@@ -20,12 +20,17 @@ jobs:
           sed -i '' "s|BUNDLE_PREFIX: com.CHANGEME|BUNDLE_PREFIX: ${{ inputs.bundle_prefix }}|" project.yml
           grep -n "BUNDLE_PREFIX" project.yml
 
-      - name: Select newest Xcode
+      # xcode-select does not always stick on the runner, but xcodebuild always
+      # honours DEVELOPER_DIR. Newest Xcode reads the pbxproj format XcodeGen
+      # writes, so this removes the version mismatch outright.
+      - name: Pick newest Xcode
         run: |
           ls -d /Applications/Xcode*.app
-          LATEST=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
-          sudo xcode-select -s "$LATEST"
-          xcodebuild -version
+          LATEST=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
+          [ -n "$LATEST" ] || LATEST=/Applications/Xcode.app
+          echo "DEVELOPER_DIR=$LATEST/Contents/Developer" >> "$GITHUB_ENV"
+          echo "picked $LATEST"
+          "$LATEST/Contents/Developer/usr/bin/xcodebuild" -version
 
       - name: Install XcodeGen
         run: brew install xcodegen

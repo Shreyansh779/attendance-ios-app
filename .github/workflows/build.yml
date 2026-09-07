@@ -10,7 +10,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-15
 
     steps:
       - uses: actions/checkout@v4
@@ -19,6 +19,13 @@ jobs:
         run: |
           sed -i '' "s|BUNDLE_PREFIX: com.CHANGEME|BUNDLE_PREFIX: ${{ inputs.bundle_prefix }}|" project.yml
           grep -n "BUNDLE_PREFIX" project.yml
+
+      - name: Select newest Xcode
+        run: |
+          ls -d /Applications/Xcode*.app
+          LATEST=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          sudo xcode-select -s "$LATEST"
+          xcodebuild -version
 
       - name: Install XcodeGen
         run: brew install xcodegen

@@ -14,6 +14,10 @@ struct Snapshot: Codable {
     var marks: [String: Mark] = [:]
     /// What the weekly scrape saw, kept only so a failure is diagnosable.
     var weekDiag: String?
+    /// The student's photo as a `data:image/...;base64,` URI, read off the
+    /// dashboard header. Stored rather than re-fetched: the portal serves it
+    /// inline, so there is no URL to load later.
+    var photo: String?
 
     /// Decoded leniently: a cache written before week and marks existed should
     /// still load rather than being thrown away.
@@ -26,12 +30,14 @@ struct Snapshot: Codable {
         week = (try? c.decode([String: [Session]].self, forKey: .week)) ?? [:]
         marks = (try? c.decode([String: Mark].self, forKey: .marks)) ?? [:]
         weekDiag = try? c.decodeIfPresent(String.self, forKey: .weekDiag)
+        photo = try? c.decodeIfPresent(String.self, forKey: .photo)
     }
 
     init(
         savedAt: Date, rows: [AttRow], sessions: [Session],
         student: String?, week: [String: [Session]] = [:],
-        marks: [String: Mark] = [:], weekDiag: String? = nil
+        marks: [String: Mark] = [:], weekDiag: String? = nil,
+        photo: String? = nil
     ) {
         self.savedAt = savedAt
         self.rows = rows
@@ -40,6 +46,7 @@ struct Snapshot: Codable {
         self.week = week
         self.marks = marks
         self.weekDiag = weekDiag
+        self.photo = photo
     }
 
     static var isoDay: DateFormatter {

@@ -70,13 +70,24 @@ final class Portal: NSObject, ObservableObject {
     }
 
     private var pollTask: Task<Void, Never>?
-    private var onDone: (([AttRow], [Session], String?, [String: [Session]], String?) -> Void)?
+    private var onDone: ((Reading) -> Void)?
+
+    /// One completed read of the portal.
+    struct Reading {
+        let rows: [AttRow]
+        let sessions: [Session]
+        let student: String?
+        let week: [String: [Session]]
+        let weekDiag: String?
+        /// `data:image/...;base64,` URI from the dashboard header, if present.
+        let photo: String?
+    }
 
     // MARK: - Entry point
 
     func begin(
         knownStudent: String?,
-        onDone: @escaping ([AttRow], [Session], String?, [String: [Session]], String?) -> Void
+        onDone: @escaping (Reading) -> Void
     ) {
         self.onDone = onDone
         self.student = knownStudent
@@ -116,6 +127,7 @@ final class Portal: NSObject, ObservableObject {
             var sawDashboard = false
             var toldStillLoggingIn = false
             var dashboardSeenAt: Date?
+            var photo: String?
 
             while Date() < deadline {
                 if Task.isCancelled { return }
@@ -140,6 +152,9 @@ final class Portal: NSObject, ObservableObject {
                 }
 
                 let (rows, sessions, cardFound) = await self.readOnce()
+                if photo == nil {
+                    photo = ((try? await self.eval(Scrapers.photo)) ?? nil) as? String
+                }
 
                 let signature = rows.map { "\($0.key):\($0.attended)/\($0.total)" }.joined(separator: ",")
                 stableReads = (!rows.isEmpty && signature == lastSignature) ? stableReads + 1 : 0
@@ -169,7 +184,12 @@ final class Portal: NSObject, ObservableObject {
                         self.student = await self.fetchStudentName()
                     }
 
-                    self.finish(rows: rows, sessions: sessions, week: week, diag: diag)
+                    // The photo is inline in the dashboard header, so it is
+                    // read while that page is still the live document.
+                    self.finish(
+                        rows: rows, sessions: sessions,
+                        week: week, diag: diag, photo: photo
+                    )
                     return
                 }
             }
@@ -363,7 +383,7 @@ final class Portal: NSObject, ObservableObject {
 
     private func finish(
         rows: [AttRow], sessions: [Session],
-        week: [String: [Session]], diag: String?
+        week: [String: [Session]], diag: String?, photo: String?
     ) {
         pollTask?.cancel()
         pollTask = nil
@@ -371,7 +391,12 @@ final class Portal: NSObject, ObservableObject {
         hostingHidden = false
         busy = false
         status = nil
-        onDone?(rows, sessions, student, week, diag)
+        onDone?(
+            Reading(
+                rows: rows, sessions: sessions, student: student,
+                week: week, weekDiag: diag, photo: photo
+            )
+        )
     }
 
     // MARK: - Reading

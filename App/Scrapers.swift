@@ -532,6 +532,100 @@ enum Scrapers {
 })()
 """#
 
+    /// Records the page's own network calls so an empty scheduler can be
+    /// explained instead of guessed at.
+    ///
+    /// The timetable renders correctly and reports zero events, which means
+    /// the answer is in the request the page makes for them: whether it fires
+    /// at all, what it returns, and what status. Angular's HttpClient goes
+    /// through XMLHttpRequest, so that is the important patch; `fetch` is
+    /// covered too in case anything else uses it.
+    ///
+    /// Install once per document - a hard reload wipes it.
+    static let installSpy = #"""
+(function () {
+  if (window.__spyOn) return 'already';
+  window.__spyOn = true;
+  window.__spy = [];
+
+  var keep = function (rec) {
+    try { if (window.__spy.length < 60) window.__spy.push(rec); } catch (e) {}
+  };
+
+  var OX = window.XMLHttpRequest;
+  if (OX) {
+    window.XMLHttpRequest = function () {
+      var x = new OX();
+      var rec = { k: 'xhr', u: '', m: '', s: 0, n: 0, b: '' };
+      var open = x.open;
+      x.open = function (m, u) {
+        rec.m = String(m || '');
+        rec.u = String(u || '');
+        return open.apply(x, arguments);
+      };
+      x.addEventListener('loadend', function () {
+        try {
+          rec.s = x.status;
+          var t = '';
+          try { t = x.responseText || ''; } catch (e) { t = '[not-text]'; }
+          rec.n = t.length;
+          rec.b = t.slice(0, 200);
+        } catch (e) {}
+        keep(rec);
+      });
+      return x;
+    };
+  }
+
+  var of = window.fetch;
+  if (of) {
+    window.fetch = function (input) {
+      var u = (input && input.url) ? input.url : String(input);
+      var pr = of.apply(this, arguments);
+      pr.then(function (r) {
+        var rec = { k: 'fetch', u: u, m: '', s: r.status, n: 0, b: '' };
+        try {
+          r.clone().text().then(function (t) {
+            rec.n = t.length;
+            rec.b = t.slice(0, 200);
+          });
+        } catch (e) {}
+        keep(rec);
+      }, function () {
+        keep({ k: 'fetch', u: u, m: '', s: -1, n: 0, b: 'rejected' });
+      });
+      return pr;
+    };
+  }
+
+  return 'installed';
+})()
+"""#
+
+    /// Reads back the recorded calls, dropping assets, newest last. Also
+    /// reports what date range the scheduler thinks it is showing, since a
+    /// nonsense range would explain an empty result on its own.
+    static let spyDump = #"""
+(function () {
+  var clean = function (t) { return String(t == null ? '' : t).replace(/\s+/g, ' ').trim(); };
+  var log = window.__spy || [];
+  var out = [];
+  for (var i = 0; i < log.length; i++) {
+    var u = log[i].u || '';
+    if (/\.(js|css|png|jpe?g|svg|woff2?|ttf|ico|map)(\?|$)/i.test(u)) continue;
+    if (/site24x7|razorpay|google|gstatic|cloudflare/i.test(u)) continue;
+    out.push(log[i]);
+  }
+  var nav = document.querySelector('.k-nav-current');
+  return JSON.stringify({
+    installed: !!window.__spyOn,
+    total: log.length,
+    calls: out.slice(-8),
+    range: nav ? clean(nav.textContent) : null
+  });
+})()
+"""#
+
     /// Routes the SPA to the timetable **without reloading the page**.
     ///
     /// A hard `load()` of the timetable URL renders the scheduler but never

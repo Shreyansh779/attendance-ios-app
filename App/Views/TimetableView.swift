@@ -1,6 +1,10 @@
 import SwiftUI
 
 struct TimetableView: View {
+    /// Today, already shaped from the dashboard card. Used as a fallback for
+    /// the today page when the weekly scrape has nothing for today, so this
+    /// screen is never emptier than the dashboard.
+    let day: [Klass]
     let nowMin: Int
     let week: [String: [Session]]
     let rows: [AttRow]
@@ -39,8 +43,10 @@ struct TimetableView: View {
     }
 
     private var list: [Klass] {
-        shapeDay(
-            sessions: week[selectedKey] ?? [],
+        let sessions = week[selectedKey] ?? []
+        if sessions.isEmpty && selectedKey == today { return day }
+        return shapeDay(
+            sessions: sessions,
             rows: rows,
             nowMin: selectedKey == today ? nowMin : -1
         )

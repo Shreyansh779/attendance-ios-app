@@ -224,6 +224,10 @@ final class Portal: NSObject, ObservableObject {
     /// non-empty reads before believing the result.
     private func fetchWeek() async -> ([String: [Session]], String?) {
         var lastDiag: String?
+        // Kept separately so the DOM scrape's diagnostic can't overwrite it -
+        // the API path is the one that matters, and losing its message is what
+        // hid a field-name mismatch last time.
+        var apiDiag: String?
         var lastSignature = ""
         var stableReads = 0
         var inAgenda = false
@@ -249,7 +253,7 @@ final class Portal: NSObject, ObservableObject {
                 let data = raw.data(using: .utf8),
                 let p = try? JSONDecoder().decode(WeekPayload.self, from: data)
             {
-                lastDiag = p.diag
+                apiDiag = p.diag
                 if p.ok {
                     var byDay: [String: [Session]] = [:]
                     for s in p.sessions {
@@ -335,7 +339,7 @@ final class Portal: NSObject, ObservableObject {
         // that distinguishes "no request was ever made" from "the request came
         // back empty" from "the request was rejected".
         let spy = ((try? await eval(Scrapers.spyDump)) ?? nil) as? String
-        return ([:], [lastDiag, spy].compactMap { $0 }.joined(separator: " || "))
+        return ([:], [apiDiag, lastDiag, spy].compactMap { $0 }.joined(separator: " || "))
     }
 
     private func finish(

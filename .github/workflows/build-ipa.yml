@@ -1,0 +1,72 @@
+name: Build unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # xcode-select does not reliably stick on the runner, but xcodebuild
+      # always honours DEVELOPER_DIR. Newest Xcode reads the project format the
+      # Capacitor CLI generates.
+      - name: Pick newest Xcode
+        run: |
+          LATEST=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
+          [ -n "$LATEST" ] || LATEST=/Applications/Xcode.app
+          echo "DEVELOPER_DIR=$LATEST/Contents/Developer" >> "$GITHUB_ENV"
+          "$LATEST/Contents/Developer/usr/bin/xcodebuild" -version
+
+      - name: Install deps
+        run: npm install
+
+      # The ios/ folder is generated here rather than committed, so nothing in
+      # the repo needs a Mac to have touched it.
+      - name: Add iOS platform
+        run: |
+          npx cap add ios
+          npx cap sync ios
+
+      - name: Build
+        working-directory: ios/App
+        run: |
+          xcodebuild \
+            -workspace App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            ONLY_ACTIVE_ARCH=NO
+
+      # An IPA is just a zip with the .app inside a Payload/ directory. Built
+      # unsigned on purpose — your sideloader re-signs it with your own cert.
+      - name: Package IPA
+        run: |
+          APP="ios/App/build/Build/Products/Release-iphoneos/App.app"
+          test -d "$APP" || { echo "App bundle missing at $APP"; exit 1; }
+          mkdir -p out/Payload
+          cp -R "$APP" out/Payload/
+          cd out
+          zip -qry Today.ipa Payload
+          rm -rf Payload
+          ls -lh Today.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Today-unsigned-ipa
+          path: out/Today.ipa
+          if-no-files-found: error
+          retention-days: 30

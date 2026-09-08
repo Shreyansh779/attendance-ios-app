@@ -544,6 +544,19 @@ enum Scrapers {
     /// only sample available was the first 200 bytes of the response. The
     /// diagnostic reports the keys it actually saw so a mismatch is
     /// immediately visible instead of silent.
+    /// Builds the week from the timetable API payload the page already
+    /// fetched, rather than from rendered HTML.
+    ///
+    /// The scheduler requests `POST /apigateway/api/timetable`, gets a ~1.1MB
+    /// JSON array back with a 200, and then renders nothing - the DOM scrape
+    /// was reading a table that was never going to fill in. The spy stashes
+    /// that array on `window.__ttData`; this turns it into sessions.
+    ///
+    /// Field names are matched by shape rather than hardcoded, because the
+    /// only sample available was the first 200 bytes of the response. When
+    /// nothing matches, the diagnostic prints the real field paths and a
+    /// per-reason skip count, so a mismatch names itself instead of failing
+    /// silently.
     static let weekApi = #"""
 (function () {
   var D = window.__ttData;
@@ -567,6 +580,7 @@ enum Scrapers {
   var clean = function (t) { return String(t == null ? '' : t).replace(/\s+/g, ' ').trim(); };
 
   var ISO = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?/;
+  var HHMM = /^(\d{1,2}):(\d{2})(?::\d{2})?$/;
   // Times are read out of the string directly rather than through Date(),
   // which would shift them by the device's timezone offset.
   var ampm = function (h, m) {
@@ -593,13 +607,20 @@ enum Scrapers {
     }
   }
 
-  // Anything describing the room, the teacher or the cohort is not the
-  // subject, and cohort codes are longer than subject names so they win any
-  // "pick the longest" contest. Hence an explicit deny-list.
-  var NOT_SUBJECT = /venue|faculty|teacher|employee|grade|batch|cohort|section|room|floor|building|block|campus|event|slot|status|type|category|program|school|department/i;
+  // This portal calls a subject a "module" - the attendance endpoint keys off
+  // ModuleId - so module/course/subject/paper are all treated as the subject,
+  // and anything on that list is checked BEFORE the deny-list, otherwise a
+  // path like ProgramCourseDetails.CourseName gets thrown out for saying
+  // "program".
+  var SUBJECTISH = /module|course|subject|paper/i;
+  // Room, teacher and cohort text is never the subject, and cohort codes are
+  // longer than subject names so they win any "pick the longest" contest.
+  var NOT_SUBJECT = /venue|faculty|teacher|employee|grade|batch|cohort|section|room|floor|building|block|campus|event|slot|status|program|school|department/i;
+  // Codes and ids are not display names.
+  var NOT_NAME = /code|id$|family|type|category|abbr|short/i;
 
   function pick(pairs) {
-    var byDate = [], link = null, venue = null, category = null;
+    var byDate = [], times = [], link = null, venue = null, category = null;
     var subj = [null, null, null, null];
 
     for (var i = 0; i < pairs.length; i++) {
@@ -609,6 +630,7 @@ enum Scrapers {
       var key = lower.split('.').pop().replace(/\[\]/g, '');
 
       if (ISO.test(v)) { byDate.push([lower, v]); continue; }
+      if (HHMM.test(v)) { times.push([lower, v]); continue; }
       if (/^https?:\/\//i.test(v)) { if (!link) link = v; continue; }
 
       // Venue first: room numbers like "11114" carry no letters and would be
@@ -618,11 +640,17 @@ enum Scrapers {
 
       if (!/[A-Za-z]{3,}/.test(v)) continue;
 
+      if (SUBJECTISH.test(lower)) {
+        if (!NOT_NAME.test(key)) {
+          if (/^(module|course|subject|paper)(name|title|description)$/.test(key)) subj[0] = subj[0] || v;
+          else if (/name|title|description/.test(key)) subj[1] = subj[1] || v;
+          else if (key === 'name') subj[2] = subj[2] || v;
+        }
+        continue;
+      }
+
       if (NOT_SUBJECT.test(lower)) continue;
-      if (lower.indexOf('course') > -1 && /name|title/.test(key)) { subj[0] = subj[0] || v; }
-      else if (/^(subject|subjectname|papername|coursetitle|coursename)$/.test(key)) { subj[1] = subj[1] || v; }
-      else if (lower.indexOf('course') > -1 && key === 'name') { subj[2] = subj[2] || v; }
-      else if (key === 'name' || key === 'title') { subj[3] = subj[3] || v; }
+      if (key === 'name' || key === 'title') subj[3] = subj[3] || v;
     }
 
     var subject = subj[0] || subj[1] || subj[2] || subj[3];
@@ -640,36 +668,56 @@ enum Scrapers {
       if (!en) en = sorted.length > 1 ? sorted[sorted.length - 1] : null;
     }
 
-    return { subject: subject, st: st, en: en, link: link, venue: venue, category: category };
+    // Some payloads carry the date and the clock time in separate fields.
+    var stT = null, enT = null;
+    for (var q = 0; q < times.length; q++) {
+      var pk = times[q][0];
+      if (!stT && /start|from|begin/.test(pk)) stT = times[q][1];
+      if (!enT && /end|finish|\bto\b/.test(pk)) enT = times[q][1];
+    }
+
+    return {
+      subject: subject, st: st, en: en, stT: stT, enT: enT,
+      link: link, venue: venue, category: category
+    };
   }
 
   var VIRTUAL = /virtual|online|teams|zoom|webex|meet/i;
   var out = [];
+  var skipped = { nosubject: 0, nodate: 0, notime: 0, range: 0 };
 
   for (var i = 0; i < arr.length; i++) {
     var pairs = [];
     flat(arr[i], pairs, '', 0);
     var g = pick(pairs);
-    if (!g.subject || !g.st) continue;
+
+    if (!g.subject) { skipped.nosubject++; continue; }
+    if (!g.st) { skipped.nodate++; continue; }
 
     var ms = g.st.match(ISO);
-    if (!ms || ms[4] == null) continue;
+    if (!ms) { skipped.nodate++; continue; }
     var date = ms[1] + '-' + ms[2] + '-' + ms[3];
-    if (date < todayIso || date > maxIso) continue;
+    if (date < todayIso || date > maxIso) { skipped.range++; continue; }
 
-    var start = ampm(+ms[4], +ms[5]);
-    var end = start;
+    // Clock time from the timestamp if it has one, else from a separate field.
+    var sh = null, sm = null;
+    if (ms[4] != null && !(ms[4] === '00' && ms[5] === '00' && g.stT)) { sh = +ms[4]; sm = +ms[5]; }
+    else if (g.stT) { var mt = g.stT.match(HHMM); if (mt) { sh = +mt[1]; sm = +mt[2]; } }
+    if (sh == null) { skipped.notime++; continue; }
+
+    var eh = null, em = null;
     if (g.en) {
       var me = g.en.match(ISO);
-      if (me && me[4] != null) end = ampm(+me[4], +me[5]);
+      if (me && me[4] != null && !(me[4] === '00' && me[5] === '00' && g.enT)) { eh = +me[4]; em = +me[5]; }
     }
+    if (eh == null && g.enT) { var mt2 = g.enT.match(HHMM); if (mt2) { eh = +mt2[1]; em = +mt2[2]; } }
 
     var online = VIRTUAL.test(g.category || '') || VIRTUAL.test(g.venue || '');
     out.push({
       date: date,
       subject: clean(g.subject),
-      start: start,
-      end: end,
+      start: ampm(sh, sm),
+      end: eh == null ? ampm(sh, sm) : ampm(eh, em),
       room: online ? null : (g.venue ? clean(g.venue) : null),
       online: online,
       mode: online ? 'virtual' : 'class',
@@ -692,13 +740,21 @@ enum Scrapers {
   for (var z = 0; z < uniq.length; z++) days[uniq[z].date] = 1;
 
   var diag = 'api items=' + arr.length + ' parsed=' + uniq.length
-    + ' days=' + Object.keys(days).length;
-  if (!uniq.length) {
+    + ' days=' + Object.keys(days).length
+    + ' skip(' + skipped.nosubject + 'subj/' + skipped.nodate + 'date/'
+    + skipped.notime + 'time/' + skipped.range + 'range)';
+  if (uniq.length) {
+    diag += ' first=' + uniq[0].date + ' ' + uniq[0].start + ' ' + uniq[0].subject.slice(0, 30);
+  } else if (arr.length) {
+    // No shape guess survived: print the real field paths so this can be
+    // finished exactly rather than guessed at again.
     var pairs0 = [];
     flat(arr[0], pairs0, '', 0);
-    diag += ' | keys=' + pairs0.map(function (x) { return x[0]; }).slice(0, 26).join(',');
-  } else {
-    diag += ' first=' + uniq[0].date + ' ' + uniq[0].start + ' ' + uniq[0].subject.slice(0, 34);
+    diag += ' | ' + pairs0.map(function (x) {
+      var v = x[1];
+      if (typeof v === 'string') v = v.slice(0, 18);
+      return x[0] + '=' + v;
+    }).slice(0, 34).join(' ');
   }
 
   return JSON.stringify({ ok: uniq.length > 0, sessions: uniq, diag: diag });

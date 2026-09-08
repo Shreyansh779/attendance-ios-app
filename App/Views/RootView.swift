@@ -9,6 +9,8 @@ struct RootView: View {
     @State private var route: Route = .today
     @State private var menuOpen = false
     @State private var tick = Date()
+    @State private var picked: String?
+    @State private var didAutoOpen = false
 
     /// Recomputed each minute so "12 min left" and the live class stay honest
     /// without the user reopening the app.
@@ -45,7 +47,7 @@ struct RootView: View {
                 content
             }
             .padding(.horizontal, 20)
-            .padding(.top, 16)
+            .padding(.top, 22)
             .padding(.bottom, 20)
 
             if menuOpen {
@@ -61,11 +63,12 @@ struct RootView: View {
                     day: day,
                     summary: summary,
                     snapshot: snapshot,
+                    student: snapshot?.student,
                     onRefresh: refresh,
                     close: { withAnimation(.easeOut(duration: 0.24)) { menuOpen = false } }
                 )
                 .frame(width: 306)
-                .ignoresSafeArea(edges: .vertical)
+                .ignoresSafeArea(edges: .bottom)
                 .transition(.move(edge: .leading))
             }
         }
@@ -74,6 +77,13 @@ struct RootView: View {
         .onReceive(clock) { tick = $0 }
         .fullScreenCover(isPresented: $portal.showingLogin) {
             LoginSheet(portal: portal)
+        }
+        // Nothing stored means nothing to look at, so go straight to the portal
+        // rather than showing an empty screen and an instruction.
+        .onAppear {
+            guard !didAutoOpen else { return }
+            didAutoOpen = true
+            if snapshot?.rows.isEmpty ?? true { refresh() }
         }
     }
 
@@ -118,7 +128,7 @@ struct RootView: View {
             }
         } else {
             switch route {
-            case .today: TodayView(day: day, nowMin: nowMin)
+            case .today: TodayView(day: day, nowMin: nowMin, picked: $picked)
             case .timetable: TimetableView(day: day, nowMin: nowMin)
             case .attendance: AttendanceView(summary: summary)
             }
@@ -127,7 +137,7 @@ struct RootView: View {
 
     private var title: String {
         switch route {
-        case .today: return tick.formatted(.dateTime.weekday(.wide).day().month(.wide))
+        case .today: return snapshot?.student ?? "Today"
         case .timetable: return "Timetable"
         case .attendance: return "Attendance"
         }
@@ -153,10 +163,16 @@ struct RootView: View {
 
     private func refresh() {
         withAnimation(.easeOut(duration: 0.2)) { menuOpen = false }
-        portal.begin { rows, sessions in
-            let snap = Snapshot(savedAt: Date(), rows: rows, sessions: sessions)
+        portal.begin { rows, sessions, student in
+            let snap = Snapshot(
+                savedAt: Date(),
+                rows: rows,
+                sessions: sessions,
+                student: student ?? snapshot?.student
+            )
             Store.save(snap)
             snapshot = snap
+            picked = nil
             tick = Date()
         }
     }

@@ -6,9 +6,12 @@ import SwiftUI
 struct TodayView: View {
     let day: [Klass]
     let nowMin: Int
+    /// Tapping the day strip pins a class; nil means follow the clock.
+    @Binding var picked: String?
 
     private var hero: Klass? {
-        day.first(where: { $0.live }) ?? day.first(where: { $0.next })
+        if let id = picked, let k = day.first(where: { $0.id == id }) { return k }
+        return day.first(where: { $0.live }) ?? day.first(where: { $0.next })
     }
 
     var body: some View {
@@ -16,7 +19,7 @@ struct TodayView: View {
             VStack(alignment: .leading, spacing: 0) {
                 Spacer(minLength: 0)
 
-                Tag(live: h.live, virtual: h.mode == "virtual")
+                Tag(state: tagState(h), virtual: h.mode == "virtual")
 
                 Text(h.online ? "Online" : (h.room ?? "No room"))
                     .font(.r(h.online ? 52 : 92, .bold))
@@ -40,7 +43,7 @@ struct TodayView: View {
 
                 Spacer(minLength: 22)
 
-                DayStrip(day: day)
+                DayStrip(day: day, picked: $picked, heroID: hero?.id)
             }
         } else {
             VStack {
@@ -58,9 +61,18 @@ struct TodayView: View {
         }
     }
 
+    private func tagState(_ k: Klass) -> String {
+        if k.live { return "In class now" }
+        if k.past { return "Earlier today" }
+        return picked != nil && !k.next ? "Later today" : "Up next"
+    }
+
     private func whenText(_ k: Klass) -> String {
         if k.live {
             return "Ends \(hhmm(k.s1))\(ampm(k.s1)), \(k.s1 - nowMin) min left"
+        }
+        if k.past {
+            return "Was \(hhmm(k.s0))\(ampm(k.s0)) to \(hhmm(k.s1))\(ampm(k.s1))"
         }
         let mins = k.s0 - nowMin
         if mins < 60 {
@@ -71,14 +83,16 @@ struct TodayView: View {
 }
 
 private struct Tag: View {
-    let live: Bool
+    let state: String
     let virtual: Bool
+
+    private var live: Bool { state == "In class now" }
 
     var body: some View {
         let ink: Color = live ? (virtual ? Color(0xE58FC0) : .mint) : Color(0x93A0B4)
         HStack(spacing: 8) {
             Circle().fill(ink).frame(width: 7, height: 7)
-            Text(live ? "In class now" : "Up next").font(.r(13.5, .semibold))
+            Text(state).font(.r(13.5, .semibold))
         }
         .foregroundStyle(ink)
         .padding(.horizontal, 16)
@@ -135,10 +149,17 @@ private struct OwnSlack: View {
 
 private struct DayStrip: View {
     let day: [Klass]
+    @Binding var picked: String?
+    let heroID: String?
 
     var body: some View {
         HStack(spacing: 7) {
             ForEach(day) { k in
+                Button {
+                    // Tapping the class already shown returns to following the
+                    // clock, so there is always a way back.
+                    picked = (picked == k.id) ? nil : k.id
+                } label: {
                 VStack(spacing: 5) {
                     Text(hhmm(k.s0))
                         .font(.r(13.5, .bold))
@@ -157,6 +178,12 @@ private struct DayStrip: View {
                     k.live ? Color.surLive : (k.past ? Color.surDim : Color.sur),
                     in: RoundedRectangle(cornerRadius: 20, style: .continuous)
                 )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .strokeBorder(Color.mintHi.opacity(k.id == heroID ? 0.9 : 0), lineWidth: 2)
+                )
+                }
+                .buttonStyle(.plain)
             }
         }
     }

@@ -219,6 +219,10 @@ final class Portal: NSObject, ObservableObject {
         var softNavAt: Date?
         var agendaAt: Date?
 
+        // Watch the page's own network calls before anything navigates, so an
+        // empty scheduler can be explained rather than guessed at.
+        _ = try? await eval(Scrapers.installSpy)
+
         // In-app routing first; a hard load is the fallback if the router
         // doesn't take us there.
         let nav = ((try? await eval(Scrapers.gotoWeek)) ?? nil) as? String
@@ -237,6 +241,10 @@ final class Portal: NSObject, ObservableObject {
                     hardLoaded = true
                     lastDiag = "nav=hard-load"
                     webView.load(URLRequest(url: Portal.weekURL))
+                    // A reload wipes the patched XHR, so it goes back on as
+                    // soon as the new document is live.
+                    try? await Task.sleep(nanoseconds: 800_000_000)
+                    _ = try? await eval(Scrapers.installSpy)
                 }
                 continue
             }
@@ -299,7 +307,12 @@ final class Portal: NSObject, ObservableObject {
             }
             if !byDay.isEmpty { return (byDay, p.diag) }
         }
-        return ([:], lastDiag)
+
+        // Nothing worked. Report what the page actually asked the server for -
+        // that distinguishes "no request was ever made" from "the request came
+        // back empty" from "the request was rejected".
+        let spy = ((try? await eval(Scrapers.spyDump)) ?? nil) as? String
+        return ([:], [lastDiag, spy].compactMap { $0 }.joined(separator: " || "))
     }
 
     private func finish(

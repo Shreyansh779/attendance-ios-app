@@ -19,7 +19,7 @@ struct AttendanceView: View {
 
                     // A healthy aggregate can hide one subject that is already
                     // drowning, so name it before the list.
-                    if let worst = summary.failing.first {
+                    if let worst = summary.blocker {
                         Callout(worst: worst).padding(.bottom, 6)
                     }
 

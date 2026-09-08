@@ -96,7 +96,7 @@ struct Drawer: View {
     }
 
     private var foot: some View {
-        let worst = summary.failing.first
+        let worst = summary.blocker
         return VStack(alignment: .leading, spacing: 8) {
             if summary.subjects.isEmpty {
                 Text("Nothing saved yet. Tap refresh and log in.")

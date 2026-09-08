@@ -30,8 +30,12 @@ jobs:
       - name: Generate project
         run: xcodegen generate
 
+      # pipefail matters: without it the pipeline reports tail's status, so a
+      # failing xcodebuild looks like success and a half-built bundle gets
+      # shipped.
       - name: Build
         run: |
+          set -o pipefail
           xcodebuild \
             -project Today.xcodeproj \
             -scheme Today \
@@ -43,7 +47,15 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             ONLY_ACTIVE_ARCH=NO \
-            | tail -40
+            2>&1 | tee build.log | grep -Ev '^\s*(export|cd |/usr/bin|builtin-)' | tail -60
+
+      - name: Show errors
+        if: failure()
+        run: |
+          echo "--- errors ---"
+          grep -nE "error:|Multiple commands|does not exist" build.log | head -40 || true
+          echo "--- tail ---"
+          tail -80 build.log || true
 
       # An IPA is a zip with the .app inside a Payload/ directory. Built
       # unsigned on purpose — your sideloader re-signs it with your own cert.
@@ -52,6 +64,15 @@ jobs:
           APP=$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -1)
           test -n "$APP" || { echo "no .app produced"; exit 1; }
           echo "app: $APP"
+          echo "--- bundle contents ---"
+          ls -la "$APP"
+          test -f "$APP/Info.plist" || {
+            echo "FATAL: Info.plist missing from the app bundle."
+            echo "It would install as Unknown.app and fail to map."
+            exit 1
+          }
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist"
           mkdir -p out/Payload
           cp -R "$APP" out/Payload/
           cd out && zip -qry Today.ipa Payload && rm -rf Payload

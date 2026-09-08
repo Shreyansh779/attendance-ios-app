@@ -29,16 +29,12 @@ final class Portal: NSObject, ObservableObject {
     @Published var busy = false
 
     /// One webview for the whole app lifetime, so the session is not thrown
-    /// away between attempts. This one does the login, the dashboard and the
-    /// profile page.
+    /// away between attempts. Everything - login, dashboard, profile,
+    /// timetable - runs through this one: a second webview shares cookies but
+    /// not sessionStorage, and the portal's auth handshake can't be assumed to
+    /// survive that, whereas navigating this one between routes is already
+    /// proven to stay signed in.
     lazy var webView: WKWebView = makeWebView()
-
-    /// A second webview, only for the weekly timetable. Both share the default
-    /// persistent data store, so the cookies from the login apply here too -
-    /// which means the timetable page can load *while* the dashboard is still
-    /// being read instead of waiting its turn. That turns the total wait into
-    /// roughly the slower of the two page loads rather than their sum.
-    lazy var weekWebView: WKWebView = makeWebView()
 
     private func makeWebView() -> WKWebView {
         let prefs = WKWebpagePreferences()
@@ -61,7 +57,6 @@ final class Portal: NSObject, ObservableObject {
     }
 
     private var pollTask: Task<Void, Never>?
-    private var weekTask: Task<([String: [Session]], String?), Never>?
     private var onDone: (([AttRow], [Session], String?, [String: [Session]], String?) -> Void)?
 
     // MARK: - Entry point
@@ -82,8 +77,6 @@ final class Portal: NSObject, ObservableObject {
     func cancel() {
         pollTask?.cancel()
         pollTask = nil
-        weekTask?.cancel()
-        weekTask = nil
         showingLogin = false
         hostingHidden = false
         busy = false
@@ -131,12 +124,6 @@ final class Portal: NSObject, ObservableObject {
                     self.showingLogin = false
                     self.hostingHidden = true
                     self.status = "Signed in. Reading your classes and attendance."
-                    // Start the timetable page loading now, in its own webview,
-                    // rather than after the dashboard read finishes.
-                    self.weekTask = Task { [weak self] in
-                        guard let self else { return ([:], nil) }
-                        return await self.fetchWeek()
-                    }
                 }
 
                 let (rows, sessions, cardFound) = await self.readOnce()
@@ -163,13 +150,7 @@ final class Portal: NSObject, ObservableObject {
                     }
 
                     self.status = "Reading this week's timetable."
-                    var week: [String: [Session]] = [:]
-                    var diag: String?
-                    if let t = self.weekTask {
-                        let r = await t.value
-                        week = r.0
-                        diag = r.1
-                    }
+                    let (week, diag) = await self.fetchWeek()
 
                     self.finish(rows: rows, sessions: sessions, week: week, diag: diag)
                     return
@@ -217,21 +198,47 @@ final class Portal: NSObject, ObservableObject {
     /// The agenda page, grouped by date. Failing here is not fatal — the
     /// dashboard card already covers today.
     ///
-    /// The Kendo scheduler's Agenda view composes its rows asynchronously and
-    /// can render just the header table before the actual row content fills
-    /// in. A single non-empty read isn't proof it's done — this requires two
-    /// identical non-empty reads in a row, same as the dashboard cards.
+    /// Two things have to happen before a read is worth anything: the
+    /// scheduler has to be in Agenda view (it doesn't open there, and no other
+    /// view renders the date-column table), and its rows have to have finished
+    /// composing. So this switches the view first, then requires two identical
+    /// non-empty reads before believing the result.
     private func fetchWeek() async -> ([String: [Session]], String?) {
-        weekWebView.load(URLRequest(url: Portal.weekURL))
+        webView.load(URLRequest(url: Portal.weekURL))
         var lastDiag: String?
         var lastSignature = ""
         var stableReads = 0
+        var inAgenda = false
 
         for _ in 0..<70 {  // 70 * 500ms = 35s
             if Task.isCancelled { return ([:], lastDiag) }
             try? await Task.sleep(nanoseconds: 500_000_000)
 
-            guard let raw = ((try? await eval(Scrapers.week, in: weekWebView)) ?? nil) as? String,
+            // Keep asking until it takes: the scheduler isn't mounted for the
+            // first second or so, and switching view re-renders the table.
+            if !inAgenda {
+                let r = ((try? await eval(Scrapers.agenda)) ?? nil) as? String
+                switch r {
+                case "already":
+                    inAgenda = true
+                case "select", "button":
+                    // Give Angular a beat to swap the view in, then confirm on
+                    // the next pass rather than trusting the click.
+                    lastDiag = "agenda=switched(\(r ?? ""))"
+                    try? await Task.sleep(nanoseconds: 400_000_000)
+                    continue
+                case "no-scheduler":
+                    lastDiag = "agenda=no-scheduler"
+                    continue
+                default:
+                    // "not-found" or a JS error: the picker isn't where it was.
+                    // Read anyway - the page may already be showing a table.
+                    inAgenda = true
+                    lastDiag = "agenda=\(r ?? "nil")"
+                }
+            }
+
+            guard let raw = ((try? await eval(Scrapers.week)) ?? nil) as? String,
                 let data = raw.data(using: .utf8),
                 let p = try? JSONDecoder().decode(WeekPayload.self, from: data)
             else { continue }
@@ -260,7 +267,6 @@ final class Portal: NSObject, ObservableObject {
     ) {
         pollTask?.cancel()
         pollTask = nil
-        weekTask = nil
         showingLogin = false
         hostingHidden = false
         busy = false

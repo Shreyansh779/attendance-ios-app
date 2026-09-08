@@ -93,6 +93,13 @@ struct RootView: View {
                     student: snapshot?.student,
                     photo: snapshot?.photo,
                     weekDays: snapshot?.week.count ?? 0,
+                    onSelect: { r in
+                        // Only a menu tap resets the pinned class. Doing this
+                        // in onChange(of: route) also caught the timetable's
+                        // own navigation and cleared the class just tapped.
+                        if r == .today { picked = nil }
+                        route = r
+                    },
                     onRefresh: refresh,
                     close: { withAnimation(.easeOut(duration: 0.24)) { menuOpen = false } }
                 )
@@ -102,11 +109,6 @@ struct RootView: View {
             }
         }
         .animation(.spring(response: 0.34, dampingFraction: 0.86), value: menuOpen)
-        // Arriving at Today from the menu should always show what is on now or
-        // next, never whichever class was pinned earlier.
-        .onChange(of: route) { _, r in
-            if r == .today { picked = nil }
-        }
         .preferredColorScheme(.dark)
         .onReceive(clock) { tick = $0 }
         .fullScreenCover(isPresented: $portal.showingLogin) {

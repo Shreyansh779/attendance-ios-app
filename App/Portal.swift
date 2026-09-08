@@ -14,6 +14,9 @@ final class Portal: NSObject, ObservableObject {
 
     static let loginURL = URL(string: "https://myupes-beta.upes.ac.in/")!
     static let dashboardMarker = "/connectportal/user/student/home/dashboard"
+    static let weekURL = URL(
+        string: "https://myupes-beta.upes.ac.in/connectportal/user/student/curriculum-scheduling"
+    )!
     static let profileURL = URL(
         string: "https://myupes-beta.upes.ac.in/connectportal/user/student/collaboration/studentprofile"
     )!
@@ -39,11 +42,11 @@ final class Portal: NSObject, ObservableObject {
     }()
 
     private var pollTask: Task<Void, Never>?
-    private var onDone: (([AttRow], [Session], String?) -> Void)?
+    private var onDone: (([AttRow], [Session], String?, [String: [Session]]) -> Void)?
 
     // MARK: - Entry point
 
-    func begin(knownStudent: String?, onDone: @escaping ([AttRow], [Session], String?) -> Void) {
+    func begin(knownStudent: String?, onDone: @escaping ([AttRow], [Session], String?, [String: [Session]]) -> Void) {
         self.onDone = onDone
         self.student = knownStudent
         status = "Log in and solve the captcha. Wait for the dashboard to appear."
@@ -112,7 +115,11 @@ final class Portal: NSObject, ObservableObject {
                         self.status = "Getting your name from your profile."
                         self.student = await self.fetchStudentName()
                     }
-                    self.finish(rows: rows, sessions: sessions)
+
+                    self.status = "Reading this week's timetable."
+                    let week = await self.fetchWeek()
+
+                    self.finish(rows: rows, sessions: sessions, week: week)
                     return
                 }
             }
@@ -148,13 +155,41 @@ final class Portal: NSObject, ObservableObject {
         return nil
     }
 
-    private func finish(rows: [AttRow], sessions: [Session]) {
+    private struct WeekPayload: Decodable {
+        let ok: Bool
+        let sessions: [Session]
+    }
+
+    /// The agenda page, grouped by date. Failing here is not fatal — the
+    /// dashboard card already covers today.
+    private func fetchWeek() async -> [String: [Session]] {
+        webView.load(URLRequest(url: Portal.weekURL))
+        for _ in 0..<25 {
+            if Task.isCancelled { return [:] }
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            guard let raw = ((try? await eval(Scrapers.week)) ?? nil) as? String,
+                let data = raw.data(using: .utf8),
+                let p = try? JSONDecoder().decode(WeekPayload.self, from: data),
+                p.ok
+            else { continue }
+
+            var byDay: [String: [Session]] = [:]
+            for s in p.sessions {
+                guard let d = s.date else { continue }
+                byDay[d, default: []].append(s)
+            }
+            if !byDay.isEmpty { return byDay }
+        }
+        return [:]
+    }
+
+    private func finish(rows: [AttRow], sessions: [Session], week: [String: [Session]]) {
         pollTask?.cancel()
         pollTask = nil
         showingLogin = false
         busy = false
         status = nil
-        onDone?(rows, sessions, student)
+        onDone?(rows, sessions, student, week)
     }
 
     // MARK: - Reading

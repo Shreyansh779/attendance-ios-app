@@ -6,6 +6,50 @@ struct Snapshot: Codable {
     var rows: [AttRow]
     var sessions: [Session]
     var student: String?
+    /// Sessions by ISO date, accumulated across refreshes. The portal's agenda
+    /// only ever shows six days from today, so merging is what eventually
+    /// yields a full week.
+    var week: [String: [Session]] = [:]
+    /// Hand-marked classes, cleared whenever a real refresh lands.
+    var marks: [String: Mark] = [:]
+
+    /// Decoded leniently: a cache written before week and marks existed should
+    /// still load rather than being thrown away.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        savedAt = (try? c.decode(Date.self, forKey: .savedAt)) ?? Date()
+        rows = (try? c.decode([AttRow].self, forKey: .rows)) ?? []
+        sessions = (try? c.decode([Session].self, forKey: .sessions)) ?? []
+        student = try? c.decodeIfPresent(String.self, forKey: .student)
+        week = (try? c.decode([String: [Session]].self, forKey: .week)) ?? [:]
+        marks = (try? c.decode([String: Mark].self, forKey: .marks)) ?? [:]
+    }
+
+    init(
+        savedAt: Date, rows: [AttRow], sessions: [Session],
+        student: String?, week: [String: [Session]] = [:], marks: [String: Mark] = [:]
+    ) {
+        self.savedAt = savedAt
+        self.rows = rows
+        self.sessions = sessions
+        self.student = student
+        self.week = week
+        self.marks = marks
+    }
+
+    static var isoDay: DateFormatter {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.calendar = Calendar(identifier: .gregorian)
+        return f
+    }
+
+    /// Today's classes: the weekly scrape if we have it, else the dashboard card.
+    func sessions(for date: Date) -> [Session] {
+        let key = Snapshot.isoDay.string(from: date)
+        if let day = week[key], !day.isEmpty { return day }
+        return Snapshot.isoDay.string(from: savedAt) == key ? sessions : []
+    }
 
     var ageHours: Double { Date().timeIntervalSince(savedAt) / 3600 }
 

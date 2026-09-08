@@ -50,6 +50,19 @@ final class Portal: NSObject, ObservableObject {
         cfg.mediaTypesRequiringUserActionForPlayback = .all
         cfg.allowsPictureInPictureMediaPlayback = false
 
+        // The network recorder goes in as a document-start user script rather
+        // than an evaluateJavaScript call, so it is patched in before the
+        // page's own JavaScript runs on *every* document. Injecting it after a
+        // load is a race the page usually wins - and the request it needs to
+        // catch fires during bootstrap.
+        cfg.userContentController.addUserScript(
+            WKUserScript(
+                source: Scrapers.installSpy,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            )
+        )
+
         let wv = WKWebView(frame: .zero, configuration: cfg)
         wv.navigationDelegate = self
         wv.allowsBackForwardNavigationGestures = true
@@ -219,10 +232,6 @@ final class Portal: NSObject, ObservableObject {
         var softNavAt: Date?
         var agendaAt: Date?
 
-        // Watch the page's own network calls before anything navigates, so an
-        // empty scheduler can be explained rather than guessed at.
-        _ = try? await eval(Scrapers.installSpy)
-
         // In-app routing first; a hard load is the fallback if the router
         // doesn't take us there.
         let nav = ((try? await eval(Scrapers.gotoWeek)) ?? nil) as? String
@@ -233,6 +242,24 @@ final class Portal: NSObject, ObservableObject {
             if Task.isCancelled { return ([:], lastDiag) }
             try? await Task.sleep(nanoseconds: 500_000_000)
 
+            // The API payload is the real source of truth: the page fetches
+            // the whole timetable as JSON and then renders none of it, so this
+            // succeeds long before (and more often than) any DOM scrape.
+            if let raw = ((try? await eval(Scrapers.weekApi)) ?? nil) as? String,
+                let data = raw.data(using: .utf8),
+                let p = try? JSONDecoder().decode(WeekPayload.self, from: data)
+            {
+                lastDiag = p.diag
+                if p.ok {
+                    var byDay: [String: [Session]] = [:]
+                    for s in p.sessions {
+                        guard let d = s.date else { continue }
+                        byDay[d, default: []].append(s)
+                    }
+                    if !byDay.isEmpty { return (byDay, p.diag) }
+                }
+            }
+
             let path = (((try? await eval(Scrapers.route)) ?? nil) as? String) ?? ""
 
             // Soft nav didn't land within a few seconds - do it the blunt way.
@@ -241,10 +268,6 @@ final class Portal: NSObject, ObservableObject {
                     hardLoaded = true
                     lastDiag = "nav=hard-load"
                     webView.load(URLRequest(url: Portal.weekURL))
-                    // A reload wipes the patched XHR, so it goes back on as
-                    // soon as the new document is live.
-                    try? await Task.sleep(nanoseconds: 800_000_000)
-                    _ = try? await eval(Scrapers.installSpy)
                 }
                 continue
             }

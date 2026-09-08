@@ -521,7 +521,59 @@ enum Scrapers {
     }
     diag += ' | ' + firstRows.join(' // ');
   }
-  return JSON.stringify({ ok: uniq.length > 0, sessions: uniq, sample: sample, diag: diag });
+  return JSON.stringify({
+    ok: uniq.length > 0,
+    sessions: uniq,
+    sample: sample,
+    diag: diag,
+    tasks: document.querySelectorAll('.k-task').length,
+    view: view
+  });
+})()
+"""#
+
+    /// Routes the SPA to the timetable **without reloading the page**.
+    ///
+    /// A hard `load()` of the timetable URL renders the scheduler but never
+    /// gets any events - the diagnostic came back `view=agenda tasks=0
+    /// rows=3`, i.e. the widget mounted and stayed empty. A full reload
+    /// re-bootstraps Angular at that route, so whatever the dashboard puts in
+    /// the app's services isn't there. Soft-routing keeps the running app
+    /// instance and just changes the route, the way tapping the menu does.
+    ///
+    /// Angular's router doesn't react to `pushState` alone, but it does react
+    /// to a `popstate`, so the two together are a working in-app navigation.
+    ///
+    /// Returns: "already", "link", "pushstate".
+    static let gotoWeek = #"""
+(function () {
+  var target = '/connectportal/user/student/curriculum-scheduling';
+  if (location.pathname.indexOf('curriculum-scheduling') > -1) return 'already';
+
+  // A real in-app link is better than faking history, when one is rendered.
+  var a = document.querySelector('a[href*="curriculum-scheduling"]');
+  if (a) { a.click(); return 'link'; }
+
+  history.pushState({}, '', target);
+  window.dispatchEvent(new PopStateEvent('popstate', { state: history.state }));
+  return 'pushstate';
+})()
+"""#
+
+    /// Clicks the scheduler's own "Today" button to force it to re-query its
+    /// date range. Used when the agenda has mounted but no events arrived, on
+    /// the theory that the initial fetch never fired.
+    ///
+    /// Returns: "today", "range" or "none".
+    static let nudge = #"""
+(function () {
+  var t = document.querySelector('.k-nav-today');
+  if (t) { t.click(); return 'today'; }
+  // No Today button: step forward and back, which also re-queries.
+  var n = document.querySelector('.k-nav-next');
+  var p = document.querySelector('.k-nav-prev');
+  if (n && p) { n.click(); p.click(); return 'range'; }
+  return 'none';
 })()
 """#
 

@@ -27,7 +27,9 @@ struct AttendanceView: View {
                         SubjectRow(row: row)
                     }
                 }
-                .padding(.bottom, 8)
+                // Enough for the last card to scroll clear of the home
+                // indicator without leaving a visible gap.
+                .padding(.bottom, 20)
             }
         }
     }

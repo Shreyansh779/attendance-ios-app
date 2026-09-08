@@ -228,6 +228,10 @@ final class Portal: NSObject, ObservableObject {
         // the API path is the one that matters, and losing its message is what
         // hid a field-name mismatch last time.
         var apiDiag: String?
+        /// Widest set of days seen so far, kept because the first payload the
+        /// page makes available is often only today.
+        var bestWeek: ([String: [Session]], String?)?
+        let began = Date()
         var lastSignature = ""
         var stableReads = 0
         var inAgenda = false
@@ -260,8 +264,21 @@ final class Portal: NSObject, ObservableObject {
                         guard let d = s.date else { continue }
                         byDay[d, default: []].append(s)
                     }
-                    if !byDay.isEmpty { return (byDay, p.diag) }
+                    if byDay.count > (bestWeek?.0.count ?? 0) {
+                        bestWeek = (byDay, p.diag)
+                    }
+                    // The dashboard calls the same endpoint for its "today"
+                    // card, so the first payload available is often a single
+                    // day. More than one day means this is the real term
+                    // timetable, and there is nothing better to wait for.
+                    if let best = bestWeek, best.0.count >= 2 { return best }
                 }
+            }
+
+            // Don't wait out the whole budget for a fuller payload that may
+            // never come - one day is still better than nothing.
+            if let best = bestWeek, Date().timeIntervalSince(began) > 12 {
+                return best
             }
 
             let path = (((try? await eval(Scrapers.route)) ?? nil) as? String) ?? ""
@@ -338,6 +355,8 @@ final class Portal: NSObject, ObservableObject {
         // Nothing worked. Report what the page actually asked the server for -
         // that distinguishes "no request was ever made" from "the request came
         // back empty" from "the request was rejected".
+        if let best = bestWeek { return best }
+
         let spy = ((try? await eval(Scrapers.spyDump)) ?? nil) as? String
         return ([:], [apiDiag, lastDiag, spy].compactMap { $0 }.joined(separator: " || "))
     }

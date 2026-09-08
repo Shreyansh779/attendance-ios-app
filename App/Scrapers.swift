@@ -849,7 +849,17 @@ enum Scrapers {
           // negative lookahead: /api/timetable/masters is a different, tiny
           // response (the venue-category colour table).
           if (/\/api\/timetable(?:\?|$)/.test(rec.u)) {
-            try { window.__ttData = JSON.parse(t); } catch (e2) { window.__ttErr = String(e2); }
+            try {
+              var parsed = JSON.parse(t);
+              // The dashboard hits this same endpoint for its "today" card,
+              // so there are two responses in a session: a 6-item one for
+              // today and the full ~424-item term. Last-write-wins would hand
+              // back whichever happened to land last, which is how the week
+              // came back as a single day. Keep the biggest instead.
+              var n = Array.isArray(parsed) ? parsed.length : 0;
+              var have = Array.isArray(window.__ttData) ? window.__ttData.length : -1;
+              if (n > have) { window.__ttData = parsed; window.__ttCount = n; }
+            } catch (e2) { window.__ttErr = String(e2); }
           }
         } catch (e) {}
         keep(rec);

@@ -144,13 +144,17 @@ final class Portal: NSObject, ObservableObject {
 
                 // Two identical reads in a row means the cards have settled.
                 if !rows.isEmpty && stableReads >= 2 {
+                    // Timetable first, while the app instance the dashboard
+                    // bootstrapped is still alive - the weekly scrape soft-routes
+                    // within it, and the profile page below is a hard load that
+                    // would throw that state away.
+                    self.status = "Reading this week's timetable."
+                    let (week, diag) = await self.fetchWeek()
+
                     if self.student == nil {
                         self.status = "Getting your name from your profile."
                         self.student = await self.fetchStudentName()
                     }
-
-                    self.status = "Reading this week's timetable."
-                    let (week, diag) = await self.fetchWeek()
 
                     self.finish(rows: rows, sessions: sessions, week: week, diag: diag)
                     return
@@ -193,6 +197,8 @@ final class Portal: NSObject, ObservableObject {
         let ok: Bool
         let sessions: [Session]
         let diag: String?
+        let tasks: Int?
+        let view: String?
     }
 
     /// The agenda page, grouped by date. Failing here is not fatal — the
@@ -204,15 +210,36 @@ final class Portal: NSObject, ObservableObject {
     /// composing. So this switches the view first, then requires two identical
     /// non-empty reads before believing the result.
     private func fetchWeek() async -> ([String: [Session]], String?) {
-        webView.load(URLRequest(url: Portal.weekURL))
         var lastDiag: String?
         var lastSignature = ""
         var stableReads = 0
         var inAgenda = false
+        var hardLoaded = false
+        var nudged = false
+        var softNavAt: Date?
+        var agendaAt: Date?
+
+        // In-app routing first; a hard load is the fallback if the router
+        // doesn't take us there.
+        let nav = ((try? await eval(Scrapers.gotoWeek)) ?? nil) as? String
+        lastDiag = "nav=\(nav ?? "nil")"
+        softNavAt = Date()
 
         for _ in 0..<70 {  // 70 * 500ms = 35s
             if Task.isCancelled { return ([:], lastDiag) }
             try? await Task.sleep(nanoseconds: 500_000_000)
+
+            let path = (((try? await eval(Scrapers.route)) ?? nil) as? String) ?? ""
+
+            // Soft nav didn't land within a few seconds - do it the blunt way.
+            if !path.contains("curriculum-scheduling") {
+                if !hardLoaded, Date().timeIntervalSince(softNavAt ?? Date()) > 4 {
+                    hardLoaded = true
+                    lastDiag = "nav=hard-load"
+                    webView.load(URLRequest(url: Portal.weekURL))
+                }
+                continue
+            }
 
             // Keep asking until it takes: the scheduler isn't mounted for the
             // first second or so, and switching view re-renders the table.
@@ -221,6 +248,7 @@ final class Portal: NSObject, ObservableObject {
                 switch r {
                 case "already":
                     inAgenda = true
+                    agendaAt = Date()
                 case "select", "button":
                     // Give Angular a beat to swap the view in, then confirm on
                     // the next pass rather than trusting the click.
@@ -234,6 +262,7 @@ final class Portal: NSObject, ObservableObject {
                     // "not-found" or a JS error: the picker isn't where it was.
                     // Read anyway - the page may already be showing a table.
                     inAgenda = true
+                    agendaAt = Date()
                     lastDiag = "agenda=\(r ?? "nil")"
                 }
             }
@@ -243,6 +272,18 @@ final class Portal: NSObject, ObservableObject {
                 let p = try? JSONDecoder().decode(WeekPayload.self, from: data)
             else { continue }
             lastDiag = p.diag
+
+            // Agenda is up but empty: the initial event query may never have
+            // fired. Ask the scheduler to re-query its own date range once.
+            if (p.tasks ?? 0) == 0, !nudged,
+                Date().timeIntervalSince(agendaAt ?? Date()) > 6
+            {
+                nudged = true
+                let n = ((try? await eval(Scrapers.nudge)) ?? nil) as? String
+                lastDiag = (p.diag ?? "") + " nudge=\(n ?? "nil")"
+                continue
+            }
+
             guard p.ok else { stableReads = 0; continue }
 
             let signature = p.sessions.map { "\($0.date ?? ""):\($0.subject):\($0.start)" }

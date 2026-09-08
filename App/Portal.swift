@@ -29,8 +29,18 @@ final class Portal: NSObject, ObservableObject {
     @Published var busy = false
 
     /// One webview for the whole app lifetime, so the session is not thrown
-    /// away between attempts.
-    lazy var webView: WKWebView = {
+    /// away between attempts. This one does the login, the dashboard and the
+    /// profile page.
+    lazy var webView: WKWebView = makeWebView()
+
+    /// A second webview, only for the weekly timetable. Both share the default
+    /// persistent data store, so the cookies from the login apply here too -
+    /// which means the timetable page can load *while* the dashboard is still
+    /// being read instead of waiting its turn. That turns the total wait into
+    /// roughly the slower of the two page loads rather than their sum.
+    lazy var weekWebView: WKWebView = makeWebView()
+
+    private func makeWebView() -> WKWebView {
         let prefs = WKWebpagePreferences()
         prefs.allowsContentJavaScript = true
 
@@ -48,9 +58,10 @@ final class Portal: NSObject, ObservableObject {
         wv.navigationDelegate = self
         wv.allowsBackForwardNavigationGestures = true
         return wv
-    }()
+    }
 
     private var pollTask: Task<Void, Never>?
+    private var weekTask: Task<([String: [Session]], String?), Never>?
     private var onDone: (([AttRow], [Session], String?, [String: [Session]], String?) -> Void)?
 
     // MARK: - Entry point
@@ -71,6 +82,8 @@ final class Portal: NSObject, ObservableObject {
     func cancel() {
         pollTask?.cancel()
         pollTask = nil
+        weekTask?.cancel()
+        weekTask = nil
         showingLogin = false
         hostingHidden = false
         busy = false
@@ -118,6 +131,12 @@ final class Portal: NSObject, ObservableObject {
                     self.showingLogin = false
                     self.hostingHidden = true
                     self.status = "Signed in. Reading your classes and attendance."
+                    // Start the timetable page loading now, in its own webview,
+                    // rather than after the dashboard read finishes.
+                    self.weekTask = Task { [weak self] in
+                        guard let self else { return ([:], nil) }
+                        return await self.fetchWeek()
+                    }
                 }
 
                 let (rows, sessions, cardFound) = await self.readOnce()
@@ -144,7 +163,13 @@ final class Portal: NSObject, ObservableObject {
                     }
 
                     self.status = "Reading this week's timetable."
-                    let (week, diag) = await self.fetchWeek()
+                    var week: [String: [Session]] = [:]
+                    var diag: String?
+                    if let t = self.weekTask {
+                        let r = await t.value
+                        week = r.0
+                        diag = r.1
+                    }
 
                     self.finish(rows: rows, sessions: sessions, week: week, diag: diag)
                     return
@@ -197,16 +222,16 @@ final class Portal: NSObject, ObservableObject {
     /// in. A single non-empty read isn't proof it's done — this requires two
     /// identical non-empty reads in a row, same as the dashboard cards.
     private func fetchWeek() async -> ([String: [Session]], String?) {
-        webView.load(URLRequest(url: Portal.weekURL))
+        weekWebView.load(URLRequest(url: Portal.weekURL))
         var lastDiag: String?
         var lastSignature = ""
         var stableReads = 0
 
-        for _ in 0..<50 {  // 50 * 700ms = 35s
+        for _ in 0..<70 {  // 70 * 500ms = 35s
             if Task.isCancelled { return ([:], lastDiag) }
-            try? await Task.sleep(nanoseconds: 700_000_000)
+            try? await Task.sleep(nanoseconds: 500_000_000)
 
-            guard let raw = ((try? await eval(Scrapers.week)) ?? nil) as? String,
+            guard let raw = ((try? await eval(Scrapers.week, in: weekWebView)) ?? nil) as? String,
                 let data = raw.data(using: .utf8),
                 let p = try? JSONDecoder().decode(WeekPayload.self, from: data)
             else { continue }
@@ -235,6 +260,7 @@ final class Portal: NSObject, ObservableObject {
     ) {
         pollTask?.cancel()
         pollTask = nil
+        weekTask = nil
         showingLogin = false
         hostingHidden = false
         busy = false
@@ -283,9 +309,10 @@ final class Portal: NSObject, ObservableObject {
         return (rows, sessions, cardFound)
     }
 
-    private func eval(_ js: String) async throws -> Any? {
-        try await withCheckedThrowingContinuation { cont in
-            webView.evaluateJavaScript(js) { value, error in
+    private func eval(_ js: String, in target: WKWebView? = nil) async throws -> Any? {
+        let wv = target ?? webView
+        return try await withCheckedThrowingContinuation { cont in
+            wv.evaluateJavaScript(js) { value, error in
                 if let error { cont.resume(throwing: error) } else { cont.resume(returning: value) }
             }
         }

@@ -37,6 +37,26 @@ struct RootView: View {
 
     var body: some View {
         ZStack(alignment: .leading) {
+            // The live webview, full size, underneath an opaque background.
+            //
+            // It used to be pinned to 1x1pt while reading in the background,
+            // which is what actually broke the weekly timetable: WKWebView
+            // lays the page out at the view's own size, the portal's Kendo
+            // scheduler measures its container before rendering rows, and at
+            // a 1x1 viewport it renders none - so the scrape always came back
+            // with an empty table no matter how long it waited. Full size and
+            // covered keeps WebKit's timers unthrottled (the view is still in
+            // the window) while the page lays out as if it were on screen.
+            if portal.hostingHidden {
+                PortalWebView(webView: portal.webView)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+
+                PortalWebView(webView: portal.weekWebView)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+
             Color.bg.ignoresSafeArea()
 
             VStack(alignment: .leading, spacing: 0) {
@@ -57,16 +77,8 @@ struct RootView: View {
             .padding(.top, 22)
             .padding(.bottom, 20)
 
-            // Kept in the hierarchy at 1pt: a detached WKWebView gets throttled,
-            // and the scrape needs its timers to keep firing.
-            if portal.hostingHidden {
-                PortalWebView(webView: portal.webView)
-                    .frame(width: 1, height: 1)
-                    .opacity(0.02)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-            }
-
+            // Kept in the hierarchy so WebKit doesn't throttle it; see the
+            // full-size copies at the bottom of the stack.
             if menuOpen {
                 Color(0x090B0F).opacity(0.62)
                     .ignoresSafeArea()
@@ -157,6 +169,7 @@ struct RootView: View {
                 )
             case .timetable:
                 TimetableView(
+                    day: day,
                     nowMin: nowMin,
                     week: snapshot?.week ?? [:],
                     rows: rows,

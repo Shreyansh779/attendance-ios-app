@@ -356,6 +356,7 @@ enum Scrapers {
   var TIME = /(\d{1,2}):(\d{2})\s*[-\u2013\u2014]\s*(\d{1,2}):(\d{2})/;
   var MON = { jan:1, feb:2, mar:3, apr:4, may:5, jun:6, jul:7, aug:8, sep:9, oct:10, nov:11, dec:12 };
   var DAY = /(\d{1,2})\s*(Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day\s*([A-Za-z]{3,9})\.?,?\s*(\d{4})/;
+  var VIRTUAL = /teams|zoom|webex|meet\.google|google\s*meet|online|virtual/i;
 
   // The agenda prints 24h times; normalise to the same "09:00 AM" shape the
   // dashboard card uses so downstream parsing stays identical.
@@ -374,15 +375,38 @@ enum Scrapers {
     return y + '-' + pad(mo) + '-' + pad(+d);
   };
 
-  var isNoise = function (t) {
-    if (!t) return true;
-    if (TIME.test(t)) return true;
-    if (DAY.test(t)) return true;
-    if (/^\d{1,2}$/.test(t)) return true;
-    if (/^(date|time|room|course|subject|faculty|type|venue|session|day|sept?|[A-Z][a-z]+day)$/i.test(t)) return true;
-    if (/^[A-Za-z]{3,9}\.?\s+\d{4}$/.test(t)) return true;   // "Sept 2026"
-    return false;
-  };
+  // The subject is the first <p> in the event cell. The cell also holds
+  // "Room :...", "Meeting Link : Link", the faculty name and the cohort code,
+  // and the cohort code is *longer* than the subject - so picking the longest
+  // text node (the old approach) reliably picked the wrong one.
+  function subjectOf(ev) {
+    var ps = ev.querySelectorAll('p');
+    for (var j = 0; j < ps.length; j++) {
+      var t = clean(ps[j].textContent);
+      if (!t || !/[A-Za-z]{4,}/.test(t)) continue;
+      if (/^room\s*:/i.test(t)) continue;
+      if (/^meeting\s*link/i.test(t)) continue;
+      return t;
+    }
+    // No <p> at all: take the cell text up to where the details start.
+    var t2 = clean(ev.textContent).replace(/\s*Room\s*:[\s\S]*$/i, '');
+    return /[A-Za-z]{4,}/.test(t2) ? t2 : null;
+  }
+
+  function linkOf(tr) {
+    var a = tr.querySelector('a.meeting-link[href]') || tr.querySelector('a[href^="http"]');
+    if (a) return a.getAttribute('href');
+    // Some rows put the URL in an onclick or a data attribute instead.
+    var all = tr.querySelectorAll('a');
+    for (var i = 0; i < all.length; i++) {
+      var at = all[i].attributes;
+      for (var x = 0; x < at.length; x++) {
+        var g = String(at[x].value || '').match(/https?:\/\/[^'"\s)]+/);
+        if (g) return g[0];
+      }
+    }
+    return null;
+  }
 
   var out = [];
   var current = null;
@@ -390,7 +414,15 @@ enum Scrapers {
   var rows = document.querySelectorAll('tr');
 
   for (var i = 0; i < rows.length; i++) {
-    var whole = clean(rows[i].textContent);
+    var tr = rows[i];
+
+    // The agenda is a table of tables. The outer wrapper rows contain every
+    // inner row, so their text spans the whole week and parses as one giant
+    // bogus entry dated to the first day found. A row holding another row is
+    // never a data row.
+    if (tr.querySelector('tr')) continue;
+
+    var whole = clean(tr.textContent);
 
     // A date cell carries a rowspan, so it appears on the first row of its day
     // and the rest of that day's rows inherit it.
@@ -400,58 +432,47 @@ enum Scrapers {
       if (d) current = d;
     }
 
-    var cells = Array.prototype.slice.call(rows[i].querySelectorAll('td')).map(function (c) {
-      return clean(c.innerText != null ? c.innerText : c.textContent);
-    });
-    if (!cells.length) continue;
+    var tds = tr.querySelectorAll('td');
+    if (!tds.length || !current) continue;
 
     var timeCell = null;
-    for (var c = 0; c < cells.length; c++) {
-      if (TIME.test(cells[c])) { timeCell = cells[c]; break; }
+    for (var c = 0; c < tds.length; c++) {
+      var ct = clean(tds[c].textContent);
+      if (TIME.test(ct)) { timeCell = ct; break; }
     }
-    if (!timeCell || !current) continue;
+    if (!timeCell) continue;
 
     var tm = timeCell.match(TIME);
     var start = ampm(+tm[1], tm[2]);
     var end = ampm(+tm[3], tm[4]);
 
+    // The event cell is whichever cell holds the task block; fall back to the
+    // last cell in the row.
+    var task = tr.querySelector('.k-task');
+    var ev = (task && task.closest('td')) || tds[tds.length - 1];
+
     // Free periods have a time but no subject, so they drop out here.
-    var subject = null;
-    for (var s = 0; s < cells.length; s++) {
-      var t = cells[s];
-      if (isNoise(t) || !/[A-Za-z]{4,}/.test(t)) continue;
-      if (/online classroom/i.test(t)) continue;
-      if (!subject || t.length > subject.length) subject = t;
-    }
+    var subject = subjectOf(ev);
     if (!subject) continue;
 
-    var online = /online\s*class/i.test(whole);
+    var link = linkOf(tr);
 
-    var link = null;
-    var as = rows[i].querySelectorAll('a');
-    for (var ai = 0; ai < as.length && !link; ai++) {
-      var h = as[ai].getAttribute('href') || '';
-      if (/^https?:/i.test(h)) { link = h; break; }
-      var at = as[ai].attributes;
-      for (var x = 0; x < at.length; x++) {
-        var g = String(at[x].value || '').match(/https?:\/\/[^'"\s)]+/);
-        if (g) { link = g[0]; break; }
-      }
-    }
-    var room = null;
-    var rm = whole.match(/room\s*:?\s*([A-Za-z0-9()\-\/]+)/i);
-    if (rm) room = rm[1];
-    if (!room) {
-      for (var r = 0; r < cells.length; r++) {
-        if (/^\d{3,6}(\(\d{3,6}\))?$/.test(cells[r])) { room = cells[r]; break; }
-      }
-    }
+    // "Room :11114" for a physical room, "Room :MS Teams" for a virtual one.
+    // This page never says "Online Classroom" - that wording is the dashboard
+    // card's - so keying off the room text is what actually works here.
+    var det = ev.querySelector('.event-room-details') || ev;
+    var rm = clean(det.textContent).match(/room\s*:\s*(.*?)(?:\s*meeting\s*link|$)/i);
+    var roomText = rm ? clean(rm[1]) : null;
+
+    var virtualRoom = VIRTUAL.test(roomText || '');
+    var online = virtualRoom || (!!link && !/\d{3}/.test(roomText || ''));
+    var room = (!roomText || virtualRoom) ? null : roomText;
     if (room) {
       var dup = room.match(/^(.+?)\s*\(\s*\1\s*\)$/);
       if (dup) room = dup[1];
     }
 
-    if (!sample) sample = cells.slice(0, 8);
+    if (!sample) sample = [subject, start, roomText || '', link ? 'link' : 'no-link'];
 
     out.push({
       date: current,
@@ -477,7 +498,10 @@ enum Scrapers {
 
   // When nothing parses, report enough to tell which assumption broke rather
   // than just returning empty.
-  var diag = 'rows=' + rows.length + ' parsed=' + uniq.length + ' lastDate=' + (current || 'none');
+  var days = {};
+  for (var z = 0; z < uniq.length; z++) days[uniq[z].date] = 1;
+  var diag = 'rows=' + rows.length + ' parsed=' + uniq.length
+    + ' days=' + Object.keys(days).length + ' lastDate=' + (current || 'none');
   if (!uniq.length) {
     var firstRows = [];
     for (var q = 0; q < rows.length && firstRows.length < 4; q++) {

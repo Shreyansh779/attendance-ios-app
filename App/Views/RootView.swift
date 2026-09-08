@@ -163,7 +163,7 @@ struct RootView: View {
 
     private func refresh() {
         withAnimation(.easeOut(duration: 0.2)) { menuOpen = false }
-        portal.begin { rows, sessions, student in
+        portal.begin(knownStudent: snapshot?.student) { rows, sessions, student in
             let snap = Snapshot(
                 savedAt: Date(),
                 rows: rows,

@@ -492,4 +492,46 @@ enum Scrapers {
 
     /// Cheap check for whether the router has landed on the dashboard yet.
     static let route = "location.pathname"
+
+    /// Resolves as soon as the DOM stops mutating for `quietMs`, or after
+    /// `maxMs` regardless. Angular/Kendo compose the agenda and dashboard
+    /// cards asynchronously — this reacts the instant that settles instead of
+    /// polling blind on a fixed interval, and still gives up if it never
+    /// settles (e.g. a chart that animates forever).
+    ///
+    /// Run via `callAsyncJavaScript`, so this is a function *body*, not an
+    /// IIFE: no wrapping `(function(){...})()`.
+    static let settle = """
+    return await new Promise((resolve) => {
+      var settled = false;
+      var quietTimer = null;
+      var giveUp = setTimeout(function () {
+        if (settled) return;
+        settled = true;
+        obs.disconnect();
+        resolve('timeout');
+      }, maxMs);
+      var obs = new MutationObserver(function () {
+        if (settled) return;
+        clearTimeout(quietTimer);
+        quietTimer = setTimeout(function () {
+          if (settled) return;
+          settled = true;
+          clearTimeout(giveUp);
+          obs.disconnect();
+          resolve('settled');
+        }, quietMs);
+      });
+      obs.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true });
+      // No mutations at all also counts as settled - start the quiet clock
+      // immediately rather than waiting for a first mutation that may never come.
+      quietTimer = setTimeout(function () {
+        if (settled) return;
+        settled = true;
+        clearTimeout(giveUp);
+        obs.disconnect();
+        resolve('settled');
+      }, quietMs);
+    });
+    """
 }

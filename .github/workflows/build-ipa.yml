@@ -5,6 +5,9 @@ on:
   push:
     tags: ['v*']
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-15
@@ -64,6 +67,23 @@ jobs:
           rm -rf Payload
           ls -lh Today.ipa
 
+      # Artifact downloads are streamed zips, which iOS Files refuses to open
+      # ("Bad message"). A release asset is a direct .ipa link instead, so the
+      # phone downloads something it can hand straight to a sideloader.
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="build-${{ github.run_number }}"
+          gh release create "$TAG" out/Today.ipa \
+            --title "Today $TAG" \
+            --notes "Unsigned IPA. Download Today.ipa and sideload it." \
+            --latest
+          echo "### Download" >> "$GITHUB_STEP_SUMMARY"
+          gh release view "$TAG" --json assets \
+            --jq '.assets[].url' >> "$GITHUB_STEP_SUMMARY"
+
+      # Kept as a fallback for extracting on a desktop.
       - uses: actions/upload-artifact@v4
         with:
           name: Today-unsigned-ipa

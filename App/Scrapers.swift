@@ -532,6 +532,179 @@ enum Scrapers {
 })()
 """#
 
+    /// Builds the week from the timetable API payload the page already
+    /// fetched, rather than from rendered HTML.
+    ///
+    /// The scheduler requests `POST /apigateway/api/timetable`, gets a ~1.1MB
+    /// JSON array back with a 200, and then renders nothing - the DOM scrape
+    /// was reading a table that was never going to fill in. The spy stashes
+    /// that array on `window.__ttData`; this turns it into sessions.
+    ///
+    /// Field names are matched by shape rather than hardcoded, because the
+    /// only sample available was the first 200 bytes of the response. The
+    /// diagnostic reports the keys it actually saw so a mismatch is
+    /// immediately visible instead of silent.
+    static let weekApi = #"""
+(function () {
+  var D = window.__ttData;
+  if (!D) {
+    return JSON.stringify({
+      ok: false,
+      sessions: [],
+      diag: 'api=none' + (window.__ttErr ? (' parseErr=' + window.__ttErr) : '')
+    });
+  }
+
+  var arr = D;
+  if (!Array.isArray(arr)) {
+    arr = D.Items || D.Item || D.Data || D.data || D.Result || null;
+  }
+  if (!Array.isArray(arr)) {
+    return JSON.stringify({ ok: false, sessions: [], diag: 'api=not-array keys=' + Object.keys(D).slice(0, 12).join(',') });
+  }
+
+  var pad = function (n) { return n < 10 ? '0' + n : String(n); };
+  var clean = function (t) { return String(t == null ? '' : t).replace(/\s+/g, ' ').trim(); };
+
+  var ISO = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?/;
+  // Times are read out of the string directly rather than through Date(),
+  // which would shift them by the device's timezone offset.
+  var ampm = function (h, m) {
+    var hh = h % 12; if (hh === 0) hh = 12;
+    return pad(hh) + ':' + pad(m) + ' ' + (h < 12 ? 'AM' : 'PM');
+  };
+
+  // Only the near future is worth caching; the payload covers the whole term.
+  var now = new Date();
+  var todayIso = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
+  var horizon = new Date(now.getTime() + 14 * 86400000);
+  var maxIso = horizon.getFullYear() + '-' + pad(horizon.getMonth() + 1) + '-' + pad(horizon.getDate());
+
+  function flat(o, out, path, depth) {
+    if (o == null || depth > 3) return;
+    if (typeof o !== 'object') { out.push([path, o]); return; }
+    if (Array.isArray(o)) {
+      for (var i = 0; i < o.length && i < 4; i++) flat(o[i], out, path + '[]', depth + 1);
+      return;
+    }
+    for (var k in o) {
+      if (!Object.prototype.hasOwnProperty.call(o, k)) continue;
+      flat(o[k], out, path ? path + '.' + k : k, depth + 1);
+    }
+  }
+
+  // Anything describing the room, the teacher or the cohort is not the
+  // subject, and cohort codes are longer than subject names so they win any
+  // "pick the longest" contest. Hence an explicit deny-list.
+  var NOT_SUBJECT = /venue|faculty|teacher|employee|grade|batch|cohort|section|room|floor|building|block|campus|event|slot|status|type|category|program|school|department/i;
+
+  function pick(pairs) {
+    var byDate = [], link = null, venue = null, category = null;
+    var subj = [null, null, null, null];
+
+    for (var i = 0; i < pairs.length; i++) {
+      var path = pairs[i][0], v = pairs[i][1];
+      if (typeof v !== 'string') continue;
+      var lower = path.toLowerCase();
+      var key = lower.split('.').pop().replace(/\[\]/g, '');
+
+      if (ISO.test(v)) { byDate.push([lower, v]); continue; }
+      if (/^https?:\/\//i.test(v)) { if (!link) link = v; continue; }
+
+      // Venue first: room numbers like "11114" carry no letters and would be
+      // thrown away by the letters test below.
+      if (key === 'venuename' || key === 'venuecode') { if (!venue) venue = v; continue; }
+      if (key.indexOf('venuecategory') === 0) { if (!category) category = v; continue; }
+
+      if (!/[A-Za-z]{3,}/.test(v)) continue;
+
+      if (NOT_SUBJECT.test(lower)) continue;
+      if (lower.indexOf('course') > -1 && /name|title/.test(key)) { subj[0] = subj[0] || v; }
+      else if (/^(subject|subjectname|papername|coursetitle|coursename)$/.test(key)) { subj[1] = subj[1] || v; }
+      else if (lower.indexOf('course') > -1 && key === 'name') { subj[2] = subj[2] || v; }
+      else if (key === 'name' || key === 'title') { subj[3] = subj[3] || v; }
+    }
+
+    var subject = subj[0] || subj[1] || subj[2] || subj[3];
+
+    // Prefer keys that say so; otherwise take the two earliest timestamps.
+    var st = null, en = null;
+    for (var j = 0; j < byDate.length; j++) {
+      var p2 = byDate[j][0];
+      if (!st && /start|from|begin/.test(p2)) st = byDate[j][1];
+      if (!en && /end|finish|to/.test(p2)) en = byDate[j][1];
+    }
+    if (!st || !en) {
+      var sorted = byDate.map(function (x) { return x[1]; }).sort();
+      if (!st) st = sorted[0] || null;
+      if (!en) en = sorted.length > 1 ? sorted[sorted.length - 1] : null;
+    }
+
+    return { subject: subject, st: st, en: en, link: link, venue: venue, category: category };
+  }
+
+  var VIRTUAL = /virtual|online|teams|zoom|webex|meet/i;
+  var out = [];
+
+  for (var i = 0; i < arr.length; i++) {
+    var pairs = [];
+    flat(arr[i], pairs, '', 0);
+    var g = pick(pairs);
+    if (!g.subject || !g.st) continue;
+
+    var ms = g.st.match(ISO);
+    if (!ms || ms[4] == null) continue;
+    var date = ms[1] + '-' + ms[2] + '-' + ms[3];
+    if (date < todayIso || date > maxIso) continue;
+
+    var start = ampm(+ms[4], +ms[5]);
+    var end = start;
+    if (g.en) {
+      var me = g.en.match(ISO);
+      if (me && me[4] != null) end = ampm(+me[4], +me[5]);
+    }
+
+    var online = VIRTUAL.test(g.category || '') || VIRTUAL.test(g.venue || '');
+    out.push({
+      date: date,
+      subject: clean(g.subject),
+      start: start,
+      end: end,
+      room: online ? null : (g.venue ? clean(g.venue) : null),
+      online: online,
+      mode: online ? 'virtual' : 'class',
+      link: g.link
+    });
+  }
+
+  var seen = {}, uniq = [];
+  for (var k = 0; k < out.length; k++) {
+    var key2 = out[k].date + '|' + out[k].start + '|' + out[k].subject;
+    if (seen[key2]) continue;
+    seen[key2] = 1;
+    uniq.push(out[k]);
+  }
+  uniq.sort(function (a, b) {
+    return a.date === b.date ? (a.start < b.start ? -1 : 1) : (a.date < b.date ? -1 : 1);
+  });
+
+  var days = {};
+  for (var z = 0; z < uniq.length; z++) days[uniq[z].date] = 1;
+
+  var diag = 'api items=' + arr.length + ' parsed=' + uniq.length
+    + ' days=' + Object.keys(days).length;
+  if (!uniq.length) {
+    var pairs0 = [];
+    flat(arr[0], pairs0, '', 0);
+    diag += ' | keys=' + pairs0.map(function (x) { return x[0]; }).slice(0, 26).join(',');
+  } else {
+    diag += ' first=' + uniq[0].date + ' ' + uniq[0].start + ' ' + uniq[0].subject.slice(0, 34);
+  }
+
+  return JSON.stringify({ ok: uniq.length > 0, sessions: uniq, diag: diag });
+})()
+"""#
+
     /// Records the page's own network calls so an empty scheduler can be
     /// explained instead of guessed at.
     ///
@@ -570,6 +743,15 @@ enum Scrapers {
           try { t = x.responseText || ''; } catch (e) { t = '[not-text]'; }
           rec.n = t.length;
           rec.b = t.slice(0, 200);
+
+          // This is the one that matters. The scheduler fetches the whole
+          // timetable as JSON and then fails to render any of it, so the
+          // payload is taken straight from the wire instead. Note the
+          // negative lookahead: /api/timetable/masters is a different, tiny
+          // response (the venue-category colour table).
+          if (/\/api\/timetable(?:\?|$)/.test(rec.u)) {
+            try { window.__ttData = JSON.parse(t); } catch (e2) { window.__ttErr = String(e2); }
+          }
         } catch (e) {}
         keep(rec);
       });

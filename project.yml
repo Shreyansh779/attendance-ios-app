@@ -32,7 +32,13 @@ targets:
       # which is exactly how we ended up with a bundle holding only the binary.
       - path: App
         excludes:
+          # INFOPLIST_FILE already targets this; leaving it in sources makes
+          # XcodeGen also add it to Copy Bundle Resources.
           - Info.plist
+          # actool rejects this catalog on the current Xcode. The files stay in
+          # the repo, just out of the build. All it bought was ~200ms of
+          # #191C23 behind the launch screen instead of system black.
+          - Assets.xcassets
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.shreyansh.today

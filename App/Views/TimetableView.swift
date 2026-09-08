@@ -90,6 +90,8 @@ struct TimetableView: View {
     }
 
     private struct Row: View {
+        @Environment(\.openURL) private var openURL
+
         let k: Klass
         let nowMin: Int
 
@@ -118,6 +120,19 @@ struct TimetableView: View {
                     Text(place)
                         .font(.r(14, k.live ? .semibold : .medium))
                         .foregroundStyle(k.live ? Color.mintDim : (k.past ? Color.ink4 : Color.ink3))
+
+                    if k.online, !k.past, let raw = k.link, let url = URL(string: raw) {
+                        Button { openURL(url) } label: {
+                            Text("Join \u{2197}")
+                                .font(.r(13.5, .semibold))
+                                .foregroundStyle(Color.mintHi)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 7)
+                                .background(Color.mintHi.opacity(0.16), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.top, 8)
+                    }
                 }
             }
             .slab(

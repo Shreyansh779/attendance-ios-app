@@ -254,6 +254,24 @@ enum Scrapers {
 
     var online = /online classroom/i.test(txt);
 
+    // The join link is usually an <a href>, but the portal sometimes puts the
+    // URL in an onclick or a data attribute instead, so try all three.
+    var link = null;
+    var anchors = r.querySelectorAll('a');
+    for (var ai = 0; ai < anchors.length && !link; ai++) {
+      var href = anchors[ai].getAttribute('href') || '';
+      if (/^https?:/i.test(href)) { link = href; break; }
+      var attrs = anchors[ai].attributes;
+      for (var x = 0; x < attrs.length; x++) {
+        var hit = String(attrs[x].value || '').match(/https?:\/\/[^'"\s)]+/);
+        if (hit) { link = hit[0]; break; }
+      }
+    }
+    if (!link) {
+      var loose = txt.match(/https?:\/\/[^\s'"<>]+/);
+      if (loose) link = loose[0];
+    }
+
     // The left bar colour is the only place the room type is encoded, so read
     // it off the computed style rather than guessing from the room number.
     var mode = 'class';
@@ -283,7 +301,8 @@ enum Scrapers {
       end: d.end.toUpperCase().replace(/\./g, ''),
       room: room,
       online: online,
-      mode: mode
+      mode: mode,
+      link: link
     };
   });
 
@@ -407,6 +426,18 @@ enum Scrapers {
     if (!subject) continue;
 
     var online = /online\s*class/i.test(whole);
+
+    var link = null;
+    var as = rows[i].querySelectorAll('a');
+    for (var ai = 0; ai < as.length && !link; ai++) {
+      var h = as[ai].getAttribute('href') || '';
+      if (/^https?:/i.test(h)) { link = h; break; }
+      var at = as[ai].attributes;
+      for (var x = 0; x < at.length; x++) {
+        var g = String(at[x].value || '').match(/https?:\/\/[^'"\s)]+/);
+        if (g) { link = g[0]; break; }
+      }
+    }
     var room = null;
     var rm = whole.match(/room\s*:?\s*([A-Za-z0-9()\-\/]+)/i);
     if (rm) room = rm[1];
@@ -429,7 +460,8 @@ enum Scrapers {
       end: end,
       room: room,
       online: !!online,
-      mode: online ? 'virtual' : 'class'
+      mode: online ? 'virtual' : 'class',
+      link: link
     });
   }
 
@@ -443,7 +475,18 @@ enum Scrapers {
     uniq.push(out[k]);
   }
 
-  return JSON.stringify({ ok: uniq.length > 0, sessions: uniq, sample: sample });
+  // When nothing parses, report enough to tell which assumption broke rather
+  // than just returning empty.
+  var diag = 'rows=' + rows.length + ' parsed=' + uniq.length + ' lastDate=' + (current || 'none');
+  if (!uniq.length) {
+    var firstRows = [];
+    for (var q = 0; q < rows.length && firstRows.length < 4; q++) {
+      var t = clean(rows[q].textContent);
+      if (t) firstRows.push(t.slice(0, 90));
+    }
+    diag += ' | ' + firstRows.join(' // ');
+  }
+  return JSON.stringify({ ok: uniq.length > 0, sessions: uniq, sample: sample, diag: diag });
 })()
 """#
 

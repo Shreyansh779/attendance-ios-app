@@ -84,10 +84,12 @@ struct Session: Codable, Identifiable, Hashable {
     /// ISO yyyy-MM-dd. Only the weekly scrape sets this; the dashboard card is
     /// always today.
     let date: String?
+    /// Join URL for an online class, when the portal exposes one.
+    let link: String?
 
     var id: String { (date ?? "") + start + subject }
 
-    enum CodingKeys: String, CodingKey { case subject, start, end, room, online, mode, date }
+    enum CodingKeys: String, CodingKey { case subject, start, end, room, online, mode, date, link }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -98,11 +100,13 @@ struct Session: Codable, Identifiable, Hashable {
         online = (try? c.decode(Bool.self, forKey: .online)) ?? false
         mode = (try? c.decode(String.self, forKey: .mode)) ?? "class"
         date = try? c.decodeIfPresent(String.self, forKey: .date)
+        link = try? c.decodeIfPresent(String.self, forKey: .link)
     }
 
     init(
         subject: String, start: String, end: String,
-        room: String?, online: Bool, mode: String, date: String? = nil
+        room: String?, online: Bool, mode: String,
+        date: String? = nil, link: String? = nil
     ) {
         self.subject = subject
         self.start = start
@@ -111,6 +115,7 @@ struct Session: Codable, Identifiable, Hashable {
         self.online = online
         self.mode = mode
         self.date = date
+        self.link = link
     }
 }
 
@@ -186,6 +191,7 @@ struct Klass: Identifiable {
     var room: String? { session.room }
     var online: Bool { session.online }
     var mode: String { session.mode }
+    var link: String? { session.link }
 }
 
 /// Marks the class on now and the next one due, and ties each to its subject.

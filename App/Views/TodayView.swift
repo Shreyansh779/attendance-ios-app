@@ -4,6 +4,8 @@ import SwiftUI
 /// number under it is that subject's own slack, not the aggregate — the
 /// aggregate is not what stops you skipping a particular class.
 struct TodayView: View {
+    @Environment(\.openURL) private var openURL
+
     let day: [Klass]
     let nowMin: Int
     /// Tapping the day strip pins a class; nil means follow the clock.
@@ -35,6 +37,23 @@ struct TodayView: View {
                     .font(.r(21, .medium))
                     .lineSpacing(2)
                     .padding(.top, 20)
+
+                if h.online, let raw = h.link, let url = URL(string: raw) {
+                    Button {
+                        openURL(url)
+                    } label: {
+                        HStack(spacing: 8) {
+                            Text("Join the class").font(.r(15.5, .semibold))
+                            Text("\u{2197}").font(.r(15, .semibold))
+                        }
+                        .foregroundStyle(Color(0x1B2C24))
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 11)
+                        .background(Color.mintHi, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 14)
+                }
 
                 Text(whenText(h))
                     .font(.r(16, .medium))

@@ -74,7 +74,7 @@ struct TimetableView: View {
                             )
                         }
                     }
-                    .padding(.bottom, 8)
+                    .padding(.bottom, 20)
                     .padding(.top, 18)
                 }
             }

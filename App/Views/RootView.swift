@@ -71,7 +71,9 @@ struct RootView: View {
             }
             .padding(.horizontal, 20)
             .padding(.top, 22)
-            .padding(.bottom, 20)
+            // No blanket bottom padding: it left a dead band under the
+            // scrolling lists, which clipped the last card and looked like
+            // empty space. Each screen pads its own scroll content instead.
 
             // Kept in the hierarchy so WebKit doesn't throttle it; see the
             // full-size copies at the bottom of the stack.
@@ -89,6 +91,7 @@ struct RootView: View {
                     summary: summary,
                     snapshot: snapshot,
                     student: snapshot?.student,
+                    photo: snapshot?.photo,
                     weekDays: snapshot?.week.count ?? 0,
                     onRefresh: refresh,
                     close: { withAnimation(.easeOut(duration: 0.24)) { menuOpen = false } }
@@ -99,6 +102,11 @@ struct RootView: View {
             }
         }
         .animation(.spring(response: 0.34, dampingFraction: 0.86), value: menuOpen)
+        // Arriving at Today from the menu should always show what is on now or
+        // next, never whichever class was pinned earlier.
+        .onChange(of: route) { _, r in
+            if r == .today { picked = nil }
+        }
         .preferredColorScheme(.dark)
         .onReceive(clock) { tick = $0 }
         .fullScreenCover(isPresented: $portal.showingLogin) {
@@ -220,22 +228,23 @@ struct RootView: View {
 
     private func refresh() {
         withAnimation(.easeOut(duration: 0.2)) { menuOpen = false }
-        portal.begin(knownStudent: snapshot?.student) { rows, sessions, student, week, diag in
+        portal.begin(knownStudent: snapshot?.student) { r in
             // Merge rather than replace: the agenda only shows six days, so old
             // days stay cached until they are superseded.
             var merged = snapshot?.week ?? [:]
-            for (day, list) in week { merged[day] = list }
+            for (day, list) in r.week { merged[day] = list }
 
             let snap = Snapshot(
                 savedAt: Date(),
-                rows: rows,
-                sessions: sessions,
-                student: student ?? snapshot?.student,
+                rows: r.rows,
+                sessions: r.sessions,
+                student: r.student ?? snapshot?.student,
                 week: merged,
                 // A fresh read from the portal is authoritative, so hand marks
                 // are spent.
                 marks: [:],
-                weekDiag: diag
+                weekDiag: r.weekDiag,
+                photo: r.photo ?? snapshot?.photo
             )
             Store.save(snap)
             snapshot = snap

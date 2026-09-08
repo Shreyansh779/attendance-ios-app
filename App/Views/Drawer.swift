@@ -19,18 +19,39 @@ struct Drawer: View {
     let summary: Summary
     let snapshot: Snapshot?
     let student: String?
+    /// `data:image/...;base64,` URI from the dashboard header.
+    let photo: String?
     let weekDays: Int
     let onRefresh: () -> Void
     let close: () -> Void
 
+    /// Decoded once per render of the header rather than per frame.
+    private var photoImage: UIImage? {
+        guard let p = photo,
+            let comma = p.firstIndex(of: ","),
+            let data = Data(base64Encoded: String(p[p.index(after: comma)...]))
+        else { return nil }
+        return UIImage(data: data)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 13) {
-                Text(initials)
-                    .font(.r(17, .bold))
-                    .foregroundStyle(Color.mintHi)
-                    .frame(width: 44, height: 44)
-                    .background(Color.surLive, in: Circle())
+                // The real photo when the dashboard gave us one, initials
+                // otherwise.
+                if let img = photoImage {
+                    Image(uiImage: img)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 44, height: 44)
+                        .clipShape(Circle())
+                } else {
+                    Text(initials)
+                        .font(.r(17, .bold))
+                        .foregroundStyle(Color.mintHi)
+                        .frame(width: 44, height: 44)
+                        .background(Color.surLive, in: Circle())
+                }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(student ?? "Today").font(.r(16.5, .semibold)).lineLimit(1)
                     Text("UPES dashboard").font(.r(13, .medium)).foregroundStyle(Color.ink3)
@@ -90,7 +111,7 @@ struct Drawer: View {
     private func badge(_ r: Route) -> String? {
         switch r {
         case .today: return nil
-        case .timetable: return day.isEmpty ? nil : "\(day.count)"
+        case .timetable: return nil
         case .attendance:
             return summary.subjects.isEmpty ? nil : "\(Int(summary.overall.pct.rounded()))%"
         }

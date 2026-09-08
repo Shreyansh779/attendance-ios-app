@@ -77,6 +77,7 @@ struct TodayView: View {
 
                 DayStrip(day: day, picked: $picked, heroID: hero?.id)
             }
+            .padding(.bottom, 20)
         } else {
             VStack {
                 Spacer()
@@ -90,6 +91,7 @@ struct TodayView: View {
                 .slab(.sur, radius: 28, pad: EdgeInsets(top: 26, leading: 24, bottom: 26, trailing: 24))
                 Spacer()
             }
+            .padding(.bottom, 20)
         }
     }
 

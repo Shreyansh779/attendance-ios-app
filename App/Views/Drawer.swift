@@ -22,6 +22,11 @@ struct Drawer: View {
     /// `data:image/...;base64,` URI from the dashboard header.
     let photo: String?
     let weekDays: Int
+    /// Picking a route from the menu, as opposed to arriving at one
+    /// programmatically. Kept separate from the `route` binding so the owner
+    /// can tell the two apart - tapping "Today" here should drop any pinned
+    /// class, while a timetable tap navigating to Today must keep it.
+    let onSelect: (Route) -> Void
     let onRefresh: () -> Void
     let close: () -> Void
 
@@ -63,7 +68,7 @@ struct Drawer: View {
             VStack(spacing: 7) {
                 ForEach(Route.allCases, id: \.self) { r in
                     Button {
-                        route = r
+                        onSelect(r)
                         close()
                     } label: {
                         NavRow(route: r, selected: route == r, badge: badge(r))

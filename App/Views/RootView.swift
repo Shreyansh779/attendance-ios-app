@@ -156,7 +156,16 @@ struct RootView: View {
                     onMark: mark
                 )
             case .timetable:
-                TimetableView(day: day, nowMin: nowMin, week: snapshot?.week ?? [:], rows: rows)
+                TimetableView(
+                    nowMin: nowMin,
+                    week: snapshot?.week ?? [:],
+                    rows: rows,
+                    today: Snapshot.isoDay.string(from: tick),
+                    onOpenToday: { id in
+                        picked = id
+                        route = .today
+                    }
+                )
             case .attendance: AttendanceView(summary: summary)
             }
         }
@@ -175,7 +184,7 @@ struct RootView: View {
         case .attendance:
             return summary.subjects.isEmpty ? "" : String(format: "%.1f%%", summary.overall.pct)
         case .timetable:
-            return "Today"
+            return ""
         case .today:
             let left = day.filter { !$0.past }.count
             if day.isEmpty { return "" }

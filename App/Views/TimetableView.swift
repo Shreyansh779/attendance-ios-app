@@ -1,92 +1,129 @@
 import SwiftUI
 
 struct TimetableView: View {
-    let day: [Klass]
     let nowMin: Int
     let week: [String: [Session]]
     let rows: [AttRow]
+    let today: String
+    /// Called with a Klass.id when a *today* row is tapped. RootView wires
+    /// this to `picked = id; route = .today` — same as tapping the class on
+    /// the dashboard itself.
+    let onOpenToday: (String) -> Void
 
-    /// The cached week, today first. Days already gone are dropped: nobody
-    /// needs last Tuesday.
-    private var upcoming: [(String, [Klass])] {
-        let todayKey = Snapshot.isoDay.string(from: Date())
-        return week.keys
-            .filter { $0 >= todayKey }
-            .sorted()
-            .compactMap { key in
-                let list = shapeDay(
-                    sessions: week[key] ?? [],
-                    rows: rows,
-                    nowMin: key == todayKey ? nowMin : -1
-                )
-                return list.isEmpty ? nil : (key, list)
-            }
+    @State private var idx = 0
+
+    /// Continuous day-by-day range, today through the furthest date the
+    /// portal has actually handed us — not just the days that happen to have
+    /// a class, so a free day still gets a page instead of vanishing and
+    /// throwing off the arrow count.
+    private var dates: [String] {
+        guard let maxKey = week.keys.filter({ $0 >= today }).max(),
+            let start = Snapshot.isoDay.date(from: today),
+            let end = Snapshot.isoDay.date(from: maxKey),
+            start <= end
+        else { return [today] }
+
+        var out: [String] = []
+        var d = start
+        let cal = Calendar.current
+        while d <= end {
+            out.append(Snapshot.isoDay.string(from: d))
+            guard let next = cal.date(byAdding: .day, value: 1, to: d) else { break }
+            d = next
+        }
+        return out
     }
 
-    private func heading(_ key: String) -> String {
-        guard let d = Snapshot.isoDay.date(from: key) else { return key }
-        let todayKey = Snapshot.isoDay.string(from: Date())
-        if key == todayKey { return "Today" }
-        return d.formatted(.dateTime.weekday(.wide).day().month(.abbreviated))
+    private var selectedKey: String {
+        dates.indices.contains(idx) ? dates[idx] : today
+    }
+
+    private var list: [Klass] {
+        shapeDay(
+            sessions: week[selectedKey] ?? [],
+            rows: rows,
+            nowMin: selectedKey == today ? nowMin : -1
+        )
     }
 
     var body: some View {
-        if day.isEmpty && upcoming.isEmpty {
-            Text("No classes cached yet. Refresh from the portal.")
-                .font(.r(16, .medium))
-                .foregroundStyle(Color.ink2)
-                .slab(.sur, radius: 28, pad: EdgeInsets(top: 26, leading: 24, bottom: 26, trailing: 24))
-                .padding(.top, 24)
-            Spacer()
-        } else if upcoming.count > 1 {
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 9) {
-                    ForEach(upcoming, id: \.0) { key, list in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(heading(key)).font(.r(21, .bold)).kerning(-0.5)
-                            Text("\(list.count) \(list.count == 1 ? "class" : "classes")")
-                                .font(.r(13.5, .medium))
-                                .foregroundStyle(Color.ink3)
-                        }
-                        .padding(.horizontal, 6)
-                        .padding(.top, key == upcoming.first?.0 ? 18 : 22)
-                        .padding(.bottom, 6)
+        VStack(alignment: .leading, spacing: 0) {
+            nav
 
+            if list.isEmpty {
+                Text("No classes this day.")
+                    .font(.r(16, .medium))
+                    .foregroundStyle(Color.ink2)
+                    .slab(.sur, radius: 28, pad: EdgeInsets(top: 26, leading: 24, bottom: 26, trailing: 24))
+                    .padding(.top, 18)
+                Spacer()
+            } else {
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 9) {
                         ForEach(list) { k in
-                            Row(k: k, nowMin: nowMin)
+                            Row(
+                                k: k, nowMin: nowMin,
+                                tappable: selectedKey == today,
+                                onTap: { onOpenToday(k.id) }
+                            )
                         }
                     }
+                    .padding(.bottom, 8)
+                    .padding(.top, 18)
                 }
-                .padding(.bottom, 8)
             }
-        } else {
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 9) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(Date().formatted(.dateTime.weekday(.wide)))
-                            .font(.r(27, .bold))
-                            .kerning(-0.8)
-                        Text(subtitle)
-                            .font(.r(14.5, .medium))
-                            .foregroundStyle(Color.ink3)
-                    }
-                    .padding(.horizontal, 6)
-                    .padding(.top, 20)
-                    .padding(.bottom, 7)
-
-                    ForEach(day) { k in
-                        Row(k: k, nowMin: nowMin)
-                    }
-                }
-                .padding(.bottom, 8)
-            }
+        }
+        // Clamp if `week` shrinks (e.g. a fresh refresh with a shorter range)
+        // and the current page no longer exists.
+        .onChange(of: dates.count) { _, count in
+            if idx >= count { idx = max(0, count - 1) }
         }
     }
 
-    private var subtitle: String {
-        let left = day.filter { !$0.past }.count
-        let noun = day.count == 1 ? "class" : "classes"
-        return "\(day.count) \(noun), \(left > 0 ? "\(left) still to come" : "all done")"
+    private var nav: some View {
+        HStack(spacing: 12) {
+            arrow("chevron.left", enabled: idx > 0) { idx -= 1 }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(heading)
+                    .font(.r(21, .bold))
+                    .kerning(-0.5)
+                Text(dateLabel)
+                    .font(.r(13.5, .medium))
+                    .foregroundStyle(Color.ink3)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            arrow("chevron.right", enabled: idx < dates.count - 1) { idx += 1 }
+        }
+        .padding(.horizontal, 6)
+        .padding(.top, 4)
+    }
+
+    private func arrow(_ system: String, enabled: Bool, _ act: @escaping () -> Void) -> some View {
+        Button(action: act) {
+            Image(systemName: system)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(enabled ? Color.ink : Color.ink4)
+                .frame(width: 36, height: 36)
+                .background(Color.sur, in: Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+    }
+
+    private var heading: String {
+        selectedKey == today ? "Today" : weekday(selectedKey)
+    }
+
+    private var dateLabel: String {
+        guard let d = Snapshot.isoDay.date(from: selectedKey) else { return selectedKey }
+        return d.formatted(.dateTime.weekday(.wide).day().month(.abbreviated))
+    }
+
+    private func weekday(_ key: String) -> String {
+        guard let d = Snapshot.isoDay.date(from: key) else { return key }
+        return d.formatted(.dateTime.weekday(.wide))
     }
 
     private struct Row: View {
@@ -94,6 +131,8 @@ struct TimetableView: View {
 
         let k: Klass
         let nowMin: Int
+        let tappable: Bool
+        let onTap: () -> Void
 
         var body: some View {
             HStack(alignment: .top, spacing: 15) {
@@ -134,12 +173,22 @@ struct TimetableView: View {
                         .padding(.top, 8)
                     }
                 }
+
+                if tappable {
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color.ink4)
+                        .padding(.top, 3)
+                }
             }
             .slab(
                 fillFor(k),
                 radius: 26,
                 pad: EdgeInsets(top: k.live ? 22 : 18, leading: 20, bottom: k.live ? 22 : 18, trailing: 20)
             )
+            .contentShape(Rectangle())
+            .onTapGesture { if tappable { onTap() } }
         }
 
         private var place: String {

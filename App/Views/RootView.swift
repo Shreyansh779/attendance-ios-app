@@ -21,12 +21,19 @@ struct RootView: View {
         return (c.hour ?? 0) * 60 + (c.minute ?? 0)
     }
 
-    private var day: [Klass] {
+    /// Marks are folded in before anything is displayed, so a hand-ticked class
+    /// moves every number in the app at once.
+    private var rows: [AttRow] {
         guard let s = snapshot else { return [] }
-        return shapeDay(sessions: s.sessions, rows: s.rows, nowMin: nowMin)
+        return applyMarks(s.rows, s.marks)
     }
 
-    private var summary: Summary { Summary(snapshot?.rows ?? []) }
+    private var day: [Klass] {
+        guard let s = snapshot else { return [] }
+        return shapeDay(sessions: s.sessions(for: tick), rows: rows, nowMin: nowMin)
+    }
+
+    private var summary: Summary { Summary(rows) }
 
     var body: some View {
         ZStack(alignment: .leading) {
@@ -128,8 +135,17 @@ struct RootView: View {
             }
         } else {
             switch route {
-            case .today: TodayView(day: day, nowMin: nowMin, picked: $picked)
-            case .timetable: TimetableView(day: day, nowMin: nowMin)
+            case .today:
+                TodayView(
+                    day: day,
+                    nowMin: nowMin,
+                    picked: $picked,
+                    marks: snapshot?.marks ?? [:],
+                    today: Snapshot.isoDay.string(from: tick),
+                    onMark: mark
+                )
+            case .timetable:
+                TimetableView(day: day, nowMin: nowMin, week: snapshot?.week ?? [:], rows: rows)
             case .attendance: AttendanceView(summary: summary)
             }
         }
@@ -161,14 +177,35 @@ struct RootView: View {
         return "This is saved from earlier. Refresh to bring it up to date."
     }
 
+    /// Ticking a class off locally. Tapping the same answer again clears it.
+    private func mark(_ key: String, _ subject: String, _ attended: Bool?) {
+        guard var snap = snapshot else { return }
+        if let a = attended {
+            snap.marks[key] = Mark(subject: subject, attended: a)
+        } else {
+            snap.marks.removeValue(forKey: key)
+        }
+        Store.save(snap)
+        snapshot = snap
+    }
+
     private func refresh() {
         withAnimation(.easeOut(duration: 0.2)) { menuOpen = false }
-        portal.begin(knownStudent: snapshot?.student) { rows, sessions, student in
+        portal.begin(knownStudent: snapshot?.student) { rows, sessions, student, week in
+            // Merge rather than replace: the agenda only shows six days, so old
+            // days stay cached until they are superseded.
+            var merged = snapshot?.week ?? [:]
+            for (day, list) in week { merged[day] = list }
+
             let snap = Snapshot(
                 savedAt: Date(),
                 rows: rows,
                 sessions: sessions,
-                student: student ?? snapshot?.student
+                student: student ?? snapshot?.student,
+                week: merged,
+                // A fresh read from the portal is authoritative, so hand marks
+                // are spent.
+                marks: [:]
             )
             Store.save(snap)
             snapshot = snap

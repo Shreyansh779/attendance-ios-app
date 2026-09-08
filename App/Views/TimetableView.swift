@@ -3,15 +3,62 @@ import SwiftUI
 struct TimetableView: View {
     let day: [Klass]
     let nowMin: Int
+    let week: [String: [Session]]
+    let rows: [AttRow]
+
+    /// The cached week, today first. Days already gone are dropped: nobody
+    /// needs last Tuesday.
+    private var upcoming: [(String, [Klass])] {
+        let todayKey = Snapshot.isoDay.string(from: Date())
+        return week.keys
+            .filter { $0 >= todayKey }
+            .sorted()
+            .compactMap { key in
+                let list = shapeDay(
+                    sessions: week[key] ?? [],
+                    rows: rows,
+                    nowMin: key == todayKey ? nowMin : -1
+                )
+                return list.isEmpty ? nil : (key, list)
+            }
+    }
+
+    private func heading(_ key: String) -> String {
+        guard let d = Snapshot.isoDay.date(from: key) else { return key }
+        let todayKey = Snapshot.isoDay.string(from: Date())
+        if key == todayKey { return "Today" }
+        return d.formatted(.dateTime.weekday(.wide).day().month(.abbreviated))
+    }
 
     var body: some View {
-        if day.isEmpty {
-            Text("No classes listed for today.")
+        if day.isEmpty && upcoming.isEmpty {
+            Text("No classes cached yet. Refresh from the portal.")
                 .font(.r(16, .medium))
                 .foregroundStyle(Color.ink2)
                 .slab(.sur, radius: 28, pad: EdgeInsets(top: 26, leading: 24, bottom: 26, trailing: 24))
                 .padding(.top, 24)
             Spacer()
+        } else if upcoming.count > 1 {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 9) {
+                    ForEach(upcoming, id: \.0) { key, list in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(heading(key)).font(.r(21, .bold)).kerning(-0.5)
+                            Text("\(list.count) \(list.count == 1 ? "class" : "classes")")
+                                .font(.r(13.5, .medium))
+                                .foregroundStyle(Color.ink3)
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.top, key == upcoming.first?.0 ? 18 : 22)
+                        .padding(.bottom, 6)
+
+                        ForEach(list) { k in
+                            Row(k: k, nowMin: nowMin)
+                        }
+                    }
+                }
+                .padding(.bottom, 8)
+            }
         } else {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 9) {

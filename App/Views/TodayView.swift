@@ -8,6 +8,9 @@ struct TodayView: View {
     let nowMin: Int
     /// Tapping the day strip pins a class; nil means follow the clock.
     @Binding var picked: String?
+    let marks: [String: Mark]
+    let today: String
+    let onMark: (String, String, Bool?) -> Void
 
     private var hero: Klass? {
         if let id = picked, let k = day.first(where: { $0.id == id }) { return k }
@@ -17,7 +20,7 @@ struct TodayView: View {
     var body: some View {
         if let h = hero {
             VStack(alignment: .leading, spacing: 0) {
-                Spacer(minLength: 0)
+                Spacer(minLength: 12)
 
                 Tag(state: tagState(h), virtual: h.mode == "virtual")
 
@@ -39,9 +42,19 @@ struct TodayView: View {
                     .padding(.top, 9)
 
                 OwnSlack(att: h.att)
-                    .padding(.top, 26)
+                    .padding(.top, 22)
 
-                Spacer(minLength: 22)
+                // Answering here is what keeps you off the portal: one tap
+                // updates every number without a refresh.
+                AttendAsk(
+                    klass: h,
+                    mark: marks[markKey(h, on: today)],
+                    enabled: h.past || h.live,
+                    onMark: { onMark(markKey(h, on: today), h.subject, $0) }
+                )
+                .padding(.top, 10)
+
+                Spacer(minLength: 18)
 
                 DayStrip(day: day, picked: $picked, heroID: hero?.id)
             }
@@ -79,6 +92,60 @@ struct TodayView: View {
             return "Starts \(hhmm(k.s0))\(ampm(k.s0)), in \(mins) min"
         }
         return "Starts \(hhmm(k.s0))\(ampm(k.s0))"
+    }
+}
+
+/// Did you attend? Yes adds an attended class, No adds a held one.
+private struct AttendAsk: View {
+    let klass: Klass
+    let mark: Mark?
+    let enabled: Bool
+    let onMark: (Bool?) -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if let m = mark {
+                Text(m.attended ? "Marked attended" : "Marked missed")
+                    .font(.r(14.5, .semibold))
+                    .foregroundStyle(m.attended ? Color.mintHi : Color.coral)
+                Spacer(minLength: 0)
+                Button("Undo") { onMark(nil) }
+                    .font(.r(14.5, .semibold))
+                    .foregroundStyle(Color.ink3)
+                    .buttonStyle(.plain)
+            } else {
+                Text(enabled ? "Did you attend?" : "Not started yet")
+                    .font(.r(14.5, .medium))
+                    .foregroundStyle(Color.ink2)
+                Spacer(minLength: 0)
+                if enabled {
+                    Pill(text: "Yes", tint: .mintHi) { onMark(true) }
+                    Pill(text: "No", tint: .coral) { onMark(false) }
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.sur, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
+    private struct Pill: View {
+        let text: String
+        let tint: Color
+        let act: () -> Void
+
+        var body: some View {
+            Button(action: act) {
+                Text(text)
+                    .font(.r(15, .semibold))
+                    .foregroundStyle(tint)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 9)
+                    .background(tint.opacity(0.16), in: Capsule())
+            }
+            .buttonStyle(.plain)
+        }
     }
 }
 
@@ -150,6 +217,9 @@ private struct OwnSlack: View {
 private struct DayStrip: View {
     let day: [Klass]
     @Binding var picked: String?
+    let marks: [String: Mark]
+    let today: String
+    let onMark: (String, String, Bool?) -> Void
     let heroID: String?
 
     var body: some View {

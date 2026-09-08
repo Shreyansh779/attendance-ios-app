@@ -5,6 +5,7 @@ struct Snapshot: Codable {
     var savedAt: Date
     var rows: [AttRow]
     var sessions: [Session]
+    var student: String?
 
     var ageHours: Double { Date().timeIntervalSince(savedAt) / 3600 }
 

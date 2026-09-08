@@ -36,11 +36,11 @@ final class Portal: NSObject, ObservableObject {
     }()
 
     private var pollTask: Task<Void, Never>?
-    private var onDone: (([AttRow], [Session]) -> Void)?
+    private var onDone: (([AttRow], [Session], String?) -> Void)?
 
     // MARK: - Entry point
 
-    func begin(onDone: @escaping ([AttRow], [Session]) -> Void) {
+    func begin(onDone: @escaping ([AttRow], [Session], String?) -> Void) {
         self.onDone = onDone
         status = "Log in and solve the captcha. Wait for the dashboard to appear."
         busy = true
@@ -89,6 +89,7 @@ final class Portal: NSObject, ObservableObject {
                 }
 
                 let (rows, sessions, cardFound) = await self.readOnce()
+                if self.student == nil { self.student = await self.readStudent() }
 
                 let signature = rows.map { "\($0.key):\($0.attended)/\($0.total)" }.joined(separator: ",")
                 stableReads = (!rows.isEmpty && signature == lastSignature) ? stableReads + 1 : 0
@@ -112,13 +113,29 @@ final class Portal: NSObject, ObservableObject {
         }
     }
 
+    private(set) var student: String?
+
+    private struct NamePayload: Decodable {
+        let ok: Bool
+        let name: String?
+    }
+
+    private func readStudent() async -> String? {
+        guard let raw = ((try? await eval(Scrapers.student)) ?? nil) as? String,
+            let data = raw.data(using: .utf8),
+            let p = try? JSONDecoder().decode(NamePayload.self, from: data),
+            p.ok
+        else { return nil }
+        return p.name
+    }
+
     private func finish(rows: [AttRow], sessions: [Session]) {
         pollTask?.cancel()
         pollTask = nil
         showingLogin = false
         busy = false
         status = nil
-        onDone?(rows, sessions)
+        onDone?(rows, sessions, student)
     }
 
     // MARK: - Reading

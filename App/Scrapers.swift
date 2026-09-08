@@ -557,21 +557,36 @@ enum Scrapers {
     /// nothing matches, the diagnostic prints the real field paths and a
     /// per-reason skip count, so a mismatch names itself instead of failing
     /// silently.
+    /// Builds the week from the timetable API payload the page already
+    /// fetched, rather than from rendered HTML.
+    ///
+    /// The scheduler requests `POST /apigateway/api/timetable`, gets a ~1.1MB
+    /// JSON array back with a 200, and then renders nothing - the DOM scrape
+    /// was reading a table that was never going to fill in. The spy stashes
+    /// that array on `window.__ttData`; this turns it into sessions.
+    ///
+    /// The payload's real shape, confirmed on device:
+    ///
+    ///     SlotDate            "2026-Aug-03"     (not ISO - month is a name)
+    ///     SlotStartTime       "12:00 PM"        (not 24h)
+    ///     SlotEndTime         "12:55 PM"
+    ///     ModuleList[0]       { ModuleName, ModuleCode, ModuleId }
+    ///     FloorPlanDetails    { VenueName, VenueCategory, MeetingLink, ... }
+    ///
+    /// A looser field-matching pass runs for any entry the direct read can't
+    /// handle, and when nothing parses the diagnostic prints the actual field
+    /// paths so a format change names itself.
     static let weekApi = #"""
 (function () {
   var D = window.__ttData;
   if (!D) {
     return JSON.stringify({
-      ok: false,
-      sessions: [],
+      ok: false, sessions: [],
       diag: 'api=none' + (window.__ttErr ? (' parseErr=' + window.__ttErr) : '')
     });
   }
 
-  var arr = D;
-  if (!Array.isArray(arr)) {
-    arr = D.Items || D.Item || D.Data || D.data || D.Result || null;
-  }
+  var arr = Array.isArray(D) ? D : (D.Items || D.Item || D.Data || D.data || D.Result || null);
   if (!Array.isArray(arr)) {
     return JSON.stringify({ ok: false, sessions: [], diag: 'api=not-array keys=' + Object.keys(D).slice(0, 12).join(',') });
   }
@@ -579,14 +594,55 @@ enum Scrapers {
   var pad = function (n) { return n < 10 ? '0' + n : String(n); };
   var clean = function (t) { return String(t == null ? '' : t).replace(/\s+/g, ' ').trim(); };
 
-  var ISO = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?/;
-  var HHMM = /^(\d{1,2}):(\d{2})(?::\d{2})?$/;
-  // Times are read out of the string directly rather than through Date(),
-  // which would shift them by the device's timezone offset.
-  var ampm = function (h, m) {
-    var hh = h % 12; if (hh === 0) hh = 12;
-    return pad(hh) + ':' + pad(m) + ' ' + (h < 12 ? 'AM' : 'PM');
+  var MON = {
+    jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
+    jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12
   };
+
+  // Case-insensitive field lookup, because the payload mixes conventions
+  // ("DayofWeekDetails" next to "DayOfWeekName").
+  function get(o, name) {
+    if (!o || typeof o !== 'object') return null;
+    for (var k in o) {
+      if (Object.prototype.hasOwnProperty.call(o, k) && k.toLowerCase() === name) return o[k];
+    }
+    return null;
+  }
+
+  // "2026-Aug-03" is what this portal sends. ISO and "03-Aug-2026" are
+  // accepted too so a format change doesn't silently zero everything out.
+  function normDate(v) {
+    if (typeof v !== 'string') return null;
+    var t = clean(v);
+    var m = t.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return m[1] + '-' + m[2] + '-' + m[3];
+    m = t.match(/^(\d{4})[-\/\s]([A-Za-z]{3,9})[-\/\s](\d{1,2})/);
+    if (m) {
+      var mo1 = MON[m[2].slice(0, 3).toLowerCase()];
+      if (mo1) return m[1] + '-' + pad(mo1) + '-' + pad(+m[3]);
+    }
+    m = t.match(/^(\d{1,2})[-\/\s]([A-Za-z]{3,9})[-\/\s](\d{4})/);
+    if (m) {
+      var mo2 = MON[m[2].slice(0, 3).toLowerCase()];
+      if (mo2) return m[3] + '-' + pad(mo2) + '-' + pad(+m[1]);
+    }
+    return null;
+  }
+
+  // "12:00 PM" is already the shape the app parses, so it passes through.
+  // A bare 24h "13:00" is converted rather than rejected.
+  function normTime(v) {
+    if (typeof v !== 'string') return null;
+    var t = clean(v).toUpperCase().replace(/\./g, '');
+    var m = t.match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*([AP])M?$/);
+    if (m) return pad(+m[1]) + ':' + m[2] + ' ' + m[3] + 'M';
+    m = t.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+    if (m) {
+      var h = +m[1], hh = h % 12; if (hh === 0) hh = 12;
+      return pad(hh) + ':' + m[2] + ' ' + (h < 12 ? 'AM' : 'PM');
+    }
+    return null;
+  }
 
   // Only the near future is worth caching; the payload covers the whole term.
   var now = new Date();
@@ -594,6 +650,46 @@ enum Scrapers {
   var horizon = new Date(now.getTime() + 14 * 86400000);
   var maxIso = horizon.getFullYear() + '-' + pad(horizon.getMonth() + 1) + '-' + pad(horizon.getDate());
 
+  var VIRTUAL = /virtual|online|teams|zoom|webex|meet/i;
+
+  // The shape this portal actually sends, read directly:
+  //   SlotDate "2026-Aug-03", SlotStartTime/SlotEndTime "12:00 PM",
+  //   ModuleList[0].ModuleName, FloorPlanDetails.VenueName/VenueCategory,
+  //   FloorPlanDetails.MeetingLink ("" when it is a physical room).
+  function direct(it) {
+    var date = normDate(get(it, 'slotdate') || get(it, 'date') || get(it, 'classdate'));
+    var st = normTime(get(it, 'slotstarttime') || get(it, 'starttime') || get(it, 'fromtime'));
+    var en = normTime(get(it, 'slotendtime') || get(it, 'endtime') || get(it, 'totime'));
+    if (!date || !st) return null;
+
+    var mods = get(it, 'modulelist') || get(it, 'modules') || null;
+    var mod = (Array.isArray(mods) && mods.length) ? mods[0] : (get(it, 'moduledetails') || {});
+    var subject = get(mod, 'modulename') || get(mod, 'name')
+      || get(it, 'modulename') || get(it, 'coursename') || get(it, 'subjectname');
+    if (!subject) return null;
+
+    var fp = get(it, 'floorplandetails') || {};
+    var venue = get(fp, 'venuename') || get(fp, 'venuecode') || get(it, 'venuename');
+    var cat = get(fp, 'venuecategory') || get(fp, 'venuecategorycode') || '';
+    var rawLink = get(fp, 'meetinglink') || get(it, 'meetinglink') || '';
+    var link = /^https?:\/\//i.test(clean(rawLink)) ? clean(rawLink) : null;
+
+    var virtual = VIRTUAL.test(String(cat)) || VIRTUAL.test(String(venue || ''));
+    return {
+      date: date,
+      subject: clean(subject),
+      start: st,
+      end: en || st,
+      room: virtual ? null : (venue ? clean(String(venue)) : null),
+      online: virtual,
+      // Hybrid rooms have both a room and a link; the UI offers Join whenever
+      // a link exists, so the distinction is only cosmetic.
+      mode: virtual ? 'virtual' : (link ? 'hybrid' : 'class'),
+      link: link
+    };
+  }
+
+  // --- generic fallback, in case the field names move -------------------
   function flat(o, out, path, depth) {
     if (o == null || depth > 3) return;
     if (typeof o !== 'object') { out.push([path, o]); return; }
@@ -607,122 +703,67 @@ enum Scrapers {
     }
   }
 
-  // This portal calls a subject a "module" - the attendance endpoint keys off
-  // ModuleId - so module/course/subject/paper are all treated as the subject,
-  // and anything on that list is checked BEFORE the deny-list, otherwise a
-  // path like ProgramCourseDetails.CourseName gets thrown out for saying
-  // "program".
   var SUBJECTISH = /module|course|subject|paper/i;
-  // Room, teacher and cohort text is never the subject, and cohort codes are
-  // longer than subject names so they win any "pick the longest" contest.
-  var NOT_SUBJECT = /venue|faculty|teacher|employee|grade|batch|cohort|section|room|floor|building|block|campus|event|slot|status|program|school|department/i;
-  // Codes and ids are not display names.
+  var NOT_SUBJECT = /venue|faculty|teacher|employee|grade|batch|cohort|section|room|floor|building|block|campus|event|slot|status|program|school|department|center|centre|day/i;
   var NOT_NAME = /code|id$|family|type|category|abbr|short/i;
 
-  function pick(pairs) {
-    var byDate = [], times = [], link = null, venue = null, category = null;
-    var subj = [null, null, null, null];
+  function loose(it) {
+    var pairs = [];
+    flat(it, pairs, '', 0);
+    var dates = [], starts = [], ends = [], subj = [null, null], venue = null, cat = null, link = null;
 
     for (var i = 0; i < pairs.length; i++) {
-      var path = pairs[i][0], v = pairs[i][1];
+      var lower = pairs[i][0].toLowerCase(), v = pairs[i][1];
       if (typeof v !== 'string') continue;
-      var lower = path.toLowerCase();
       var key = lower.split('.').pop().replace(/\[\]/g, '');
 
-      if (ISO.test(v)) { byDate.push([lower, v]); continue; }
-      if (HHMM.test(v)) { times.push([lower, v]); continue; }
       if (/^https?:\/\//i.test(v)) { if (!link) link = v; continue; }
-
-      // Venue first: room numbers like "11114" carry no letters and would be
-      // thrown away by the letters test below.
       if (key === 'venuename' || key === 'venuecode') { if (!venue) venue = v; continue; }
-      if (key.indexOf('venuecategory') === 0) { if (!category) category = v; continue; }
+      if (key.indexOf('venuecategory') === 0) { if (!cat) cat = v; continue; }
 
-      if (!/[A-Za-z]{3,}/.test(v)) continue;
-
-      if (SUBJECTISH.test(lower)) {
-        if (!NOT_NAME.test(key)) {
-          if (/^(module|course|subject|paper)(name|title|description)$/.test(key)) subj[0] = subj[0] || v;
-          else if (/name|title|description/.test(key)) subj[1] = subj[1] || v;
-          else if (key === 'name') subj[2] = subj[2] || v;
-        }
+      var nd = normDate(v);
+      if (nd) { dates.push(nd); continue; }
+      var nt = normTime(v);
+      if (nt) {
+        if (/start|from|begin/.test(lower)) starts.push(nt);
+        else if (/end|finish/.test(lower)) ends.push(nt);
         continue;
       }
+      if (!/[A-Za-z]{3,}/.test(v)) continue;
 
+      if (SUBJECTISH.test(lower) && !NOT_NAME.test(key)) {
+        if (/name|title|description/.test(key)) subj[0] = subj[0] || v;
+        continue;
+      }
       if (NOT_SUBJECT.test(lower)) continue;
-      if (key === 'name' || key === 'title') subj[3] = subj[3] || v;
+      if (key === 'name' || key === 'title') subj[1] = subj[1] || v;
     }
 
-    var subject = subj[0] || subj[1] || subj[2] || subj[3];
-
-    // Prefer keys that say so; otherwise take the two earliest timestamps.
-    var st = null, en = null;
-    for (var j = 0; j < byDate.length; j++) {
-      var p2 = byDate[j][0];
-      if (!st && /start|from|begin/.test(p2)) st = byDate[j][1];
-      if (!en && /end|finish|\bto\b/.test(p2)) en = byDate[j][1];
-    }
-    if (!st || !en) {
-      var sorted = byDate.map(function (x) { return x[1]; }).sort();
-      if (!st) st = sorted[0] || null;
-      if (!en) en = sorted.length > 1 ? sorted[sorted.length - 1] : null;
-    }
-
-    // Some payloads carry the date and the clock time in separate fields.
-    var stT = null, enT = null;
-    for (var q = 0; q < times.length; q++) {
-      var pk = times[q][0];
-      if (!stT && /start|from|begin/.test(pk)) stT = times[q][1];
-      if (!enT && /end|finish|\bto\b/.test(pk)) enT = times[q][1];
-    }
-
+    var subject = subj[0] || subj[1];
+    if (!subject || !dates.length || !starts.length) return null;
+    var virtual = VIRTUAL.test(cat || '') || VIRTUAL.test(venue || '');
     return {
-      subject: subject, st: st, en: en, stT: stT, enT: enT,
-      link: link, venue: venue, category: category
+      date: dates.sort()[0],
+      subject: clean(subject),
+      start: starts[0],
+      end: ends.length ? ends[0] : starts[0],
+      room: virtual ? null : (venue ? clean(venue) : null),
+      online: virtual,
+      mode: virtual ? 'virtual' : (link ? 'hybrid' : 'class'),
+      link: link
     };
   }
 
-  var VIRTUAL = /virtual|online|teams|zoom|webex|meet/i;
   var out = [];
-  var skipped = { nosubject: 0, nodate: 0, notime: 0, range: 0 };
+  var skipped = { shape: 0, range: 0 };
+  var usedLoose = 0;
 
   for (var i = 0; i < arr.length; i++) {
-    var pairs = [];
-    flat(arr[i], pairs, '', 0);
-    var g = pick(pairs);
-
-    if (!g.subject) { skipped.nosubject++; continue; }
-    if (!g.st) { skipped.nodate++; continue; }
-
-    var ms = g.st.match(ISO);
-    if (!ms) { skipped.nodate++; continue; }
-    var date = ms[1] + '-' + ms[2] + '-' + ms[3];
-    if (date < todayIso || date > maxIso) { skipped.range++; continue; }
-
-    // Clock time from the timestamp if it has one, else from a separate field.
-    var sh = null, sm = null;
-    if (ms[4] != null && !(ms[4] === '00' && ms[5] === '00' && g.stT)) { sh = +ms[4]; sm = +ms[5]; }
-    else if (g.stT) { var mt = g.stT.match(HHMM); if (mt) { sh = +mt[1]; sm = +mt[2]; } }
-    if (sh == null) { skipped.notime++; continue; }
-
-    var eh = null, em = null;
-    if (g.en) {
-      var me = g.en.match(ISO);
-      if (me && me[4] != null && !(me[4] === '00' && me[5] === '00' && g.enT)) { eh = +me[4]; em = +me[5]; }
-    }
-    if (eh == null && g.enT) { var mt2 = g.enT.match(HHMM); if (mt2) { eh = +mt2[1]; em = +mt2[2]; } }
-
-    var online = VIRTUAL.test(g.category || '') || VIRTUAL.test(g.venue || '');
-    out.push({
-      date: date,
-      subject: clean(g.subject),
-      start: ampm(sh, sm),
-      end: eh == null ? ampm(sh, sm) : ampm(eh, em),
-      room: online ? null : (g.venue ? clean(g.venue) : null),
-      online: online,
-      mode: online ? 'virtual' : 'class',
-      link: g.link
-    });
+    var g = direct(arr[i]);
+    if (!g) { g = loose(arr[i]); if (g) usedLoose++; }
+    if (!g) { skipped.shape++; continue; }
+    if (g.date < todayIso || g.date > maxIso) { skipped.range++; continue; }
+    out.push(g);
   }
 
   var seen = {}, uniq = [];
@@ -733,7 +774,11 @@ enum Scrapers {
     uniq.push(out[k]);
   }
   uniq.sort(function (a, b) {
-    return a.date === b.date ? (a.start < b.start ? -1 : 1) : (a.date < b.date ? -1 : 1);
+    if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+    var am = a.start.match(/^(\d+):(\d+) ([AP])/), bm = b.start.match(/^(\d+):(\d+) ([AP])/);
+    var av = ((+am[1]) % 12 + (am[3] === 'P' ? 12 : 0)) * 60 + (+am[2]);
+    var bv = ((+bm[1]) % 12 + (bm[3] === 'P' ? 12 : 0)) * 60 + (+bm[2]);
+    return av - bv;
   });
 
   var days = {};
@@ -741,20 +786,18 @@ enum Scrapers {
 
   var diag = 'api items=' + arr.length + ' parsed=' + uniq.length
     + ' days=' + Object.keys(days).length
-    + ' skip(' + skipped.nosubject + 'subj/' + skipped.nodate + 'date/'
-    + skipped.notime + 'time/' + skipped.range + 'range)';
+    + ' skip(' + skipped.shape + 'shape/' + skipped.range + 'range)'
+    + (usedLoose ? ' loose=' + usedLoose : '');
   if (uniq.length) {
     diag += ' first=' + uniq[0].date + ' ' + uniq[0].start + ' ' + uniq[0].subject.slice(0, 30);
   } else if (arr.length) {
-    // No shape guess survived: print the real field paths so this can be
-    // finished exactly rather than guessed at again.
     var pairs0 = [];
     flat(arr[0], pairs0, '', 0);
     diag += ' | ' + pairs0.map(function (x) {
       var v = x[1];
       if (typeof v === 'string') v = v.slice(0, 18);
       return x[0] + '=' + v;
-    }).slice(0, 34).join(' ');
+    }).slice(0, 24).join(' ');
   }
 
   return JSON.stringify({ ok: uniq.length > 0, sessions: uniq, diag: diag });

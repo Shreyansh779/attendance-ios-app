@@ -81,10 +81,13 @@ struct Session: Codable, Identifiable, Hashable {
     let room: String?
     let online: Bool
     let mode: String
+    /// ISO yyyy-MM-dd. Only the weekly scrape sets this; the dashboard card is
+    /// always today.
+    let date: String?
 
-    var id: String { start + subject }
+    var id: String { (date ?? "") + start + subject }
 
-    enum CodingKeys: String, CodingKey { case subject, start, end, room, online, mode }
+    enum CodingKeys: String, CodingKey { case subject, start, end, room, online, mode, date }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -94,15 +97,20 @@ struct Session: Codable, Identifiable, Hashable {
         room = try? c.decodeIfPresent(String.self, forKey: .room)
         online = (try? c.decode(Bool.self, forKey: .online)) ?? false
         mode = (try? c.decode(String.self, forKey: .mode)) ?? "class"
+        date = try? c.decodeIfPresent(String.self, forKey: .date)
     }
 
-    init(subject: String, start: String, end: String, room: String?, online: Bool, mode: String) {
+    init(
+        subject: String, start: String, end: String,
+        room: String?, online: Bool, mode: String, date: String? = nil
+    ) {
         self.subject = subject
         self.start = start
         self.end = end
         self.room = room
         self.online = online
         self.mode = mode
+        self.date = date
     }
 }
 
@@ -128,6 +136,39 @@ func hhmm(_ m: Int) -> String {
 }
 
 func ampm(_ m: Int) -> String { m < 720 ? "am" : "pm" }
+
+// MARK: - Local marks
+
+/// One class ticked off by hand, so the portal does not have to be refreshed
+/// just to see the effect of attending.
+struct Mark: Codable, Hashable {
+    var subject: String
+    var attended: Bool
+}
+
+func markKey(_ k: Klass, on date: String) -> String {
+    "\(date)|\(k.session.start)|\(k.subject)"
+}
+
+/// Folds hand-marked classes into the scraped totals. Each mark adds one held
+/// class, and an attended one also adds to the numerator.
+func applyMarks(_ rows: [AttRow], _ marks: [String: Mark]) -> [AttRow] {
+    guard !marks.isEmpty else { return rows }
+    var extra: [String: (Int, Int)] = [:]
+
+    for mark in marks.values {
+        guard let row = matchSubject(mark.subject, in: rows) else { continue }
+        var e = extra[row.key] ?? (0, 0)
+        e.0 += mark.attended ? 1 : 0
+        e.1 += 1
+        extra[row.key] = e
+    }
+
+    return rows.map { r in
+        guard let e = extra[r.key] else { return r }
+        return AttRow(key: r.key, attended: r.attended + e.0, total: r.total + e.1)
+    }
+}
 
 // MARK: - A shaped day
 

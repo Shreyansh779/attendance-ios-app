@@ -327,6 +327,126 @@ enum Scrapers {
 })()
 """#
 
+    /// The whole visible week off the curriculum-scheduling page, in Agenda
+    /// mode. That view only ever shows six days from today, which is fine: rows
+    /// are keyed by date and merged into the cache, so repeated refreshes
+    /// accumulate rather than overwrite.
+    static let week = #"""
+(function () {
+  var clean = function (t) { return String(t == null ? '' : t).replace(/\s+/g, ' ').trim(); };
+  var TIME = /(\d{1,2}):(\d{2})\s*[-\u2013\u2014]\s*(\d{1,2}):(\d{2})/;
+  var MON = { jan:1, feb:2, mar:3, apr:4, may:5, jun:6, jul:7, aug:8, sep:9, oct:10, nov:11, dec:12 };
+  var DAY = /(\d{1,2})\s*(Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day\s*([A-Za-z]{3,9})\.?,?\s*(\d{4})/;
+
+  // The agenda prints 24h times; normalise to the same "09:00 AM" shape the
+  // dashboard card uses so downstream parsing stays identical.
+  var ampm = function (h, m) {
+    var suffix = h < 12 ? 'AM' : 'PM';
+    var hh = h % 12; if (hh === 0) hh = 12;
+    return (hh < 10 ? '0' + hh : hh) + ':' + m + ' ' + suffix;
+  };
+
+  var pad = function (n) { return n < 10 ? '0' + n : String(n); };
+
+  var iso = function (d, monName, y) {
+    var mo = MON[String(monName).slice(0, 3).toLowerCase()];
+    if (!mo) return null;
+    // Pad the number, not the string: "08" would otherwise become "008".
+    return y + '-' + pad(mo) + '-' + pad(+d);
+  };
+
+  var isNoise = function (t) {
+    if (!t) return true;
+    if (TIME.test(t)) return true;
+    if (DAY.test(t)) return true;
+    if (/^\d{1,2}$/.test(t)) return true;
+    if (/^(date|time|room|course|subject|faculty|type|venue|session|day|sept?|[A-Z][a-z]+day)$/i.test(t)) return true;
+    if (/^[A-Za-z]{3,9}\.?\s+\d{4}$/.test(t)) return true;   // "Sept 2026"
+    return false;
+  };
+
+  var out = [];
+  var current = null;
+  var sample = null;
+  var rows = document.querySelectorAll('tr');
+
+  for (var i = 0; i < rows.length; i++) {
+    var whole = clean(rows[i].textContent);
+
+    // A date cell carries a rowspan, so it appears on the first row of its day
+    // and the rest of that day's rows inherit it.
+    var dm = whole.match(DAY);
+    if (dm) {
+      var d = iso(dm[1], dm[3], dm[4]);
+      if (d) current = d;
+    }
+
+    var cells = Array.prototype.slice.call(rows[i].querySelectorAll('td')).map(function (c) {
+      return clean(c.innerText != null ? c.innerText : c.textContent);
+    });
+    if (!cells.length) continue;
+
+    var timeCell = null;
+    for (var c = 0; c < cells.length; c++) {
+      if (TIME.test(cells[c])) { timeCell = cells[c]; break; }
+    }
+    if (!timeCell || !current) continue;
+
+    var tm = timeCell.match(TIME);
+    var start = ampm(+tm[1], tm[2]);
+    var end = ampm(+tm[3], tm[4]);
+
+    // Free periods have a time but no subject, so they drop out here.
+    var subject = null;
+    for (var s = 0; s < cells.length; s++) {
+      var t = cells[s];
+      if (isNoise(t) || !/[A-Za-z]{4,}/.test(t)) continue;
+      if (/online classroom/i.test(t)) continue;
+      if (!subject || t.length > subject.length) subject = t;
+    }
+    if (!subject) continue;
+
+    var online = /online\s*class/i.test(whole);
+    var room = null;
+    var rm = whole.match(/room\s*:?\s*([A-Za-z0-9()\-\/]+)/i);
+    if (rm) room = rm[1];
+    if (!room) {
+      for (var r = 0; r < cells.length; r++) {
+        if (/^\d{3,6}(\(\d{3,6}\))?$/.test(cells[r])) { room = cells[r]; break; }
+      }
+    }
+    if (room) {
+      var dup = room.match(/^(.+?)\s*\(\s*\1\s*\)$/);
+      if (dup) room = dup[1];
+    }
+
+    if (!sample) sample = cells.slice(0, 8);
+
+    out.push({
+      date: current,
+      subject: subject,
+      start: start,
+      end: end,
+      room: room,
+      online: !!online,
+      mode: online ? 'virtual' : 'class'
+    });
+  }
+
+  // Same slot can appear twice if the table repeats headers.
+  var seen = {};
+  var uniq = [];
+  for (var k = 0; k < out.length; k++) {
+    var key = out[k].date + '|' + out[k].start + '|' + out[k].subject;
+    if (seen[key]) continue;
+    seen[key] = 1;
+    uniq.push(out[k]);
+  }
+
+  return JSON.stringify({ ok: uniq.length > 0, sessions: uniq, sample: sample });
+})()
+"""#
+
     /// Cheap check for whether the router has landed on the dashboard yet.
     static let route = "location.pathname"
 }

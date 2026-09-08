@@ -1,9 +1,0 @@
-{
-  "appId": "dev.today.upes",
-  "appName": "Today",
-  "webDir": "www",
-  "ios": {
-    "contentInset": "always",
-    "limitsNavigationsToAppBoundDomains": false
-  }
-}

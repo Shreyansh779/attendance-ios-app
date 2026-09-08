@@ -12,6 +12,8 @@ struct Snapshot: Codable {
     var week: [String: [Session]] = [:]
     /// Hand-marked classes, cleared whenever a real refresh lands.
     var marks: [String: Mark] = [:]
+    /// What the weekly scrape saw, kept only so a failure is diagnosable.
+    var weekDiag: String?
 
     /// Decoded leniently: a cache written before week and marks existed should
     /// still load rather than being thrown away.
@@ -23,11 +25,13 @@ struct Snapshot: Codable {
         student = try? c.decodeIfPresent(String.self, forKey: .student)
         week = (try? c.decode([String: [Session]].self, forKey: .week)) ?? [:]
         marks = (try? c.decode([String: Mark].self, forKey: .marks)) ?? [:]
+        weekDiag = try? c.decodeIfPresent(String.self, forKey: .weekDiag)
     }
 
     init(
         savedAt: Date, rows: [AttRow], sessions: [Session],
-        student: String?, week: [String: [Session]] = [:], marks: [String: Mark] = [:]
+        student: String?, week: [String: [Session]] = [:],
+        marks: [String: Mark] = [:], weekDiag: String? = nil
     ) {
         self.savedAt = savedAt
         self.rows = rows
@@ -35,6 +39,7 @@ struct Snapshot: Codable {
         self.student = student
         self.week = week
         self.marks = marks
+        self.weekDiag = weekDiag
     }
 
     static var isoDay: DateFormatter {

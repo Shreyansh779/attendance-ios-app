@@ -57,6 +57,16 @@ struct RootView: View {
             .padding(.top, 22)
             .padding(.bottom, 20)
 
+            // Kept in the hierarchy at 1pt: a detached WKWebView gets throttled,
+            // and the scrape needs its timers to keep firing.
+            if portal.hostingHidden {
+                PortalWebView(webView: portal.webView)
+                    .frame(width: 1, height: 1)
+                    .opacity(0.02)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+
             if menuOpen {
                 Color(0x090B0F).opacity(0.62)
                     .ignoresSafeArea()
@@ -71,6 +81,7 @@ struct RootView: View {
                     summary: summary,
                     snapshot: snapshot,
                     student: snapshot?.student,
+                    weekDays: snapshot?.week.count ?? 0,
                     onRefresh: refresh,
                     close: { withAnimation(.easeOut(duration: 0.24)) { menuOpen = false } }
                 )
@@ -191,7 +202,7 @@ struct RootView: View {
 
     private func refresh() {
         withAnimation(.easeOut(duration: 0.2)) { menuOpen = false }
-        portal.begin(knownStudent: snapshot?.student) { rows, sessions, student, week in
+        portal.begin(knownStudent: snapshot?.student) { rows, sessions, student, week, diag in
             // Merge rather than replace: the agenda only shows six days, so old
             // days stay cached until they are superseded.
             var merged = snapshot?.week ?? [:]
@@ -205,7 +216,8 @@ struct RootView: View {
                 week: merged,
                 // A fresh read from the portal is authoritative, so hand marks
                 // are spent.
-                marks: [:]
+                marks: [:],
+                weekDiag: diag
             )
             Store.save(snap)
             snapshot = snap

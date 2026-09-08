@@ -19,6 +19,7 @@ struct Drawer: View {
     let summary: Summary
     let snapshot: Snapshot?
     let student: String?
+    let weekDays: Int
     let onRefresh: () -> Void
     let close: () -> Void
 
@@ -117,6 +118,16 @@ struct Drawer: View {
                 .fixedSize(horizontal: false, vertical: true)
                 if let s = snapshot {
                     Text(s.ageText).font(.r(12.5, .medium)).foregroundStyle(Color.ink4)
+                }
+                // Only shown when the weekly timetable did not come through, so
+                // the failure is diagnosable instead of silent.
+                if weekDays <= 1, let d = snapshot?.weekDiag {
+                    Text("week: \(d)")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(Color.ink4)
+                        .textSelection(.enabled)
+                        .lineLimit(6)
+                        .padding(.top, 6)
                 }
             }
         }

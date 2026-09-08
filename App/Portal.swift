@@ -22,6 +22,9 @@ final class Portal: NSObject, ObservableObject {
     )!
 
     @Published var showingLogin = false
+    /// Once the dashboard is reached the login sheet closes and the webview is
+    /// re-parented off-screen, so reading continues without holding the UI.
+    @Published var hostingHidden = false
     @Published var status: String?
     @Published var busy = false
 
@@ -42,11 +45,14 @@ final class Portal: NSObject, ObservableObject {
     }()
 
     private var pollTask: Task<Void, Never>?
-    private var onDone: (([AttRow], [Session], String?, [String: [Session]]) -> Void)?
+    private var onDone: (([AttRow], [Session], String?, [String: [Session]], String?) -> Void)?
 
     // MARK: - Entry point
 
-    func begin(knownStudent: String?, onDone: @escaping ([AttRow], [Session], String?, [String: [Session]]) -> Void) {
+    func begin(
+        knownStudent: String?,
+        onDone: @escaping ([AttRow], [Session], String?, [String: [Session]], String?) -> Void
+    ) {
         self.onDone = onDone
         self.student = knownStudent
         status = "Log in and solve the captcha. Wait for the dashboard to appear."
@@ -60,6 +66,7 @@ final class Portal: NSObject, ObservableObject {
         pollTask?.cancel()
         pollTask = nil
         showingLogin = false
+        hostingHidden = false
         busy = false
     }
 
@@ -92,7 +99,11 @@ final class Portal: NSObject, ObservableObject {
 
                 if !sawDashboard {
                     sawDashboard = true
-                    self.status = "Dashboard reached. Reading your classes and attendance."
+                    // Login is done, so get out of the way and keep reading in
+                    // the background.
+                    self.showingLogin = false
+                    self.hostingHidden = true
+                    self.status = "Signed in. Reading your classes and attendance."
                 }
 
                 let (rows, sessions, cardFound) = await self.readOnce()
@@ -117,14 +128,15 @@ final class Portal: NSObject, ObservableObject {
                     }
 
                     self.status = "Reading this week's timetable."
-                    let week = await self.fetchWeek()
+                    let (week, diag) = await self.fetchWeek()
 
-                    self.finish(rows: rows, sessions: sessions, week: week)
+                    self.finish(rows: rows, sessions: sessions, week: week, diag: diag)
                     return
                 }
             }
 
             self.status = "Gave up waiting for the dashboard. Try again, and make sure it is fully loaded."
+            self.hostingHidden = false
             self.busy = false
         }
     }
@@ -158,38 +170,46 @@ final class Portal: NSObject, ObservableObject {
     private struct WeekPayload: Decodable {
         let ok: Bool
         let sessions: [Session]
+        let diag: String?
     }
 
     /// The agenda page, grouped by date. Failing here is not fatal — the
     /// dashboard card already covers today.
-    private func fetchWeek() async -> [String: [Session]] {
+    private func fetchWeek() async -> ([String: [Session]], String?) {
         webView.load(URLRequest(url: Portal.weekURL))
+        var lastDiag: String?
+
         for _ in 0..<25 {
-            if Task.isCancelled { return [:] }
+            if Task.isCancelled { return ([:], lastDiag) }
             try? await Task.sleep(nanoseconds: 700_000_000)
             guard let raw = ((try? await eval(Scrapers.week)) ?? nil) as? String,
                 let data = raw.data(using: .utf8),
-                let p = try? JSONDecoder().decode(WeekPayload.self, from: data),
-                p.ok
+                let p = try? JSONDecoder().decode(WeekPayload.self, from: data)
             else { continue }
+            lastDiag = p.diag
+            guard p.ok else { continue }
 
             var byDay: [String: [Session]] = [:]
             for s in p.sessions {
                 guard let d = s.date else { continue }
                 byDay[d, default: []].append(s)
             }
-            if !byDay.isEmpty { return byDay }
+            if !byDay.isEmpty { return (byDay, p.diag) }
         }
-        return [:]
+        return ([:], lastDiag)
     }
 
-    private func finish(rows: [AttRow], sessions: [Session], week: [String: [Session]]) {
+    private func finish(
+        rows: [AttRow], sessions: [Session],
+        week: [String: [Session]], diag: String?
+    ) {
         pollTask?.cancel()
         pollTask = nil
         showingLogin = false
+        hostingHidden = false
         busy = false
         status = nil
-        onDone?(rows, sessions, student, week)
+        onDone?(rows, sessions, student, week, diag)
     }
 
     // MARK: - Reading

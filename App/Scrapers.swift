@@ -291,6 +291,32 @@ enum Scrapers {
 })()
 """#
 
+    /// The student's own name, for the header. Tries a greeting first, then a
+    /// title-case name in the nav area. Returns nothing rather than guessing
+    /// wrong, and the header falls back to "Today".
+    static let student = #"""
+(function () {
+  var clean = function (t) { return String(t == null ? '' : t).replace(/\s+/g, ' ').trim(); };
+  var best = null;
+
+  var body = document.body ? (document.body.innerText || document.body.textContent || '') : '';
+  var m = body.match(/(?:welcome|hello|hi)[,!\s]+([A-Z][a-z']+(?:\s+[A-Z][a-z']+){0,3})/);
+  if (m) best = m[1];
+
+  if (!best) {
+    var sel = 'header *, nav *, [class*="profile"] *, [class*="user"] *, [class*="name"], [class*="student"] *';
+    var els = document.querySelectorAll(sel);
+    for (var i = 0; i < els.length; i++) {
+      if (els[i].children.length) continue;
+      var t = clean(els[i].textContent);
+      if (t.length > 40) continue;
+      if (/^[A-Z][a-z']+(?:\s+[A-Z][a-z']+){1,3}$/.test(t)) { best = t; break; }
+    }
+  }
+  return JSON.stringify({ ok: !!best, name: best });
+})()
+"""#
+
     /// Cheap check for whether the router has landed on the dashboard yet.
     static let route = "location.pathname"
 }

@@ -51,10 +51,6 @@ struct RootView: View {
                 PortalWebView(webView: portal.webView)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
-
-                PortalWebView(webView: portal.weekWebView)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
             }
 
             Color.bg.ignoresSafeArea()

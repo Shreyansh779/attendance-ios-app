@@ -632,7 +632,7 @@ enum Scrapers {
     for (var j = 0; j < byDate.length; j++) {
       var p2 = byDate[j][0];
       if (!st && /start|from|begin/.test(p2)) st = byDate[j][1];
-      if (!en && /end|finish|to/.test(p2)) en = byDate[j][1];
+      if (!en && /end|finish|\bto\b/.test(p2)) en = byDate[j][1];
     }
     if (!st || !en) {
       var sorted = byDate.map(function (x) { return x[1]; }).sort();

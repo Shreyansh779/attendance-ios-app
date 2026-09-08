@@ -37,6 +37,12 @@ final class Portal: NSObject, ObservableObject {
         let cfg = WKWebViewConfiguration()
         cfg.defaultWebpagePreferences = prefs
         cfg.websiteDataStore = .default()
+        // The portal has an autoplaying <video> somewhere on the login page.
+        // Without this it takes over fullscreen the moment the page loads.
+        // Keeping it inline and requiring a tap means it just never plays.
+        cfg.allowsInlineMediaPlayback = true
+        cfg.mediaTypesRequiringUserActionForPlayback = .all
+        cfg.allowsPictureInPictureMediaPlayback = false
 
         let wv = WKWebView(frame: .zero, configuration: cfg)
         wv.navigationDelegate = self
@@ -73,21 +79,27 @@ final class Portal: NSObject, ObservableObject {
     // MARK: - Polling
 
     /// Waits for the router to reach the dashboard, then reads until the row set
-    /// stops changing. Driven by DOM settle events rather than a fixed-interval
-    /// poll: reacts the instant Angular/Kendo stop mutating instead of up to
-    /// 500ms late every tick, and skips round trips while nothing changed.
+    /// stops changing. Plain fixed-interval poll, native Task.sleep — the
+    /// settle-on-mutation approach that lived here briefly depended on JS
+    /// setTimeout/MutationObserver, which WebKit throttles into never-firing
+    /// once the webview is pinned to a 1x1pt frame (see hostingHidden). Native
+    /// sleep doesn't care about webview size, so this is the correct
+    /// primitive for the hidden-webview phase. 300ms instead of the old
+    /// 500ms for a bit more responsiveness without spamming eval calls.
     private func startPolling() {
         pollTask?.cancel()
         pollTask = Task { [weak self] in
             guard let self else { return }
 
-            let deadline = Date().addingTimeInterval(90)  // same ceiling as before
+            let deadline = Date().addingTimeInterval(90)
             var lastSignature = ""
             var stableReads = 0
             var sawDashboard = false
             var toldStillLoggingIn = false
 
             while Date() < deadline {
+                if Task.isCancelled { return }
+                try? await Task.sleep(nanoseconds: 300_000_000)
                 if Task.isCancelled { return }
 
                 let path = (((try? await self.eval(Scrapers.route)) ?? nil) as? String) ?? ""
@@ -96,9 +108,6 @@ final class Portal: NSObject, ObservableObject {
                         toldStillLoggingIn = true
                         self.status = "Still on the login page. Solve the captcha and wait for the dashboard."
                     }
-                    // Short settle wait so this reacts to the redirect fast
-                    // instead of a fixed sleep, but doesn't spin a tight loop.
-                    await self.settle(quietMs: 300, maxMs: 1500)
                     continue
                 }
 
@@ -109,7 +118,6 @@ final class Portal: NSObject, ObservableObject {
                     self.status = "Signed in. Reading your classes and attendance."
                 }
 
-                await self.settle(quietMs: 350, maxMs: 4000)
                 let (rows, sessions, cardFound) = await self.readOnce()
 
                 let signature = rows.map { "\($0.key):\($0.attended)/\($0.total)" }.joined(separator: ",")
@@ -154,10 +162,9 @@ final class Portal: NSObject, ObservableObject {
     /// leave the dashboard by this point: its data is already captured.
     private func fetchStudentName() async -> String? {
         webView.load(URLRequest(url: Portal.profileURL))
-        let deadline = Date().addingTimeInterval(15)
-        while Date() < deadline {
+        for _ in 0..<25 {
             if Task.isCancelled { return nil }
-            await settle(quietMs: 300, maxMs: 3000)
+            try? await Task.sleep(nanoseconds: 500_000_000)
             guard let raw = ((try? await eval(Scrapers.student)) ?? nil) as? String,
                 let data = raw.data(using: .utf8),
                 let p = try? JSONDecoder().decode(NamePayload.self, from: data),
@@ -179,22 +186,19 @@ final class Portal: NSObject, ObservableObject {
     /// The agenda page, grouped by date. Failing here is not fatal — the
     /// dashboard card already covers today.
     ///
-    /// The Kendo scheduler's Agenda view composes its rows asynchronously and,
-    /// for a bare navigation with no user scroll, can render a small first
-    /// batch (or just the header row) before the rest fills in. A single
-    /// settle isn't proof the *content*, not just the header table, is done -
-    /// so this requires two identical non-empty reads in a row, same as the
-    /// dashboard cards.
+    /// The Kendo scheduler's Agenda view composes its rows asynchronously and
+    /// can render just the header table before the actual row content fills
+    /// in. A single non-empty read isn't proof it's done — this requires two
+    /// identical non-empty reads in a row, same as the dashboard cards.
     private func fetchWeek() async -> ([String: [Session]], String?) {
         webView.load(URLRequest(url: Portal.weekURL))
-        let deadline = Date().addingTimeInterval(90)
         var lastDiag: String?
         var lastSignature = ""
         var stableReads = 0
 
-        while Date() < deadline {
+        for _ in 0..<50 {  // 50 * 700ms = 35s
             if Task.isCancelled { return ([:], lastDiag) }
-            await settle(quietMs: 400, maxMs: 5000)
+            try? await Task.sleep(nanoseconds: 700_000_000)
 
             guard let raw = ((try? await eval(Scrapers.week)) ?? nil) as? String,
                 let data = raw.data(using: .utf8),
@@ -217,18 +221,6 @@ final class Portal: NSObject, ObservableObject {
             if !byDay.isEmpty { return (byDay, p.diag) }
         }
         return ([:], lastDiag)
-    }
-
-    /// Runs `Scrapers.settle` and waits for it. Never throws outward: a JS
-    /// error here just means the caller reads immediately, same as before
-    /// this existed.
-    private func settle(quietMs: Int, maxMs: Int) async {
-        _ = try? await webView.callAsyncJavaScript(
-            Scrapers.settle,
-            arguments: ["quietMs": quietMs, "maxMs": maxMs],
-            in: nil,
-            contentWorld: .page
-        )
     }
 
     private func finish(

@@ -53,7 +53,7 @@ jobs:
         if: failure()
         run: |
           echo "--- errors ---"
-          grep -nE "error:|Multiple commands|does not exist" build.log | head -40 || true
+          grep -nE "error:|error |failed|Multiple commands|does not exist|actool" build.log | head -60 || true
           echo "--- tail ---"
           tail -80 build.log || true
 

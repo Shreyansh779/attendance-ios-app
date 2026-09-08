@@ -217,9 +217,6 @@ private struct OwnSlack: View {
 private struct DayStrip: View {
     let day: [Klass]
     @Binding var picked: String?
-    let marks: [String: Mark]
-    let today: String
-    let onMark: (String, String, Bool?) -> Void
     let heroID: String?
 
     var body: some View {

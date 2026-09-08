@@ -126,8 +126,19 @@ struct Drawer: View {
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(Color.ink4)
                         .textSelection(.enabled)
-                        .lineLimit(6)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 6)
+
+                    Button {
+                        UIPasteboard.general.string = d
+                    } label: {
+                        Text("Copy diagnostic")
+                            .font(.r(12, .semibold))
+                            .foregroundStyle(Color.mintHi)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 6)
                 }
             }
         }

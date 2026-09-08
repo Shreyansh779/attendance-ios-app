@@ -294,26 +294,36 @@ enum Scrapers {
     /// The student's own name, for the header. Tries a greeting first, then a
     /// title-case name in the nav area. Returns nothing rather than guessing
     /// wrong, and the header falls back to "Today".
+    /// The name lives on the profile page, not the dashboard, printed as
+    /// "Shreyansh Singhal (590011979)". That parenthesised SAP ID is a far
+    /// stronger anchor than guessing at title-case text in the nav. Only the
+    /// name is kept; the ID is discarded.
     static let student = #"""
 (function () {
   var clean = function (t) { return String(t == null ? '' : t).replace(/\s+/g, ' ').trim(); };
-  var best = null;
-
   var body = document.body ? (document.body.innerText || document.body.textContent || '') : '';
-  var m = body.match(/(?:welcome|hello|hi)[,!\s]+([A-Z][a-z']+(?:\s+[A-Z][a-z']+){0,3})/);
-  if (m) best = m[1];
+  var lines = body.split(/[\r\n]+/);
 
-  if (!best) {
-    var sel = 'header *, nav *, [class*="profile"] *, [class*="user"] *, [class*="name"], [class*="student"] *';
-    var els = document.querySelectorAll(sel);
-    for (var i = 0; i < els.length; i++) {
-      if (els[i].children.length) continue;
-      var t = clean(els[i].textContent);
-      if (t.length > 40) continue;
-      if (/^[A-Z][a-z']+(?:\s+[A-Z][a-z']+){1,3}$/.test(t)) { best = t; break; }
+  for (var i = 0; i < lines.length; i++) {
+    var m = clean(lines[i]).match(/^(.{2,48}?)\s*\(\s*(\d{6,12})\s*\)\s*$/);
+    if (!m) continue;
+    var name = clean(m[1]);
+    if (!/^[A-Za-z][A-Za-z'.\- ]+$/.test(name)) continue;
+    return JSON.stringify({ ok: true, name: name });
+  }
+
+  // Same pattern, but inside a single element rather than on its own line.
+  var els = document.querySelectorAll('h1,h2,h3,h4,h5,b,strong,span,div,p');
+  for (var j = 0; j < els.length; j++) {
+    if (els[j].children.length) continue;
+    var t = clean(els[j].textContent);
+    var n = t.match(/^(.{2,48}?)\s*\(\s*(\d{6,12})\s*\)\s*$/);
+    if (n && /^[A-Za-z][A-Za-z'.\- ]+$/.test(clean(n[1]))) {
+      return JSON.stringify({ ok: true, name: clean(n[1]) });
     }
   }
-  return JSON.stringify({ ok: !!best, name: best });
+
+  return JSON.stringify({ ok: false, name: null });
 })()
 """#
 

@@ -14,6 +14,9 @@ final class Portal: NSObject, ObservableObject {
 
     static let loginURL = URL(string: "https://myupes-beta.upes.ac.in/")!
     static let dashboardMarker = "/connectportal/user/student/home/dashboard"
+    static let profileURL = URL(
+        string: "https://myupes-beta.upes.ac.in/connectportal/user/student/collaboration/studentprofile"
+    )!
 
     @Published var showingLogin = false
     @Published var status: String?
@@ -40,8 +43,9 @@ final class Portal: NSObject, ObservableObject {
 
     // MARK: - Entry point
 
-    func begin(onDone: @escaping ([AttRow], [Session], String?) -> Void) {
+    func begin(knownStudent: String?, onDone: @escaping ([AttRow], [Session], String?) -> Void) {
         self.onDone = onDone
+        self.student = knownStudent
         status = "Log in and solve the captcha. Wait for the dashboard to appear."
         busy = true
         showingLogin = true
@@ -89,7 +93,6 @@ final class Portal: NSObject, ObservableObject {
                 }
 
                 let (rows, sessions, cardFound) = await self.readOnce()
-                if self.student == nil { self.student = await self.readStudent() }
 
                 let signature = rows.map { "\($0.key):\($0.attended)/\($0.total)" }.joined(separator: ",")
                 stableReads = (!rows.isEmpty && signature == lastSignature) ? stableReads + 1 : 0
@@ -103,6 +106,12 @@ final class Portal: NSObject, ObservableObject {
 
                 // Two identical reads in a row means the cards have settled.
                 if !rows.isEmpty && stableReads >= 2 {
+                    // The name is on the profile page, so it is fetched only
+                    // once and only after the dashboard data is safely in hand.
+                    if self.student == nil {
+                        self.status = "Getting your name from your profile."
+                        self.student = await self.fetchStudentName()
+                    }
                     self.finish(rows: rows, sessions: sessions)
                     return
                 }
@@ -113,20 +122,30 @@ final class Portal: NSObject, ObservableObject {
         }
     }
 
-    private(set) var student: String?
+    private var student: String?
 
     private struct NamePayload: Decodable {
         let ok: Bool
         let name: String?
     }
 
-    private func readStudent() async -> String? {
-        guard let raw = ((try? await eval(Scrapers.student)) ?? nil) as? String,
-            let data = raw.data(using: .utf8),
-            let p = try? JSONDecoder().decode(NamePayload.self, from: data),
-            p.ok
-        else { return nil }
-        return p.name
+    /// Navigates to the profile page and waits for the name to appear. Safe to
+    /// leave the dashboard by this point: its data is already captured.
+    private func fetchStudentName() async -> String? {
+        webView.load(URLRequest(url: Portal.profileURL))
+        for _ in 0..<25 {
+            if Task.isCancelled { return nil }
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            guard let raw = ((try? await eval(Scrapers.student)) ?? nil) as? String,
+                let data = raw.data(using: .utf8),
+                let p = try? JSONDecoder().decode(NamePayload.self, from: data),
+                p.ok,
+                let name = p.name,
+                !name.isEmpty
+            else { continue }
+            return name
+        }
+        return nil
     }
 
     private func finish(rows: [AttRow], sessions: [Session]) {

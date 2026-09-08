@@ -171,6 +171,10 @@ struct Summary {
     let attended: Int
     let total: Int
     let failing: [AttRow]
+    /// The subject that actually gates you: the one needing the most classes in
+    /// a row. Lowest percentage is a different question — a subject at 50% off
+    /// 1/2 needs far fewer classes than one at 67% off 8/12.
+    let blocker: AttRow?
 
     init(_ rows: [AttRow]) {
         // Risk order. A subject with no classes held yet reads 0% but carries no
@@ -185,5 +189,10 @@ struct Summary {
         total = rows.reduce(0) { $0 + $1.total }
         overall = Budget(attended: attended, total: total)
         failing = subjects.filter { $0.budget.state == .short }
+        blocker = failing.max {
+            $0.budget.value != $1.budget.value
+                ? $0.budget.value < $1.budget.value
+                : $0.budget.pct > $1.budget.pct
+        }
     }
 }

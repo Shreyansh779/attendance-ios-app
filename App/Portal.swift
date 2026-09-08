@@ -73,39 +73,43 @@ final class Portal: NSObject, ObservableObject {
     // MARK: - Polling
 
     /// Waits for the router to reach the dashboard, then reads until the row set
-    /// stops changing. The cards populate well after the document finishes
-    /// loading, so a single read almost always comes back empty.
+    /// stops changing. Driven by DOM settle events rather than a fixed-interval
+    /// poll: reacts the instant Angular/Kendo stop mutating instead of up to
+    /// 500ms late every tick, and skips round trips while nothing changed.
     private func startPolling() {
         pollTask?.cancel()
         pollTask = Task { [weak self] in
             guard let self else { return }
 
+            let deadline = Date().addingTimeInterval(90)  // same ceiling as before
             var lastSignature = ""
             var stableReads = 0
             var sawDashboard = false
+            var toldStillLoggingIn = false
 
-            for tick in 0..<180 {  // ~90s ceiling
-                if Task.isCancelled { return }
-                try? await Task.sleep(nanoseconds: 500_000_000)
+            while Date() < deadline {
                 if Task.isCancelled { return }
 
                 let path = (((try? await self.eval(Scrapers.route)) ?? nil) as? String) ?? ""
                 guard path.contains(Portal.dashboardMarker) else {
-                    if tick == 40 && !sawDashboard {
+                    if !toldStillLoggingIn && !sawDashboard {
+                        toldStillLoggingIn = true
                         self.status = "Still on the login page. Solve the captcha and wait for the dashboard."
                     }
+                    // Short settle wait so this reacts to the redirect fast
+                    // instead of a fixed sleep, but doesn't spin a tight loop.
+                    await self.settle(quietMs: 300, maxMs: 1500)
                     continue
                 }
 
                 if !sawDashboard {
                     sawDashboard = true
-                    // Login is done, so get out of the way and keep reading in
-                    // the background.
                     self.showingLogin = false
                     self.hostingHidden = true
                     self.status = "Signed in. Reading your classes and attendance."
                 }
 
+                await self.settle(quietMs: 350, maxMs: 4000)
                 let (rows, sessions, cardFound) = await self.readOnce()
 
                 let signature = rows.map { "\($0.key):\($0.attended)/\($0.total)" }.joined(separator: ",")
@@ -120,8 +124,6 @@ final class Portal: NSObject, ObservableObject {
 
                 // Two identical reads in a row means the cards have settled.
                 if !rows.isEmpty && stableReads >= 2 {
-                    // The name is on the profile page, so it is fetched only
-                    // once and only after the dashboard data is safely in hand.
                     if self.student == nil {
                         self.status = "Getting your name from your profile."
                         self.student = await self.fetchStudentName()
@@ -152,9 +154,10 @@ final class Portal: NSObject, ObservableObject {
     /// leave the dashboard by this point: its data is already captured.
     private func fetchStudentName() async -> String? {
         webView.load(URLRequest(url: Portal.profileURL))
-        for _ in 0..<25 {
+        let deadline = Date().addingTimeInterval(15)
+        while Date() < deadline {
             if Task.isCancelled { return nil }
-            try? await Task.sleep(nanoseconds: 600_000_000)
+            await settle(quietMs: 300, maxMs: 3000)
             guard let raw = ((try? await eval(Scrapers.student)) ?? nil) as? String,
                 let data = raw.data(using: .utf8),
                 let p = try? JSONDecoder().decode(NamePayload.self, from: data),
@@ -175,19 +178,36 @@ final class Portal: NSObject, ObservableObject {
 
     /// The agenda page, grouped by date. Failing here is not fatal — the
     /// dashboard card already covers today.
+    ///
+    /// The Kendo scheduler's Agenda view composes its rows asynchronously and,
+    /// for a bare navigation with no user scroll, can render a small first
+    /// batch (or just the header row) before the rest fills in. A single
+    /// settle isn't proof the *content*, not just the header table, is done -
+    /// so this requires two identical non-empty reads in a row, same as the
+    /// dashboard cards.
     private func fetchWeek() async -> ([String: [Session]], String?) {
         webView.load(URLRequest(url: Portal.weekURL))
+        let deadline = Date().addingTimeInterval(90)
         var lastDiag: String?
+        var lastSignature = ""
+        var stableReads = 0
 
-        for _ in 0..<25 {
+        while Date() < deadline {
             if Task.isCancelled { return ([:], lastDiag) }
-            try? await Task.sleep(nanoseconds: 700_000_000)
+            await settle(quietMs: 400, maxMs: 5000)
+
             guard let raw = ((try? await eval(Scrapers.week)) ?? nil) as? String,
                 let data = raw.data(using: .utf8),
                 let p = try? JSONDecoder().decode(WeekPayload.self, from: data)
             else { continue }
             lastDiag = p.diag
-            guard p.ok else { continue }
+            guard p.ok else { stableReads = 0; continue }
+
+            let signature = p.sessions.map { "\($0.date ?? ""):\($0.subject):\($0.start)" }
+                .sorted().joined(separator: ",")
+            stableReads = signature == lastSignature ? stableReads + 1 : 0
+            lastSignature = signature
+            guard stableReads >= 2 else { continue }
 
             var byDay: [String: [Session]] = [:]
             for s in p.sessions {
@@ -197,6 +217,18 @@ final class Portal: NSObject, ObservableObject {
             if !byDay.isEmpty { return (byDay, p.diag) }
         }
         return ([:], lastDiag)
+    }
+
+    /// Runs `Scrapers.settle` and waits for it. Never throws outward: a JS
+    /// error here just means the caller reads immediately, same as before
+    /// this existed.
+    private func settle(quietMs: Int, maxMs: Int) async {
+        _ = try? await webView.callAsyncJavaScript(
+            Scrapers.settle,
+            arguments: ["quietMs": quietMs, "maxMs": maxMs],
+            in: nil,
+            contentWorld: .page
+        )
     }
 
     private func finish(

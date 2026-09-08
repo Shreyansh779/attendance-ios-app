@@ -96,6 +96,7 @@ final class Portal: NSObject, ObservableObject {
             var stableReads = 0
             var sawDashboard = false
             var toldStillLoggingIn = false
+            var dashboardSeenAt: Date?
 
             while Date() < deadline {
                 if Task.isCancelled { return }
@@ -113,6 +114,7 @@ final class Portal: NSObject, ObservableObject {
 
                 if !sawDashboard {
                     sawDashboard = true
+                    dashboardSeenAt = Date()
                     self.showingLogin = false
                     self.hostingHidden = true
                     self.status = "Signed in. Reading your classes and attendance."
@@ -128,6 +130,10 @@ final class Portal: NSObject, ObservableObject {
                     self.status = "Found \(rows.count) subjects, \(sessions.count) classes today."
                 } else if cardFound {
                     self.status = "Found the attendance card, waiting for it to fill in."
+                } else if Date().timeIntervalSince(dashboardSeenAt ?? Date()) > 15 {
+                    // Long silence with nothing found yet reads as "broken" -
+                    // say plainly that the portal itself is just slow.
+                    self.status = "Still reading — the portal's own page can take a while to load."
                 }
 
                 // Two identical reads in a row means the cards have settled.
@@ -250,9 +256,15 @@ final class Portal: NSObject, ObservableObject {
     }
 
     private func readOnce() async -> ([AttRow], [Session], Bool) {
+        // Both scrapers hit the same document; issuing them concurrently
+        // instead of one-after-another cuts the round-trip cost of each tick
+        // roughly in half.
+        async let attRaw = (try? await eval(Scrapers.attendance)) ?? nil
+        async let sesRaw = (try? await eval(Scrapers.sessions)) ?? nil
+
         var rows: [AttRow] = []
         var cardFound = false
-        if let raw = ((try? await eval(Scrapers.attendance)) ?? nil) as? String,
+        if let raw = (await attRaw) as? String,
             let data = raw.data(using: .utf8),
             let p = try? JSONDecoder().decode(AttPayload.self, from: data)
         {
@@ -261,7 +273,7 @@ final class Portal: NSObject, ObservableObject {
         }
 
         var sessions: [Session] = []
-        if let raw = ((try? await eval(Scrapers.sessions)) ?? nil) as? String,
+        if let raw = (await sesRaw) as? String,
             let data = raw.data(using: .utf8),
             let p = try? JSONDecoder().decode(SesPayload.self, from: data)
         {

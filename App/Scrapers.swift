@@ -500,17 +500,72 @@ enum Scrapers {
   // than just returning empty.
   var days = {};
   for (var z = 0; z < uniq.length; z++) days[uniq[z].date] = 1;
-  var diag = 'rows=' + rows.length + ' parsed=' + uniq.length
-    + ' days=' + Object.keys(days).length + ' lastDate=' + (current || 'none');
+
+  // Which view the scheduler is actually in is the single most useful fact
+  // when this comes back empty, so it goes in the diagnostic first.
+  var view = 'none';
+  if (document.querySelector('.k-scheduler-agendaview')) view = 'agenda';
+  else if (document.querySelector('.k-scheduler-monthview')) view = 'month';
+  else if (document.querySelector('.k-scheduler-timesview, .k-scheduler-dayview')) view = 'day/week';
+  else if (document.querySelector('kendo-scheduler, .k-scheduler')) view = 'scheduler-other';
+
+  var diag = 'view=' + view + ' tasks=' + document.querySelectorAll('.k-task').length
+    + ' rows=' + rows.length + ' parsed=' + uniq.length
+    + ' days=' + Object.keys(days).length + ' lastDate=' + (current || 'none')
+    + ' at=' + location.pathname;
   if (!uniq.length) {
     var firstRows = [];
     for (var q = 0; q < rows.length && firstRows.length < 4; q++) {
       var t = clean(rows[q].textContent);
-      if (t) firstRows.push(t.slice(0, 90));
+      if (t) firstRows.push(t.slice(0, 80));
     }
     diag += ' | ' + firstRows.join(' // ');
   }
   return JSON.stringify({ ok: uniq.length > 0, sessions: uniq, sample: sample, diag: diag });
+})()
+"""#
+
+    /// Switches the portal's Kendo scheduler into Agenda view and reports what
+    /// it did.
+    ///
+    /// This is the fix for "only today ever showed up". The scheduler opens in
+    /// whatever view it defaults to - a Day/Week time grid - and only the
+    /// Agenda view renders the date-column table the weekly scraper reads. A
+    /// page saved *after* manually picking Agenda looks completely different
+    /// from a page freshly navigated to, which is why the scraper tested clean
+    /// against a saved copy and still came back empty on device.
+    ///
+    /// Returns: "already", "select", "button", "no-scheduler" or "not-found".
+    static let agenda = #"""
+(function () {
+  var clean = function (t) { return String(t == null ? '' : t).replace(/\s+/g, ' ').trim(); };
+
+  if (document.querySelector('.k-scheduler-agendaview')) return 'already';
+  if (!document.querySelector('kendo-scheduler, .k-scheduler')) return 'no-scheduler';
+
+  // At phone widths Kendo renders the view picker as a native <select>, so
+  // this is the path that actually runs for us. Angular listens for 'change'.
+  var sels = document.querySelectorAll('select');
+  for (var i = 0; i < sels.length; i++) {
+    var opts = sels[i].options || [];
+    for (var j = 0; j < opts.length; j++) {
+      if (!/agenda/i.test(clean(opts[j].textContent))) continue;
+      sels[i].selectedIndex = j;
+      sels[i].value = opts[j].value;
+      sels[i].dispatchEvent(new Event('input', { bubbles: true }));
+      sels[i].dispatchEvent(new Event('change', { bubbles: true }));
+      return 'select';
+    }
+  }
+
+  // Wider layouts get a button group instead. click() fires the handler even
+  // when the group is the hidden one of the two.
+  var btns = document.querySelectorAll('button');
+  for (var k = 0; k < btns.length; k++) {
+    if (/^agenda$/i.test(clean(btns[k].textContent))) { btns[k].click(); return 'button'; }
+  }
+
+  return 'not-found';
 })()
 """#
 

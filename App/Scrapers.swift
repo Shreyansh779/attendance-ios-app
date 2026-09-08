@@ -1006,6 +1006,40 @@ enum Scrapers {
 })()
 """#
 
+    /// The student's photo, straight off the dashboard header.
+    ///
+    /// The portal renders it as `<img class="header-profile-img"
+    /// src="data:image/jpeg;base64,...">`, so the bytes are already in the
+    /// page - no second authenticated request, no URL to expire. Only data
+    /// URIs are accepted; a remote src would need cookies the app can't
+    /// replay from an image view.
+    static let photo = #"""
+(function () {
+  var pick = function (el) {
+    if (!el) return null;
+    var src = el.getAttribute('src') || '';
+    return /^data:image\/(jpe?g|png|webp);base64,/i.test(src) ? src : null;
+  };
+
+  var direct = pick(document.querySelector('img.header-profile-img'))
+    || pick(document.querySelector('img.nav-avatar'))
+    || pick(document.querySelector('img.user-avatar'))
+    || pick(document.querySelector('img.profile-image'));
+  if (direct) return direct;
+
+  // Any inline image that isn't a logo or an icon, smallest markup wins.
+  var imgs = document.querySelectorAll('img[src^="data:image"]');
+  for (var i = 0; i < imgs.length; i++) {
+    var cls = (imgs[i].getAttribute('class') || '').toLowerCase();
+    var id = (imgs[i].getAttribute('id') || '').toLowerCase();
+    if (/logo|icon|brand/.test(cls + ' ' + id)) continue;
+    var src2 = pick(imgs[i]);
+    if (src2) return src2;
+  }
+  return null;
+})()
+"""#
+
     /// Cheap check for whether the router has landed on the dashboard yet.
     static let route = "location.pathname"
 }

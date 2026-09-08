@@ -18,19 +18,20 @@ struct Drawer: View {
     let day: [Klass]
     let summary: Summary
     let snapshot: Snapshot?
+    let student: String?
     let onRefresh: () -> Void
     let close: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 13) {
-                Text(summary.subjects.isEmpty ? "·" : "SS")
+                Text(initials)
                     .font(.r(17, .bold))
                     .foregroundStyle(Color.mintHi)
                     .frame(width: 44, height: 44)
                     .background(Color.surLive, in: Circle())
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Today").font(.r(16.5, .semibold))
+                    Text(student ?? "Today").font(.r(16.5, .semibold)).lineLimit(1)
                     Text("UPES dashboard").font(.r(13, .medium)).foregroundStyle(Color.ink3)
                 }
             }
@@ -71,11 +72,18 @@ struct Drawer: View {
             foot
         }
         .padding(.horizontal, 20)
-        .padding(.top, 22)
+        .padding(.top, 26)
         .padding(.bottom, 20)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Color.drawerBG)
         .clipShape(RoundedCorners(radius: 34, corners: [.topRight, .bottomRight]))
+    }
+
+    private var initials: String {
+        guard let n = student else { return "·" }
+        let parts = n.split(separator: " ").prefix(2)
+        let letters = parts.compactMap { $0.first }.map(String.init).joined()
+        return letters.isEmpty ? "·" : letters.uppercased()
     }
 
     private func badge(_ r: Route) -> String? {

@@ -26,7 +26,13 @@ targets:
     type: application
     platform: iOS
     sources:
+      # Info.plist must be excluded here. Leaving it in makes XcodeGen add it to
+      # Copy Bundle Resources while INFOPLIST_FILE also targets it, and two
+      # build commands writing the same path fails the build after linking —
+      # which is exactly how we ended up with a bundle holding only the binary.
       - path: App
+        excludes:
+          - Info.plist
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.shreyansh.today

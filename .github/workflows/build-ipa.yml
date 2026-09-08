@@ -3,7 +3,7 @@ name: Build unsigned IPA
 on:
   workflow_dispatch:
   push:
-    tags: ['v*']
+    branches: [main]
 
 permissions:
   contents: write
@@ -15,13 +15,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
       # xcode-select does not reliably stick on the runner, but xcodebuild
-      # always honours DEVELOPER_DIR. Newest Xcode reads the project format the
-      # Capacitor CLI generates.
+      # always honours DEVELOPER_DIR.
       - name: Pick newest Xcode
         run: |
           LATEST=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
@@ -29,22 +24,17 @@ jobs:
           echo "DEVELOPER_DIR=$LATEST/Contents/Developer" >> "$GITHUB_ENV"
           "$LATEST/Contents/Developer/usr/bin/xcodebuild" -version
 
-      - name: Install deps
-        run: npm install
+      - name: Install XcodeGen
+        run: brew install xcodegen
 
-      # The ios/ folder is generated here rather than committed, so nothing in
-      # the repo needs a Mac to have touched it.
-      - name: Add iOS platform
-        run: |
-          npx cap add ios
-          npx cap sync ios
+      - name: Generate project
+        run: xcodegen generate
 
       - name: Build
-        working-directory: ios/App
         run: |
           xcodebuild \
-            -workspace App.xcworkspace \
-            -scheme App \
+            -project Today.xcodeproj \
+            -scheme Today \
             -configuration Release \
             -sdk iphoneos \
             -derivedDataPath build \
@@ -52,19 +42,19 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            ONLY_ACTIVE_ARCH=NO
+            ONLY_ACTIVE_ARCH=NO \
+            | tail -40
 
-      # An IPA is just a zip with the .app inside a Payload/ directory. Built
+      # An IPA is a zip with the .app inside a Payload/ directory. Built
       # unsigned on purpose — your sideloader re-signs it with your own cert.
       - name: Package IPA
         run: |
-          APP="ios/App/build/Build/Products/Release-iphoneos/App.app"
-          test -d "$APP" || { echo "App bundle missing at $APP"; exit 1; }
+          APP=$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -1)
+          test -n "$APP" || { echo "no .app produced"; exit 1; }
+          echo "app: $APP"
           mkdir -p out/Payload
           cp -R "$APP" out/Payload/
-          cd out
-          zip -qry Today.ipa Payload
-          rm -rf Payload
+          cd out && zip -qry Today.ipa Payload && rm -rf Payload
           ls -lh Today.ipa
 
       # Artifact downloads are streamed zips, which iOS Files refuses to open
@@ -79,14 +69,4 @@ jobs:
             --title "Today $TAG" \
             --notes "Unsigned IPA. Download Today.ipa and sideload it." \
             --latest
-          echo "### Download" >> "$GITHUB_STEP_SUMMARY"
-          gh release view "$TAG" --json assets \
-            --jq '.assets[].url' >> "$GITHUB_STEP_SUMMARY"
-
-      # Kept as a fallback for extracting on a desktop.
-      - uses: actions/upload-artifact@v4
-        with:
-          name: Today-unsigned-ipa
-          path: out/Today.ipa
-          if-no-files-found: error
-          retention-days: 30
+          echo "### Download Today.ipa from the release: $TAG" >> "$GITHUB_STEP_SUMMARY"

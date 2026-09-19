@@ -55,6 +55,8 @@ enum Notify {
         let fmt = stamp
         var scheduled = 0
 
+        await scheduleEndOfDay(from: snap, centre: centre, fmt: fmt, now: now, budget: &scheduled)
+
         for session in snap.upcoming(from: now) {
             guard scheduled < maxPending,
                 let date = session.date,
@@ -74,6 +76,47 @@ enum Notify {
             )
             let request = UNNotificationRequest(
                 identifier: "\(date)|\(session.start)|\(session.subject)",
+                content: content,
+                trigger: UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+            )
+            try? await centre.add(request)
+            scheduled += 1
+        }
+    }
+
+    /// One nudge per day, shortly after the last class ends.
+    ///
+    /// Marks are what keep the numbers honest between portal refreshes, and
+    /// the end of the day is both when you can finally fill them all in and
+    /// when you are least likely to think of it.
+    private static func scheduleEndOfDay(
+        from snap: Snapshot, centre: UNUserNotificationCenter,
+        fmt: DateFormatter, now: Date, budget scheduled: inout Int
+    ) async {
+        // Only the next few days: a nudge three weeks out is noise, and the
+        // pending queue is a scarce resource.
+        var byDay: [String: Date] = [:]
+        for session in snap.upcoming(from: now) {
+            guard let date = session.date,
+                let start = fmt.date(from: "\(date) \(session.end.isEmpty ? session.start : session.end)")
+            else { continue }
+            byDay[date] = Swift.max(byDay[date] ?? start, start)
+        }
+
+        for (date, lastEnd) in byDay.sorted(by: { $0.key < $1.key }).prefix(5) {
+            let fire = lastEnd.addingTimeInterval(15 * 60)
+            guard fire > now else { continue }
+
+            let content = UNMutableNotificationContent()
+            content.title = "That's the day done"
+            content.body = "Tick off what you made it to, so the numbers stay honest."
+            content.sound = nil
+
+            let comps = Calendar.current.dateComponents(
+                [.year, .month, .day, .hour, .minute], from: fire
+            )
+            let request = UNNotificationRequest(
+                identifier: "eod|\(date)",
                 content: content,
                 trigger: UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
             )

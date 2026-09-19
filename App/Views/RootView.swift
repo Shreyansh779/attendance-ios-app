@@ -174,7 +174,8 @@ struct RootView: View {
                         termEnd: terms.isEmpty ? nil : snapshot?.termEnd,
                         weekDays: snapshot?.week.count ?? 0,
                         weekDiag: snapshot?.weekDiag,
-                        age: snapshot?.ageText
+                        age: snapshot?.ageText,
+                        history: snapshot?.history ?? []
                     )
                 }
             }
@@ -331,6 +332,7 @@ struct RootView: View {
                 // A read that only managed the agenda keeps whatever term end
                 // an earlier whole-term read established.
                 termEnd: r.termEnd ?? snapshot?.termEnd,
+                history: Snapshot.extend(snapshot?.history ?? [], with: r.rows, on: Date()),
                 photo: r.photo ?? snapshot?.photo
             )
             Store.save(snap)

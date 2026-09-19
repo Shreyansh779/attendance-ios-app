@@ -1,5 +1,24 @@
 import Foundation
 
+/// What the portal said on one day.
+///
+/// The app was entirely point-in-time: it knew you were at 72.6% but not that
+/// you were at 70% a fortnight ago. Direction is the thing that tells you
+/// whether a nine-class run is working, and the portal never reports it.
+struct Stamp: Codable, Hashable {
+    /// ISO yyyy-MM-dd. One stamp per day; a second read the same day replaces
+    /// the first rather than adding a point.
+    let day: String
+    /// The portal's own figures, before hand-marks are folded in - otherwise
+    /// the trend would move when you ticked a box rather than when you
+    /// attended something.
+    let rows: [AttRow]
+
+    var attended: Int { rows.reduce(0) { $0 + $1.attended } }
+    var total: Int { rows.reduce(0) { $0 + $1.total } }
+    var pct: Double { total > 0 ? Double(attended) / Double(total) * 100 : 0 }
+}
+
 /// What one successful read of the dashboard produced.
 struct Snapshot: Codable {
     var savedAt: Date
@@ -19,6 +38,8 @@ struct Snapshot: Codable {
     /// maths must stay quiet rather than call a subject hopeless on the
     /// strength of a six-day agenda.
     var termEnd: String?
+    /// Oldest first. Capped, because this lives in UserDefaults.
+    var history: [Stamp] = []
     /// The student's photo as a `data:image/...;base64,` URI, read off the
     /// dashboard header. Stored rather than re-fetched: the portal serves it
     /// inline, so there is no URL to load later.
@@ -36,6 +57,7 @@ struct Snapshot: Codable {
         marks = (try? c.decode([String: Mark].self, forKey: .marks)) ?? [:]
         weekDiag = try? c.decodeIfPresent(String.self, forKey: .weekDiag)
         termEnd = try? c.decodeIfPresent(String.self, forKey: .termEnd)
+        history = (try? c.decode([Stamp].self, forKey: .history)) ?? []
         photo = try? c.decodeIfPresent(String.self, forKey: .photo)
     }
 
@@ -43,7 +65,8 @@ struct Snapshot: Codable {
         savedAt: Date, rows: [AttRow], sessions: [Session],
         student: String?, week: [String: [Session]] = [:],
         marks: [String: Mark] = [:], weekDiag: String? = nil,
-        termEnd: String? = nil, photo: String? = nil
+        termEnd: String? = nil, history: [Stamp] = [],
+        photo: String? = nil
     ) {
         self.savedAt = savedAt
         self.rows = rows
@@ -53,6 +76,7 @@ struct Snapshot: Codable {
         self.marks = marks
         self.weekDiag = weekDiag
         self.termEnd = termEnd
+        self.history = history
         self.photo = photo
     }
 
@@ -85,6 +109,19 @@ struct Snapshot: Codable {
             .filter { $0.key >= today }
             .sorted { $0.key < $1.key }
             .flatMap { $0.value }
+    }
+
+    /// Today's reading folded in, replacing any earlier one from the same day.
+    static func extend(_ history: [Stamp], with rows: [AttRow], on date: Date) -> [Stamp] {
+        guard !rows.isEmpty else { return history }
+        let key = Snapshot.isoDay.string(from: date)
+        var out = history.filter { $0.day != key }
+        out.append(Stamp(day: key, rows: rows))
+        out.sort { $0.day < $1.day }
+        // A term is ~120 teaching days; past that the oldest points stop
+        // earning their bytes.
+        if out.count > 120 { out.removeFirst(out.count - 120) }
+        return out
     }
 
     var ageHours: Double { Date().timeIntervalSince(savedAt) / 3600 }

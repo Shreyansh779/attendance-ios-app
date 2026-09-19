@@ -1,6 +1,5 @@
 import Foundation
 import SwiftUI
-import UIKit
 
 struct AttendanceView: View {
     let summary: Summary
@@ -8,16 +7,8 @@ struct AttendanceView: View {
     let terms: [String: Term]
     /// Last day of the timetable, when known.
     let termEnd: String?
-    /// How many days the cached timetable covers, and what the scrape saw.
-    /// Both used to live in the drawer; they belong next to the numbers they
-    /// explain.
-    let weekDays: Int
-    let weekDiag: String?
-    let age: String?
     /// Oldest first. Empty until the portal has been read on two separate days.
     let history: [Stamp]
-
-    @State private var notifyResult: String?
 
     var body: some View {
         if summary.subjects.isEmpty {
@@ -51,8 +42,6 @@ struct AttendanceView: View {
                         }
                         .buttonStyle(.pressableCard)
                     }
-
-                    footer.padding(.top, 10)
                 }
                 // Enough for the last card to scroll clear of the home
                 // indicator without leaving a visible gap.
@@ -75,51 +64,6 @@ struct AttendanceView: View {
             ? "flat since \(since)"
             : "\(word) \(String(format: "%.1f", abs(delta))) points since \(since)"
         return (usable.map(\.pct), delta, label)
-    }
-
-    /// Freshness, and — only when the weekly scrape came back thin — what the
-    /// page actually did, so a failure is diagnosable instead of silent.
-    @ViewBuilder private var footer: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 12) {
-                Button {
-                    Task { notifyResult = await Notify.test() }
-                } label: {
-                    Text("Test a reminder")
-                        .r(12.5, .semibold)
-                        .foregroundStyle(Color.mintHi)
-                }
-                .buttonStyle(.pressable)
-                if let notifyResult {
-                    Text(notifyResult)
-                        .r(12, .medium)
-                        .foregroundStyle(Color.ink4)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            if let age {
-                Text(age)
-                    .r(12.5, .medium)
-                    .foregroundStyle(Color.ink4)
-            }
-            if weekDays <= 1, let d = weekDiag {
-                Text("week: \(d)")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(Color.ink4)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                Button {
-                    UIPasteboard.general.string = d
-                } label: {
-                    Text("Copy diagnostic")
-                        .r(12, .semibold)
-                        .foregroundStyle(Color.mintHi)
-                }
-                .buttonStyle(.pressable)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 6)
     }
 
     private var header: some View {

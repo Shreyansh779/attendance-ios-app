@@ -36,6 +36,73 @@ extension Color {
     static let warnInk = Color(0xE8CE9C)
 }
 
+// MARK: - Motion
+
+/// Timing decided once, here, rather than guessed at each call site.
+///
+/// The numbers are Apple's own, from Designing Fluid Interfaces: a drawer is
+/// damping 0.8 / response 0.3, general UI is critically damped. SwiftUI's
+/// `bounce` is `1 - damping`, so 0.8 damping is bounce 0.2. Bounce is only
+/// earned where the gesture itself carried momentum - overshoot on something
+/// that merely appeared reads as a wobble.
+enum Motion {
+    /// Panels and sheets: the one place bounce belongs.
+    static let panel = Animation.spring(duration: 0.3, bounce: 0.2)
+    /// Everything else. Arrives and stops.
+    static let ui = Animation.spring(duration: 0.35, bounce: 0)
+    /// Press feedback. Short enough to read as instant rather than as motion.
+    static let press = Animation.spring(duration: 0.16, bounce: 0)
+    /// The stand-in when the system asks for less motion. Still explains the
+    /// change; moves nothing across the screen.
+    static let gentle = Animation.easeOut(duration: 0.18)
+}
+
+extension Animation {
+    /// Swaps in the gentle cross-fade when Reduce Motion is on, so call sites
+    /// read `Motion.panel.reduced(reduceMotion)` and never have to remember
+    /// which animations are safe.
+    func reduced(_ reduce: Bool) -> Animation { reduce ? Motion.gentle : self }
+}
+
+// MARK: - Press
+
+/// Every pressable thing acknowledges the touch, on touch *down*.
+///
+/// The app used `.plain` throughout, which draws no press state at all: a tap
+/// produced no acknowledgement until the screen itself changed, which is the
+/// moment directness falls off a cliff. Scale is deliberately small - large
+/// surfaces need less of it than small ones to read as the same movement.
+struct PressableStyle: ButtonStyle {
+    var scale: CGFloat = 0.97
+
+    func makeBody(configuration: Configuration) -> some View {
+        Body(configuration: configuration, scale: scale)
+    }
+
+    /// A ButtonStyle is not a View, so @Environment on the style itself is
+    /// never populated - it would read false forever and quietly ignore
+    /// Reduce Motion. The nested view is what can actually see it.
+    private struct Body: View {
+        let configuration: ButtonStyleConfiguration
+        let scale: CGFloat
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+        var body: some View {
+            configuration.label
+                .scaleEffect(reduceMotion ? 1 : (configuration.isPressed ? scale : 1))
+                .opacity(configuration.isPressed ? 0.82 : 1)
+                .animation(Motion.press, value: configuration.isPressed)
+        }
+    }
+}
+
+extension ButtonStyle where Self == PressableStyle {
+    /// Small controls: pills, arrows, text buttons.
+    static var pressable: PressableStyle { PressableStyle() }
+    /// Full-width rows and cards, where the same ratio reads as a bigger jump.
+    static var pressableCard: PressableStyle { PressableStyle(scale: 0.985) }
+}
+
 extension Font {
     static func r(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
         .system(size: size, weight: weight, design: .rounded)

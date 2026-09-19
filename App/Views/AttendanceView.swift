@@ -42,6 +42,7 @@ struct AttendanceView: View {
         let o = summary.overall
         return VStack(alignment: .leading, spacing: 4) {
             Text(o.state == .short ? "+\(o.value) to attend" : "\(o.value) to spare")
+                .contentTransition(.numericText())
                 .font(.r(27, .bold))
                 .kerning(-0.8)
             Text("\(summary.attended) of \(summary.total) attended, \(String(format: "%.1f", o.pct))% overall")
@@ -109,6 +110,7 @@ struct AttendanceView: View {
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 8)
                     Text(idle ? "—" : (low ? "+\(b.value)" : "\(b.value)"))
+                        .contentTransition(.numericText())
                         .font(.r(idle ? 15 : (low ? 16 : 22), .bold))
                         .kerning(-0.6)
                         .foregroundStyle(idle ? Color.ink4 : (low ? Color.coral : Color.mintHi))

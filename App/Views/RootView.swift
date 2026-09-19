@@ -157,7 +157,9 @@ struct RootView: View {
                         onOpenToday: { id in
                             picked = id
                             route = .today
-                        }
+                        },
+                        marks: snapshot?.marks ?? [:],
+                        onMark: mark
                     )
                 }
             }

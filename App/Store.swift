@@ -14,6 +14,11 @@ struct Snapshot: Codable {
     var marks: [String: Mark] = [:]
     /// What the weekly scrape saw, kept only so a failure is diagnosable.
     var weekDiag: String?
+    /// Last day the timetable covers, set only when the whole term came
+    /// through. nil means the cache holds a few days at most, and the term
+    /// maths must stay quiet rather than call a subject hopeless on the
+    /// strength of a six-day agenda.
+    var termEnd: String?
     /// The student's photo as a `data:image/...;base64,` URI, read off the
     /// dashboard header. Stored rather than re-fetched: the portal serves it
     /// inline, so there is no URL to load later.
@@ -30,6 +35,7 @@ struct Snapshot: Codable {
         week = (try? c.decode([String: [Session]].self, forKey: .week)) ?? [:]
         marks = (try? c.decode([String: Mark].self, forKey: .marks)) ?? [:]
         weekDiag = try? c.decodeIfPresent(String.self, forKey: .weekDiag)
+        termEnd = try? c.decodeIfPresent(String.self, forKey: .termEnd)
         photo = try? c.decodeIfPresent(String.self, forKey: .photo)
     }
 
@@ -37,7 +43,7 @@ struct Snapshot: Codable {
         savedAt: Date, rows: [AttRow], sessions: [Session],
         student: String?, week: [String: [Session]] = [:],
         marks: [String: Mark] = [:], weekDiag: String? = nil,
-        photo: String? = nil
+        termEnd: String? = nil, photo: String? = nil
     ) {
         self.savedAt = savedAt
         self.rows = rows
@@ -46,6 +52,7 @@ struct Snapshot: Codable {
         self.week = week
         self.marks = marks
         self.weekDiag = weekDiag
+        self.termEnd = termEnd
         self.photo = photo
     }
 
@@ -67,6 +74,17 @@ struct Snapshot: Codable {
         let key = Snapshot.isoDay.string(from: date)
         if let day = week[key], !day.isEmpty { return day }
         return Snapshot.isoDay.string(from: savedAt) == key ? sessions : []
+    }
+
+    /// Every class still to come, today onwards, ascending. The term maths
+    /// needs the whole tail - the timetable screen only pages through the
+    /// first fortnight of it.
+    func upcoming(from date: Date) -> [Session] {
+        let today = Snapshot.isoDay.string(from: date)
+        return week
+            .filter { $0.key >= today }
+            .sorted { $0.key < $1.key }
+            .flatMap { $0.value }
     }
 
     var ageHours: Double { Date().timeIntervalSince(savedAt) / 3600 }

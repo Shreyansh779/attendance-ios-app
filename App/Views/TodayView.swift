@@ -8,6 +8,8 @@ struct TodayView: View {
 
     let day: [Klass]
     let nowMin: Int
+    /// Keyed by `AttRow.key`. Empty when the whole term is not known.
+    let terms: [String: Term]
     /// Tapping the day strip pins a class; nil means follow the clock.
     @Binding var picked: String?
     let marks: [String: Mark]
@@ -60,7 +62,7 @@ struct TodayView: View {
                     .foregroundStyle(Color.ink3)
                     .padding(.top, 9)
 
-                OwnSlack(att: h.att)
+                OwnSlack(att: h.att, term: h.att.flatMap { terms[$0.key] })
                     .padding(.top, 22)
 
                 // Answering here is what keeps you off the portal: one tap
@@ -199,6 +201,7 @@ private struct Tag: View {
 /// This class's own room to skip — the number you actually weigh.
 private struct OwnSlack: View {
     let att: AttRow?
+    let term: Term?
 
     var body: some View {
         if let a = att {
@@ -221,6 +224,12 @@ private struct OwnSlack: View {
                         .font(.r(14, .semibold))
                         .foregroundStyle(Color.ink2)
                         .fixedSize()
+                }
+                if let tm = term {
+                    Text(termLine(b, tm))
+                        .font(.r(13.5, .medium))
+                        .foregroundStyle(tm.reachable ? Color.ink3 : Color.coral)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .slab(.sur, radius: 28, pad: EdgeInsets(top: 19, leading: 22, bottom: 19, trailing: 22))

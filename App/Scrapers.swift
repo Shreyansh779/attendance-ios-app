@@ -648,11 +648,12 @@ enum Scrapers {
     return null;
   }
 
-  // Only the near future is worth caching; the payload covers the whole term.
+  // The whole remaining term is kept, not just the next fortnight. Knowing
+  // how many classes are actually left is what lets the app say "you cannot
+  // reach 75% any more" instead of cheerfully asking for twelve more when
+  // only five remain. Past dates still go, they answer nothing.
   var now = new Date();
   var todayIso = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
-  var horizon = new Date(now.getTime() + 14 * 86400000);
-  var maxIso = horizon.getFullYear() + '-' + pad(horizon.getMonth() + 1) + '-' + pad(horizon.getDate());
 
   var VIRTUAL = /virtual|online|teams|zoom|webex|meet/i;
 
@@ -766,7 +767,7 @@ enum Scrapers {
     var g = direct(arr[i]);
     if (!g) { g = loose(arr[i]); if (g) usedLoose++; }
     if (!g) { skipped.shape++; continue; }
-    if (g.date < todayIso || g.date > maxIso) { skipped.range++; continue; }
+    if (g.date < todayIso) { skipped.range++; continue; }
     out.push(g);
   }
 
@@ -804,7 +805,9 @@ enum Scrapers {
     }).slice(0, 24).join(' ');
   }
 
-  return JSON.stringify({ ok: uniq.length > 0, sessions: uniq, diag: diag });
+  // items is how the app distinguishes the real term feed (hundreds) from
+  // the dashboard's own six-item "today" call to the same endpoint.
+  return JSON.stringify({ ok: uniq.length > 0, sessions: uniq, diag: diag, items: arr.length });
 })()
 """#
 

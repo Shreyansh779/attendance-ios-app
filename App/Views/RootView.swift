@@ -141,6 +141,9 @@ struct RootView: View {
             guard !didAutoOpen else { return }
             didAutoOpen = true
             if snapshot?.rows.isEmpty ?? true { refresh() }
+            // A re-signed sideload is a reinstall, and a reinstall clears the
+            // pending queue - so rebuild it every launch, not only on refresh.
+            rescheduleReminders()
         }
     }
 
@@ -263,6 +266,15 @@ struct RootView: View {
         withAnimation(Motion.ui.reduced(reduceMotion)) { snapshot = snap }
     }
 
+    /// Fire-and-forget: reminders are a convenience, and nothing in the UI
+    /// should wait on the notification centre.
+    private func rescheduleReminders() {
+        guard let snap = snapshot, !snap.rows.isEmpty else { return }
+        let terms = self.terms
+        let rows = self.rows
+        Task { await Notify.reschedule(from: snap, terms: terms, rows: rows) }
+    }
+
     private func refresh() {
         withAnimation(Motion.panel.reduced(reduceMotion)) { menuOpen = false }
         portal.begin(knownStudent: snapshot?.student) { r in
@@ -290,6 +302,7 @@ struct RootView: View {
             snapshot = snap
             picked = nil
             tick = Date()
+            rescheduleReminders()
         }
     }
 }

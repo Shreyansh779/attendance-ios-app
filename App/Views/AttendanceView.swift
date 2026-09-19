@@ -60,6 +60,17 @@ struct AttendanceView: View {
         let worst: AttRow
         let term: Term?
 
+        /// The first `need` dates, spelled out. Capped, because a fourteen-date
+        /// run is a wall of text rather than a plan.
+        private func plan(_ tm: Term, need: Int) -> String {
+            let take = Array(tm.dates.prefix(need))
+            guard !take.isEmpty else { return "" }
+            let shown = take.prefix(6).map(shortDate).joined(separator: " · ")
+            return take.count > 6
+                ? "Starting \(shown) — and \(take.count - 6) more"
+                : "That is \(shown)"
+        }
+
         var body: some View {
             let b = worst.budget
             VStack(alignment: .leading, spacing: 10) {
@@ -87,6 +98,14 @@ struct AttendanceView: View {
                     .font(.r(13.5, .medium))
                     .foregroundStyle(tm.reachable ? Color.ink2 : Color.coral)
                     .fixedSize(horizontal: false, vertical: true)
+
+                    // "Nine in a row" is a number. These are the nine days.
+                    if tm.reachable, b.state == .short, b.value >= 1 {
+                        Text(plan(tm, need: b.value))
+                            .font(.r(13, .medium))
+                            .foregroundStyle(Color.ink3)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
             .slab(.surLow, radius: 28, pad: EdgeInsets(top: 20, leading: 22, bottom: 20, trailing: 22))

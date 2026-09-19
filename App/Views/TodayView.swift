@@ -85,7 +85,7 @@ struct TodayView: View {
 
                 Spacer(minLength: 18)
 
-                DayStrip(day: day, picked: $picked, heroID: hero?.id)
+                DayStrip(day: day, picked: $picked, heroID: hero?.id, marks: marks, today: today)
             }
             .padding(.bottom, 20)
         } else {
@@ -261,6 +261,10 @@ private struct DayStrip: View {
     let day: [Klass]
     @Binding var picked: String?
     let heroID: String?
+    /// So you can see at a glance which classes are already ticked off,
+    /// instead of opening each one to find out.
+    let marks: [String: Mark]
+    let today: String
 
     var body: some View {
         HStack(spacing: 7) {
@@ -271,10 +275,17 @@ private struct DayStrip: View {
                     picked = (picked == k.id) ? nil : k.id
                 } label: {
                 VStack(spacing: 5) {
-                    Text(hhmm(k.s0))
-                        .font(.r(13.5, .bold))
-                        .kerning(-0.3)
-                        .foregroundStyle(k.live ? Color.mintHi : (k.past ? Color.ink4 : Color.ink))
+                    HStack(spacing: 4) {
+                        if let m = marks[markKey(k, on: today)] {
+                            Circle()
+                                .fill(m.attended ? Color.mintHi : Color.coral)
+                                .frame(width: 5, height: 5)
+                        }
+                        Text(hhmm(k.s0))
+                            .font(.r(13.5, .bold))
+                            .kerning(-0.3)
+                    }
+                    .foregroundStyle(k.live ? Color.mintHi : (k.past ? Color.ink4 : Color.ink))
                     Text(k.online ? "online" : (k.room ?? "—"))
                         .font(.r(11, .medium))
                         .foregroundStyle(k.live ? Color.mintDim : (k.past ? Color.ink4 : Color.ink3))

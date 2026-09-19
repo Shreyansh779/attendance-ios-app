@@ -21,7 +21,14 @@ struct TimetableView: View {
     /// a class, so a free day still gets a page instead of vanishing and
     /// throwing off the arrow count.
     private var dates: [String] {
-        guard let maxKey = week.keys.filter({ $0 >= today }).max(),
+        // The cache holds the whole term now, for the attendance maths. Paging
+        // through three months one arrow at a time is not a timetable, so the
+        // screen still stops at a fortnight - which is all the portal's own
+        // agenda ever showed.
+        let horizon = Snapshot.isoDay.string(
+            from: Calendar.current.date(byAdding: .day, value: 13, to: Date()) ?? Date()
+        )
+        guard let maxKey = week.keys.filter({ $0 >= today && $0 <= horizon }).max(),
             let start = Snapshot.isoDay.date(from: today),
             let end = Snapshot.isoDay.date(from: maxKey),
             start <= end

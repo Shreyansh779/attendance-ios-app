@@ -72,6 +72,17 @@ final class Portal: NSObject, ObservableObject {
     private var pollTask: Task<Void, Never>?
     private var onDone: ((Reading) -> Void)?
 
+    /// One read of the timetable page.
+    struct WeekResult {
+        var days: [String: [Session]] = [:]
+        var diag: String?
+        /// True only for the API payload, which carries the whole term. The
+        /// DOM agenda never shows more than six days, and six days must not be
+        /// mistaken for "that is every class left" - the term maths would then
+        /// call a perfectly recoverable subject hopeless.
+        var whole = false
+    }
+
     /// One completed read of the portal.
     struct Reading {
         let rows: [AttRow]
@@ -79,6 +90,8 @@ final class Portal: NSObject, ObservableObject {
         let student: String?
         let week: [String: [Session]]
         let weekDiag: String?
+        /// Last day of the timetable, when the whole term came through.
+        let termEnd: String?
         /// `data:image/...;base64,` URI from the dashboard header, if present.
         let photo: String?
     }
@@ -186,7 +199,7 @@ final class Portal: NSObject, ObservableObject {
                     // within it, and the profile page below is a hard load that
                     // would throw that state away.
                     self.status = "Reading this week's timetable."
-                    let (week, diag) = await self.fetchWeek()
+                    let week = await self.fetchWeek()
 
                     if self.student == nil {
                         self.status = "Getting your name from your profile."
@@ -197,7 +210,7 @@ final class Portal: NSObject, ObservableObject {
                     // read while that page is still the live document.
                     self.finish(
                         rows: rows, sessions: sessions,
-                        week: week, diag: diag, photo: photo
+                        week: week, photo: photo
                     )
                     return
                 }
@@ -241,6 +254,10 @@ final class Portal: NSObject, ObservableObject {
         let diag: String?
         let tasks: Int?
         let view: String?
+        /// Raw entry count in the payload. The dashboard calls the same
+        /// endpoint for its own one-day card, so size is what separates the
+        /// real term feed from that.
+        let items: Int?
     }
 
     /// The agenda page, grouped by date. Failing here is not fatal — the
@@ -251,7 +268,7 @@ final class Portal: NSObject, ObservableObject {
     /// view renders the date-column table), and its rows have to have finished
     /// composing. So this switches the view first, then requires two identical
     /// non-empty reads before believing the result.
-    private func fetchWeek() async -> ([String: [Session]], String?) {
+    private func fetchWeek() async -> WeekResult {
         var lastDiag: String?
         // Kept separately so the DOM scrape's diagnostic can't overwrite it -
         // the API path is the one that matters, and losing its message is what
@@ -259,7 +276,7 @@ final class Portal: NSObject, ObservableObject {
         var apiDiag: String?
         /// Widest set of days seen so far, kept because the first payload the
         /// page makes available is often only today.
-        var bestWeek: ([String: [Session]], String?)?
+        var bestWeek: WeekResult?
         let began = Date()
         var lastSignature = ""
         var stableReads = 0
@@ -276,7 +293,7 @@ final class Portal: NSObject, ObservableObject {
         softNavAt = Date()
 
         for _ in 0..<70 {  // 70 * 500ms = 35s
-            if Task.isCancelled { return ([:], lastDiag) }
+            if Task.isCancelled { return WeekResult(diag: lastDiag) }
             try? await Task.sleep(nanoseconds: 500_000_000)
 
             // The API payload is the real source of truth: the page fetches
@@ -293,14 +310,19 @@ final class Portal: NSObject, ObservableObject {
                         guard let d = s.date else { continue }
                         byDay[d, default: []].append(s)
                     }
-                    if byDay.count > (bestWeek?.0.count ?? 0) {
-                        bestWeek = (byDay, p.diag)
+                    if byDay.count > (bestWeek?.days.count ?? 0) {
+                        // Fifty-odd entries means the scheduler's term feed;
+                        // the dashboard's own call to this endpoint returns a
+                        // handful. Only the former may claim to be the term.
+                        bestWeek = WeekResult(
+                            days: byDay, diag: p.diag, whole: (p.items ?? 0) >= 50
+                        )
                     }
                     // The dashboard calls the same endpoint for its "today"
                     // card, so the first payload available is often a single
                     // day. More than one day means this is the real term
                     // timetable, and there is nothing better to wait for.
-                    if let best = bestWeek, best.0.count >= 2 { return best }
+                    if let best = bestWeek, best.days.count >= 2 { return best }
                 }
             }
 
@@ -378,7 +400,7 @@ final class Portal: NSObject, ObservableObject {
                 guard let d = s.date else { continue }
                 byDay[d, default: []].append(s)
             }
-            if !byDay.isEmpty { return (byDay, p.diag) }
+            if !byDay.isEmpty { return WeekResult(days: byDay, diag: p.diag) }
         }
 
         // Nothing worked. Report what the page actually asked the server for -
@@ -387,12 +409,12 @@ final class Portal: NSObject, ObservableObject {
         if let best = bestWeek { return best }
 
         let spy = ((try? await eval(Scrapers.spyDump)) ?? nil) as? String
-        return ([:], [apiDiag, lastDiag, spy].compactMap { $0 }.joined(separator: " || "))
+        return WeekResult(diag: [apiDiag, lastDiag, spy].compactMap { $0 }.joined(separator: " || "))
     }
 
     private func finish(
         rows: [AttRow], sessions: [Session],
-        week: [String: [Session]], diag: String?, photo: String?
+        week: WeekResult, photo: String?
     ) {
         pollTask?.cancel()
         pollTask = nil
@@ -403,7 +425,9 @@ final class Portal: NSObject, ObservableObject {
         onDone?(
             Reading(
                 rows: rows, sessions: sessions, student: student,
-                week: week, weekDiag: diag, photo: photo
+                week: week.days, weekDiag: week.diag,
+                termEnd: week.whole ? week.days.keys.max() : nil,
+                photo: photo
             )
         )
     }

@@ -35,6 +35,15 @@ struct RootView: View {
 
     private var summary: Summary { Summary(rows) }
 
+    /// Only computed when the whole term is known and has not already run out;
+    /// on a few days of agenda the honest answer is to say nothing.
+    private var terms: [String: Term] {
+        guard let s = snapshot, let end = s.termEnd,
+            end >= Snapshot.isoDay.string(from: tick)
+        else { return [:] }
+        return termMap(rows: rows, upcoming: s.upcoming(from: tick))
+    }
+
     var body: some View {
         ZStack(alignment: .leading) {
             // The live webview, full size, underneath an opaque background.
@@ -169,6 +178,7 @@ struct RootView: View {
                 TodayView(
                     day: day,
                     nowMin: nowMin,
+                    terms: terms,
                     picked: $picked,
                     marks: snapshot?.marks ?? [:],
                     today: Snapshot.isoDay.string(from: tick),
@@ -186,7 +196,14 @@ struct RootView: View {
                         route = .today
                     }
                 )
-            case .attendance: AttendanceView(summary: summary)
+            case .attendance:
+                AttendanceView(
+                    summary: summary,
+                    terms: terms,
+                    // Tied to the same guard, so the header cannot announce a
+                    // term end that the rows below have gone quiet about.
+                    termEnd: terms.isEmpty ? nil : snapshot?.termEnd
+                )
             }
         }
     }
@@ -247,6 +264,9 @@ struct RootView: View {
                 // are spent.
                 marks: [:],
                 weekDiag: r.weekDiag,
+                // A read that only managed the agenda keeps whatever term end
+                // an earlier whole-term read established.
+                termEnd: r.termEnd ?? snapshot?.termEnd,
                 photo: r.photo ?? snapshot?.photo
             )
             Store.save(snap)

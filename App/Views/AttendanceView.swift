@@ -3,6 +3,10 @@ import SwiftUI
 
 struct AttendanceView: View {
     let summary: Summary
+    /// Keyed by `AttRow.key`. Empty when the whole term is not known.
+    let terms: [String: Term]
+    /// Last day of the timetable, when known.
+    let termEnd: String?
 
     var body: some View {
         if summary.subjects.isEmpty {
@@ -20,11 +24,11 @@ struct AttendanceView: View {
                     // A healthy aggregate can hide one subject that is already
                     // drowning, so name it before the list.
                     if let worst = summary.blocker {
-                        Callout(worst: worst).padding(.bottom, 6)
+                        Callout(worst: worst, term: terms[worst.key]).padding(.bottom, 6)
                     }
 
                     ForEach(summary.subjects) { row in
-                        SubjectRow(row: row)
+                        SubjectRow(row: row, term: terms[row.key])
                     }
                 }
                 // Enough for the last card to scroll clear of the home
@@ -43,11 +47,17 @@ struct AttendanceView: View {
             Text("\(summary.attended) of \(summary.total) attended, \(String(format: "%.1f", o.pct))% overall")
                 .font(.r(14.5, .medium))
                 .foregroundStyle(Color.ink3)
+            if let end = termEnd {
+                Text("classes run to \(shortDate(end))")
+                    .font(.r(13, .medium))
+                    .foregroundStyle(Color.ink4)
+            }
         }
     }
 
     private struct Callout: View {
         let worst: AttRow
+        let term: Term?
 
         var body: some View {
             let b = worst.budget
@@ -62,6 +72,21 @@ struct AttendanceView: View {
                 .font(.r(14.5, .medium))
                 .foregroundStyle(Color(0xCBB0A9))
                 .fixedSize(horizontal: false, vertical: true)
+
+                // The bit the percentage alone cannot tell you: whether there
+                // are even enough classes left to do it in.
+                if let tm = term {
+                    Text(
+                        tm.reachable
+                            ? (tm.clears.map {
+                                "Attend every one from here and it clears on \(shortDate($0)), with \(tm.remaining) scheduled."
+                            } ?? "")
+                            : "Only \(tm.remaining) \(tm.remaining == 1 ? "class is" : "classes are") left, so \(THRESHOLD)% is no longer reachable."
+                    )
+                    .font(.r(13.5, .medium))
+                    .foregroundStyle(tm.reachable ? Color.ink2 : Color.coral)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
             }
             .slab(.surLow, radius: 28, pad: EdgeInsets(top: 20, leading: 22, bottom: 20, trailing: 22))
         }
@@ -69,6 +94,7 @@ struct AttendanceView: View {
 
     private struct SubjectRow: View {
         let row: AttRow
+        let term: Term?
 
         var body: some View {
             let b = row.budget
@@ -94,6 +120,12 @@ struct AttendanceView: View {
                         .font(.r(13.5, .medium))
                         .foregroundStyle(Color.ink3)
                         .fixedSize()
+                }
+                if let tm = term {
+                    Text(termLine(b, tm))
+                        .font(.r(13, .medium))
+                        .foregroundStyle(tm.reachable ? Color.ink4 : Color.coral)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .slab(idle ? .surDim : .sur, radius: 24, pad: EdgeInsets(top: 17, leading: 20, bottom: 17, trailing: 20))

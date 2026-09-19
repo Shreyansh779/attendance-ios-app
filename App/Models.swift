@@ -219,6 +219,98 @@ func shapeDay(sessions: [Session], rows: [AttRow], nowMin: Int) -> [Klass] {
     return list
 }
 
+// MARK: - The rest of the term
+
+/// What the remaining timetable means for one subject.
+///
+/// The percentage on its own answers "where am I"; this answers "can I still
+/// get there, and when". Only meaningful when the portal handed over the whole
+/// term rather than the next few days - see `Snapshot.termEnd`.
+struct Term {
+    /// Classes still scheduled for this subject, today onwards.
+    let remaining: Int
+    /// Does attending every one of them reach the threshold?
+    let reachable: Bool
+    /// How many of `remaining` can be missed and still clear.
+    let skippable: Int
+    /// The date it crosses the threshold if every class from here is attended.
+    /// nil when already clear, or when it cannot be reached at all.
+    let clears: String?
+    /// Last scheduled class for this subject. ISO yyyy-MM-dd.
+    let last: String?
+}
+
+/// Ties the remaining timetable to the attendance rows, keyed by `AttRow.key`.
+///
+/// A term's worth of sessions repeats the same handful of subject names, so
+/// each distinct name is resolved once rather than once per session - the
+/// matcher is far too expensive to run several hundred times per render.
+func termMap(rows: [AttRow], upcoming: [Session], threshold T: Int = THRESHOLD) -> [String: Term] {
+    guard !rows.isEmpty, !upcoming.isEmpty else { return [:] }
+
+    var byKey: [String: [String]] = [:]
+    var resolved: [String: String?] = [:]
+
+    for s in upcoming {
+        guard let d = s.date else { continue }
+        let key: String?
+        if let seen = resolved[s.subject] {
+            key = seen
+        } else {
+            let k = matchSubject(s.subject, in: rows)?.key
+            resolved[s.subject] = k
+            key = k
+        }
+        guard let k = key else { continue }
+        byKey[k, default: []].append(d)
+    }
+
+    var out: [String: Term] = [:]
+    for r in rows {
+        let dates = (byKey[r.key] ?? []).sorted()
+        let R = dates.count
+        let a = r.attended
+        let t = r.total
+
+        // Attend all R:  (a+R)/(t+R) >= T/100
+        let reachable = 100 * (a + R) >= T * (t + R)
+
+        // Miss s of them: (a+R-s)/(t+R) >= T/100, largest such s. The
+        // numerator can go negative, and max(0,) is what floors it there.
+        let raw = (100 * a + (100 - T) * R - T * t) / 100
+        let skippable = reachable ? max(0, min(R, raw)) : 0
+
+        // Attending every class from here, the threshold is crossed at the
+        // n-th one - and n is exactly the figure Budget already computes for
+        // a short subject, so there is no second sum to keep in step.
+        var clears: String?
+        let b = r.budget
+        if b.state == .short, reachable, b.value >= 1, b.value <= R {
+            clears = dates[b.value - 1]
+        }
+
+        out[r.key] = Term(
+            remaining: R, reachable: reachable,
+            skippable: skippable, clears: clears, last: dates.last
+        )
+    }
+    return out
+}
+
+/// "2026-10-14" -> "14 Oct", for the term lines.
+func shortDate(_ iso: String) -> String {
+    guard let d = Snapshot.isoDay.date(from: iso) else { return iso }
+    return d.formatted(.dateTime.day().month(.abbreviated))
+}
+
+/// One line describing where a subject stands against the rest of the term.
+func termLine(_ b: Budget, _ tm: Term) -> String {
+    if tm.remaining == 0 { return "no classes left" }
+    if !tm.reachable { return "can't reach \(THRESHOLD)% · only \(tm.remaining) left" }
+    if let c = tm.clears { return "clears \(shortDate(c)) · \(tm.remaining) left" }
+    return "\(tm.skippable) of \(tm.remaining) left can be missed"
+}
+
 struct Summary {
     let subjects: [AttRow]
     let overall: Budget

@@ -68,7 +68,12 @@ struct TodayView: View {
                 AttendAsk(
                     klass: h,
                     mark: marks[markKey(h, on: today)],
-                    enabled: h.past || h.live,
+                    // With no matching attendance row applyMarks drops the mark
+                    // on the floor, so don't offer a tick that moves no number.
+                    enabled: (h.past || h.live) && h.att != nil,
+                    note: h.att == nil
+                        ? "No matching subject to tick off"
+                        : (h.past || h.live ? "Did you attend?" : "Not started yet"),
                     onMark: { onMark(markKey(h, on: today), h.subject, $0) }
                 )
                 .padding(.top, 10)
@@ -121,6 +126,8 @@ private struct AttendAsk: View {
     let klass: Klass
     let mark: Mark?
     let enabled: Bool
+    /// Shown when nothing is marked yet: the prompt, or why there isn't one.
+    let note: String
     let onMark: (Bool?) -> Void
 
     var body: some View {
@@ -135,7 +142,7 @@ private struct AttendAsk: View {
                     .foregroundStyle(Color.ink3)
                     .buttonStyle(.plain)
             } else {
-                Text(enabled ? "Did you attend?" : "Not started yet")
+                Text(note)
                     .font(.r(14.5, .medium))
                     .foregroundStyle(Color.ink2)
                 Spacer(minLength: 0)

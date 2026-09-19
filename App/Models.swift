@@ -197,7 +197,14 @@ struct Klass: Identifiable {
 /// Marks the class on now and the next one due, and ties each to its subject.
 func shapeDay(sessions: [Session], rows: [AttRow], nowMin: Int) -> [Klass] {
     var list: [Klass] = sessions.compactMap { s in
-        guard let a = toMinutes(s.start), let b = toMinutes(s.end) else { return nil }
+        guard let a = toMinutes(s.start) else { return nil }
+        // An end that is missing, unparseable, or not after the start used to
+        // collapse the class to zero length, which reads as "already over"
+        // from its own start minute: never live, past at once, no Join button.
+        // ponytail: fixed 55-minute slot, which is what this portal issues.
+        // Read a real duration off the payload if that ever stops holding.
+        let b: Int
+        if let e = toMinutes(s.end), e > a { b = e } else { b = a + 55 }
         return Klass(session: s, s0: a, s1: b, att: matchSubject(s.subject, in: rows))
     }
     .sorted { $0.s0 < $1.s0 }

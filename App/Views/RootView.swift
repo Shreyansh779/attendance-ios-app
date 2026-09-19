@@ -93,6 +93,7 @@ struct RootView: View {
                     student: snapshot?.student,
                     photo: snapshot?.photo,
                     weekDays: snapshot?.week.count ?? 0,
+                    busy: portal.busy,
                     onSelect: { r in
                         // Only a menu tap resets the pinned class. Doing this
                         // in onChange(of: route) also caught the timetable's

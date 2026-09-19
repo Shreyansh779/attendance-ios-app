@@ -53,6 +53,12 @@ struct Snapshot: Codable {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
         f.calendar = Calendar(identifier: .gregorian)
+        // A fixed format needs a fixed locale. Otherwise the current locale's
+        // numbering system applies, so a region defaulting to Arabic-Indic or
+        // Devanagari digits writes the date in those digits and never matches
+        // the ASCII keys the scrapers produce - at which point the whole
+        // weekly timetable silently disappears.
+        f.locale = Locale(identifier: "en_US_POSIX")
         return f
     }
 

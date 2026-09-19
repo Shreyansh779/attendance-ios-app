@@ -238,6 +238,9 @@ struct Term {
     let clears: String?
     /// Last scheduled class for this subject. ISO yyyy-MM-dd.
     let last: String?
+    /// Every remaining session date for this subject, ascending. Turns "needs
+    /// 9 in a row" into nine actual dates you can put in a calendar.
+    let dates: [String]
 }
 
 /// Ties the remaining timetable to the attendance rows, keyed by `AttRow.key`.
@@ -291,7 +294,8 @@ func termMap(rows: [AttRow], upcoming: [Session], threshold T: Int = THRESHOLD) 
 
         out[r.key] = Term(
             remaining: R, reachable: reachable,
-            skippable: skippable, clears: clears, last: dates.last
+            skippable: skippable, clears: clears, last: dates.last,
+            dates: dates
         )
     }
     return out

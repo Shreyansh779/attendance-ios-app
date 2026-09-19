@@ -76,13 +76,17 @@ struct PressableStyle: ButtonStyle {
     var scale: CGFloat = 0.97
 
     func makeBody(configuration: Configuration) -> some View {
-        Body(configuration: configuration, scale: scale)
+        PressEffect(configuration: configuration, scale: scale)
     }
 
+    /// Named PressEffect, not Body: ButtonStyle has an associated type called
+    /// Body, so a nested type of that name is taken as its witness and has to
+    /// match the outer access level.
+    ///
     /// A ButtonStyle is not a View, so @Environment on the style itself is
     /// never populated - it would read false forever and quietly ignore
     /// Reduce Motion. The nested view is what can actually see it.
-    private struct Body: View {
+    private struct PressEffect: View {
         let configuration: ButtonStyleConfiguration
         let scale: CGFloat
         @Environment(\.accessibilityReduceMotion) private var reduceMotion

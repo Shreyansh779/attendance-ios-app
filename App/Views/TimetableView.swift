@@ -65,7 +65,7 @@ struct TimetableView: View {
 
             if list.isEmpty {
                 Text("No classes this day.")
-                    .font(.r(16, .medium))
+                    .r(16, .medium)
                     .foregroundStyle(Color.ink2)
                     .slab(.sur, radius: 28, pad: EdgeInsets(top: 26, leading: 24, bottom: 26, trailing: 24))
                     .padding(.top, 18)
@@ -99,10 +99,10 @@ struct TimetableView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(heading)
-                    .font(.r(21, .bold))
+                    .r(21, .bold)
                     .kerning(-0.5)
                 Text(dateLabel)
-                    .font(.r(13.5, .medium))
+                    .r(13.5, .medium)
                     .foregroundStyle(Color.ink3)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -154,8 +154,8 @@ struct TimetableView: View {
                     // but not "11:00 am" - which wrapped to "11:0 / 0 am" on
                     // every 11 o'clock class.
                     HStack(alignment: .firstTextBaseline, spacing: 2) {
-                        Text(hhmm(k.s0)).font(.r(16, .bold)).kerning(-0.3)
-                        Text(ampm(k.s0)).font(.r(11.5, .semibold)).foregroundStyle(Color.ink3)
+                        Text(hhmm(k.s0)).r(16, .bold).kerning(-0.3)
+                        Text(ampm(k.s0)).r(11.5, .semibold).foregroundStyle(Color.ink3)
                     }
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
@@ -163,7 +163,7 @@ struct TimetableView: View {
 
                     if k.live {
                         Text("\(k.s1 - nowMin) min left")
-                            .font(.r(11.5, .semibold))
+                            .r(11.5, .semibold)
                             .foregroundStyle(Color.mintDim)
                     }
                 }
@@ -171,11 +171,11 @@ struct TimetableView: View {
 
                 VStack(alignment: .leading, spacing: 5) {
                     Text(k.subject)
-                        .font(.r(k.live ? 18 : 16, .semibold))
+                        .r(k.live ? 18 : 16, .semibold)
                         .foregroundStyle(k.past ? Color.ink4 : Color.ink)
                         .fixedSize(horizontal: false, vertical: true)
                     Text(place)
-                        .font(.r(14, k.live ? .semibold : .medium))
+                        .r(14, k.live ? .semibold : .medium)
                         .foregroundStyle(k.live ? Color.mintDim : (k.past ? Color.ink4 : Color.ink3))
 
                     // A hybrid class has both a room and a join link, so the
@@ -183,7 +183,7 @@ struct TimetableView: View {
                     if !k.past, let raw = k.link, let url = URL(string: raw) {
                         Button { openURL(url) } label: {
                             Text("Join \u{2197}")
-                                .font(.r(13.5, .semibold))
+                                .r(13.5, .semibold)
                                 .foregroundStyle(Color.mintHi)
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 7)

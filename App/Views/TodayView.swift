@@ -32,7 +32,7 @@ struct TodayView: View {
                     .padding(.top, 12)
 
                 Text(h.online ? "Online" : (h.room ?? "No room"))
-                    .font(.r(h.online ? 52 : 92, .bold))
+                    .r(h.online ? 52 : 92, .bold)
                     .kerning(h.online ? -1.6 : -4)
                     .lineLimit(1)
                     .minimumScaleFactor(0.55)
@@ -41,7 +41,7 @@ struct TodayView: View {
                     .accessibilityLabel(h.online ? "Online class" : "Room \(h.room ?? "not listed")")
 
                 Text(h.subject)
-                    .font(.r(21, .medium))
+                    .r(21, .medium)
                     .lineSpacing(2)
                     .padding(.top, 20)
 
@@ -50,8 +50,8 @@ struct TodayView: View {
                         openURL(url)
                     } label: {
                         HStack(spacing: 8) {
-                            Text("Join the class").font(.r(15.5, .semibold))
-                            Text("\u{2197}").font(.r(15, .semibold))
+                            Text("Join the class").r(15.5, .semibold)
+                            Text("\u{2197}").r(15, .semibold)
                         }
                         .foregroundStyle(Color.onAccent)
                         .padding(.horizontal, 20)
@@ -63,7 +63,7 @@ struct TodayView: View {
                 }
 
                 Text(whenText(h))
-                    .font(.r(16, .medium))
+                    .r(16, .medium)
                     .foregroundStyle(Color.ink3)
                     .padding(.top, 9)
 
@@ -98,7 +98,7 @@ struct TodayView: View {
                         ? "No classes listed for today."
                         : "That was the last class for today. Nothing left to walk to."
                 )
-                .font(.r(16, .medium))
+                .r(16, .medium)
                 .foregroundStyle(Color.ink2)
                 .slab(.sur, radius: 28, pad: EdgeInsets(top: 26, leading: 24, bottom: 26, trailing: 24))
                 Spacer()
@@ -142,16 +142,16 @@ private struct AttendAsk: View {
         HStack(spacing: 10) {
             if let m = mark {
                 Text(m.attended ? "Marked attended" : "Marked missed")
-                    .font(.r(14.5, .semibold))
+                    .r(14.5, .semibold)
                     .foregroundStyle(m.attended ? Color.mintHi : Color.coral)
                 Spacer(minLength: 0)
                 Button("Undo") { onMark(nil) }
-                    .font(.r(14.5, .semibold))
+                    .r(14.5, .semibold)
                     .foregroundStyle(Color.ink3)
                     .buttonStyle(.pressable)
             } else {
                 Text(note)
-                    .font(.r(14.5, .medium))
+                    .r(14.5, .medium)
                     .foregroundStyle(Color.ink2)
                 Spacer(minLength: 0)
                 if enabled {
@@ -175,7 +175,7 @@ private struct AttendAsk: View {
         var body: some View {
             Button(action: act) {
                 Text(text)
-                    .font(.r(15, .semibold))
+                    .r(15, .semibold)
                     .foregroundStyle(tint)
                     .padding(.horizontal, 18)
                     .padding(.vertical, 9)
@@ -196,7 +196,7 @@ private struct Tag: View {
         let ink: Color = live ? (virtual ? Color.violet : .mint) : Color.ink3
         HStack(spacing: 8) {
             Circle().fill(ink).frame(width: 7, height: 7)
-            Text(state).font(.r(13.5, .semibold))
+            Text(state).r(13.5, .semibold)
         }
         .foregroundStyle(ink)
         .padding(.horizontal, 16)
@@ -220,24 +220,24 @@ private struct OwnSlack: View {
                 HStack(alignment: .firstTextBaseline, spacing: 14) {
                     Text(b.state == .empty ? "—" : (low ? "+\(b.value)" : "\(b.value)"))
                         .contentTransition(.numericText())
-                        .font(.r(34, .bold))
+                        .r(34, .bold)
                         .kerning(-1.3)
                         .foregroundStyle(tint)
                     Text(caption(b))
-                        .font(.r(14.5, .medium))
+                        .r(14.5, .medium)
                         .foregroundStyle(Color.ink2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 HStack(spacing: 12) {
                     Meter(pct: b.pct, tint: b.state == .empty ? Color.ink4 : tint)
                     Text("\(Int(b.pct.rounded()))% · \(a.attended)/\(a.total)")
-                        .font(.r(14, .semibold))
+                        .r(14, .semibold)
                         .foregroundStyle(Color.ink2)
                         .fixedSize()
                 }
                 if let tm = term {
                     Text(termLine(b, tm))
-                        .font(.r(13.5, .medium))
+                        .r(13.5, .medium)
                         .foregroundStyle(tm.reachable ? Color.ink3 : Color.coral)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -245,7 +245,7 @@ private struct OwnSlack: View {
             .slab(.sur, radius: 28, pad: EdgeInsets(top: 19, leading: 22, bottom: 19, trailing: 22))
         } else {
             Text("No attendance row matches this class.")
-                .font(.r(14.5, .medium))
+                .r(14.5, .medium)
                 .foregroundStyle(Color.ink2)
                 .slab(.sur, radius: 28, pad: EdgeInsets(top: 19, leading: 22, bottom: 19, trailing: 22))
         }
@@ -286,12 +286,12 @@ private struct DayStrip: View {
                                 .frame(width: 5, height: 5)
                         }
                         Text(hhmm(k.s0))
-                            .font(.r(13.5, .bold))
+                            .r(13.5, .bold)
                             .kerning(-0.3)
                     }
                     .foregroundStyle(k.live ? Color.mintHi : (k.past ? Color.ink4 : Color.ink))
                     Text(k.online ? "online" : (k.room ?? "—"))
-                        .font(.r(11, .medium))
+                        .r(11, .medium)
                         .foregroundStyle(k.live ? Color.mintDim : (k.past ? Color.ink4 : Color.ink3))
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)

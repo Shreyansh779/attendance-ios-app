@@ -145,8 +145,36 @@ extension ButtonStyle where Self == PressableStyle {
 }
 
 extension Font {
+    /// Fixed size. Only for contexts that need a `Font` value rather than a
+    /// view modifier; prefer `View.r(_:_:)`, which scales.
     static func r(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
         .system(size: size, weight: weight, design: .rounded)
+    }
+}
+
+/// The rounded system font at `size`, scaled by the reader's text-size setting.
+///
+/// `Font.system(size:)` ignores Dynamic Type entirely, so every size in this app
+/// used to be a fixed point value — the one accessibility gap left after the
+/// contrast work. `@ScaledMetric` is the piece that both scales the number and
+/// tells SwiftUI to re-evaluate when the setting changes.
+private struct ScaledFont: ViewModifier {
+    @ScaledMetric private var size: CGFloat
+    private let weight: Font.Weight
+
+    init(size: CGFloat, weight: Font.Weight) {
+        _size = ScaledMetric(wrappedValue: size)
+        self.weight = weight
+    }
+
+    func body(content: Content) -> some View {
+        content.font(.system(size: size, weight: weight, design: .rounded))
+    }
+}
+
+extension View {
+    func r(_ size: CGFloat, _ weight: Font.Weight = .regular) -> some View {
+        modifier(ScaledFont(size: size, weight: weight))
     }
 }
 

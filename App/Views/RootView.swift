@@ -104,6 +104,10 @@ struct RootView: View {
                 emptyState
             }
         }
+        // Text scales with the reader's setting, but only so far: past
+        // accessibility1 a 92pt room number stops being a layout and starts
+        // being a single digit. The hero keeps minimumScaleFactor as well.
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         // No forced scheme. Every colour is a solved light/dark pair now, so
         // the app follows the phone instead of insisting.
         .sensoryFeedback(.selection, trigger: route)
@@ -216,7 +220,7 @@ struct RootView: View {
                 .safeAreaInset(edge: .top) {
                     if let msg = portal.status ?? staleNote {
                         Text(msg)
-                            .font(.r(14.5, .medium))
+                            .r(14.5, .medium)
                             .foregroundStyle(Color.warnInk)
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(EdgeInsets(top: 15, leading: 18, bottom: 15, trailing: 18))
@@ -236,15 +240,15 @@ struct RootView: View {
                 .font(.system(size: 44, weight: .light))
                 .foregroundStyle(Color.ink3)
             Text("Nothing saved yet")
-                .font(.r(22, .semibold))
+                .r(22, .semibold)
                 .foregroundStyle(Color.ink)
             Text("Sign in to the portal and your classes and attendance land here.")
-                .font(.r(16, .medium))
+                .r(16, .medium)
                 .foregroundStyle(Color.ink2)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
             Button("Open the portal") { refresh() }
-                .font(.r(16, .semibold))
+                .r(16, .semibold)
                 .buttonStyle(.borderedProminent)
                 .tint(Color.mintHi)
                 .foregroundStyle(Color.onAccent)
@@ -252,7 +256,7 @@ struct RootView: View {
                 .padding(.top, 4)
             if let msg = portal.status {
                 Text(msg)
-                    .font(.r(13.5, .medium))
+                    .r(13.5, .medium)
                     .foregroundStyle(Color.warnInk)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
@@ -345,7 +349,7 @@ private struct LoginSheet: View {
             VStack(spacing: 0) {
                 if let s = portal.status {
                     Text(s)
-                        .font(.r(13.5, .medium))
+                        .r(13.5, .medium)
                         .foregroundStyle(Color.warnInk)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)

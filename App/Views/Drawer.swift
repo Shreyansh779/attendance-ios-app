@@ -75,7 +75,7 @@ struct Drawer: View {
                     } label: {
                         NavRow(route: r, selected: route == r, badge: badge(r))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.pressableCard)
                 }
 
                 Button(action: onRefresh) {
@@ -93,7 +93,7 @@ struct Drawer: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color.sur, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.pressableCard)
                 .disabled(busy)
                 .padding(.top, 7)
             }
@@ -108,6 +108,9 @@ struct Drawer: View {
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Color.drawerBG)
         .clipShape(RoundedCorners(radius: 34, corners: [.topRight, .bottomRight]))
+        // A floating layer should read as floating. Bigger surfaces carry a
+        // deeper shadow than small ones - this is the largest in the app.
+        .shadow(color: Color(0x05070A).opacity(0.45), radius: 34, x: 10, y: 0)
     }
 
     private var initials: String {
@@ -167,7 +170,7 @@ struct Drawer: View {
                             .font(.r(12, .semibold))
                             .foregroundStyle(Color.mintHi)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.pressable)
                     .padding(.top, 6)
                 }
             }

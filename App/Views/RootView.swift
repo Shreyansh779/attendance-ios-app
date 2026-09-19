@@ -1,6 +1,7 @@
 import Combine
 import Foundation
 import SwiftUI
+import UIKit
 
 struct RootView: View {
     @StateObject private var portal = Portal()
@@ -11,6 +12,9 @@ struct RootView: View {
     @State private var tick = Date()
     @State private var picked: String?
     @State private var didAutoOpen = false
+
+    /// Motion is gentler, never absent, when the system asks for less of it.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Recomputed each minute so "12 min left" and the live class stay honest
     /// without the user reopening the app.
@@ -80,6 +84,10 @@ struct RootView: View {
             }
             .padding(.horizontal, 20)
             .padding(.top, 22)
+            // The drawer is a modal task, so the page behind it goes back
+            // rather than just being dimmed - depth says "this is still here,
+            // underneath" in a way a flat scrim cannot.
+            .scaleEffect(menuOpen && !reduceMotion ? 0.95 : 1)
             // No blanket bottom padding: it left a dead band under the
             // scrolling lists, which clipped the last card and looked like
             // empty space. Each screen pads its own scroll content instead.
@@ -90,7 +98,7 @@ struct RootView: View {
                 Color(0x090B0F).opacity(0.62)
                     .ignoresSafeArea()
                     .transition(.opacity)
-                    .onTapGesture { withAnimation(.easeOut(duration: 0.24)) { menuOpen = false } }
+                    .onTapGesture { withAnimation(Motion.panel.reduced(reduceMotion)) { menuOpen = false } }
             }
 
             if menuOpen {
@@ -111,15 +119,18 @@ struct RootView: View {
                         route = r
                     },
                     onRefresh: refresh,
-                    close: { withAnimation(.easeOut(duration: 0.24)) { menuOpen = false } }
+                    close: { withAnimation(Motion.panel.reduced(reduceMotion)) { menuOpen = false } }
                 )
                 .frame(width: 306)
                 .ignoresSafeArea(edges: .bottom)
                 .transition(.move(edge: .leading))
             }
         }
-        .animation(.spring(response: 0.34, dampingFraction: 0.86), value: menuOpen)
+        .animation(Motion.panel.reduced(reduceMotion), value: menuOpen)
         .preferredColorScheme(.dark)
+        // Causality: the tap moved the drawer, so the tap is what you feel.
+        .sensoryFeedback(.impact(weight: .light), trigger: menuOpen)
+        .sensoryFeedback(.selection, trigger: route)
         .onReceive(clock) { tick = $0 }
         .fullScreenCover(isPresented: $portal.showingLogin) {
             LoginSheet(portal: portal)
@@ -138,7 +149,7 @@ struct RootView: View {
     private var header: some View {
         HStack(spacing: 14) {
             Button {
-                withAnimation(.easeOut(duration: 0.26)) { menuOpen = true }
+                withAnimation(Motion.panel.reduced(reduceMotion)) { menuOpen = true }
             } label: {
                 VStack(spacing: 4) {
                     Capsule().fill(Color.ink2).frame(width: 15, height: 2)
@@ -147,7 +158,7 @@ struct RootView: View {
                 .frame(width: 40, height: 40)
                 .background(Color.sur, in: Circle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.pressable)
 
             Text(title)
                 .font(.r(16, .semibold))
@@ -242,12 +253,18 @@ struct RootView: View {
         } else {
             snap.marks.removeValue(forKey: key)
         }
+        // Fired here rather than with .sensoryFeedback(trigger:) on the
+        // control, because that form also fires when you merely pin a
+        // different class that already carries a mark. Feedback has to follow
+        // the cause, or it trains you to ignore it.
+        UIImpactFeedbackGenerator(style: attended == nil ? .light : .medium)
+            .impactOccurred()
         Store.save(snap)
-        snapshot = snap
+        withAnimation(Motion.ui.reduced(reduceMotion)) { snapshot = snap }
     }
 
     private func refresh() {
-        withAnimation(.easeOut(duration: 0.2)) { menuOpen = false }
+        withAnimation(Motion.panel.reduced(reduceMotion)) { menuOpen = false }
         portal.begin(knownStudent: snapshot?.student) { r in
             // Merge rather than replace: the agenda only shows six days, so old
             // days stay cached until they are superseded.

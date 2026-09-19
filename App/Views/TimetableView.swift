@@ -121,7 +121,7 @@ struct TimetableView: View {
                 .frame(width: 36, height: 36)
                 .background(Color.sur, in: Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pressable)
         .disabled(!enabled)
     }
 
@@ -184,7 +184,7 @@ struct TimetableView: View {
                                 .padding(.vertical, 7)
                                 .background(Color.mintHi.opacity(0.16), in: Capsule())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.pressable)
                         .padding(.top, 8)
                     }
                 }

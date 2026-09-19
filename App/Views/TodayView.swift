@@ -34,6 +34,8 @@ struct TodayView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.55)
                     .padding(.top, 20)
+                    // Otherwise VoiceOver reads "11213" with no idea what it is.
+                    .accessibilityLabel(h.online ? "Online class" : "Room \(h.room ?? "not listed")")
 
                 Text(h.subject)
                     .font(.r(21, .medium))
@@ -53,7 +55,7 @@ struct TodayView: View {
                         .padding(.vertical, 11)
                         .background(Color.mintHi, in: Capsule())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.pressable)
                     .padding(.top, 14)
                 }
 
@@ -128,6 +130,7 @@ private struct AttendAsk: View {
     let klass: Klass
     let mark: Mark?
     let enabled: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Shown when nothing is marked yet: the prompt, or why there isn't one.
     let note: String
     let onMark: (Bool?) -> Void
@@ -142,7 +145,7 @@ private struct AttendAsk: View {
                 Button("Undo") { onMark(nil) }
                     .font(.r(14.5, .semibold))
                     .foregroundStyle(Color.ink3)
-                    .buttonStyle(.plain)
+                    .buttonStyle(.pressable)
             } else {
                 Text(note)
                     .font(.r(14.5, .medium))
@@ -158,6 +161,7 @@ private struct AttendAsk: View {
         .padding(.vertical, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.sur, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .animation(Motion.ui.reduced(reduceMotion), value: mark)
     }
 
     private struct Pill: View {
@@ -174,7 +178,7 @@ private struct AttendAsk: View {
                     .padding(.vertical, 9)
                     .background(tint.opacity(0.16), in: Capsule())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.pressable)
         }
     }
 }
@@ -210,6 +214,7 @@ private struct OwnSlack: View {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .firstTextBaseline, spacing: 14) {
                     Text(b.state == .empty ? "—" : (low ? "+\(b.value)" : "\(b.value)"))
+                        .contentTransition(.numericText())
                         .font(.r(34, .bold))
                         .kerning(-1.3)
                         .foregroundStyle(low ? Color.coral : Color.mintHi)
@@ -287,8 +292,14 @@ private struct DayStrip: View {
                         .strokeBorder(Color.mintHi.opacity(k.id == heroID ? 0.9 : 0), lineWidth: 2)
                 )
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.pressableCard)
+                .accessibilityLabel(
+                    "\(k.subject), \(hhmm(k.s0))\(ampm(k.s0)), "
+                        + (k.online ? "online" : (k.room.map { "room " + $0 } ?? "no room"))
+                )
             }
         }
+        // Pinning a class is a selection, not a commit.
+        .sensoryFeedback(.selection, trigger: picked)
     }
 }

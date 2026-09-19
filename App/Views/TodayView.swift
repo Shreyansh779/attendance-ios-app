@@ -24,10 +24,12 @@ struct TodayView: View {
     }
 
     var body: some View {
-        if let h = hero {
-            VStack(alignment: .leading, spacing: 0) {
-                // One expanding spacer, at the bottom. Two of them split the
-                // free space and left the hero marooned in the middle.
+        // The strip lives outside the hero branch on purpose. It used to be
+        // inside it, so the moment the last class ended `hero` went nil, the
+        // strip disappeared, and the day became unmarkable - at exactly the
+        // point you would sit down to mark it.
+        VStack(alignment: .leading, spacing: 0) {
+            if let h = hero {
                 Tag(state: tagState(h), virtual: h.mode == "virtual")
                     .padding(.top, 12)
 
@@ -84,27 +86,28 @@ struct TodayView: View {
                     onMark: { onMark(markKey(h, on: today), h.subject, $0) }
                 )
                 .padding(.top, 10)
-
-                Spacer(minLength: 18)
-
-                DayStrip(day: day, picked: $picked, heroID: hero?.id, marks: marks, today: today)
-            }
-            .padding(.bottom, 20)
-        } else {
-            VStack {
-                Spacer()
+            } else {
+                // A finished day is still a day. Say so near the top and point
+                // at the strip, rather than centring one slab in a void.
                 Text(
                     day.isEmpty
                         ? "No classes listed for today."
-                        : "That was the last class for today. Nothing left to walk to."
+                        : "That was the last class. Tap one below to tick it off."
                 )
                 .r(16, .medium)
                 .foregroundStyle(Color.ink2)
-                .slab(.sur, radius: 28, pad: EdgeInsets(top: 26, leading: 24, bottom: 26, trailing: 24))
-                Spacer()
+                .fixedSize(horizontal: false, vertical: true)
+                .slab(.sur, radius: 28, pad: EdgeInsets(top: 22, leading: 22, bottom: 22, trailing: 22))
+                .padding(.top, 12)
             }
-            .padding(.bottom, 20)
+
+            Spacer(minLength: 18)
+
+            if !day.isEmpty {
+                DayStrip(day: day, picked: $picked, heroID: hero?.id, marks: marks, today: today)
+            }
         }
+        .padding(.bottom, 20)
     }
 
     private func tagState(_ k: Klass) -> String {

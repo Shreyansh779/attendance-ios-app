@@ -35,7 +35,7 @@ struct AttendanceView: View {
                     }
 
                     ForEach(summary.subjects) { row in
-                        SubjectRow(row: row, term: terms[row.key])
+                        SubjectRow(row: row, term: terms[row.key], blocker: summary.blocker)
                     }
 
                     footer.padding(.top, 10)
@@ -120,7 +120,7 @@ struct AttendanceView: View {
                     "\(worst.key) is the one holding you back. It needs \(b.value) \(b.value == 1 ? "class" : "classes") in a row to clear \(THRESHOLD)%."
                 )
                 .font(.r(14.5, .medium))
-                .foregroundStyle(Color(0xCBB0A9))
+                .foregroundStyle(Color.ink2)
                 .fixedSize(horizontal: false, vertical: true)
 
                 // The bit the percentage alone cannot tell you: whether there
@@ -153,11 +153,13 @@ struct AttendanceView: View {
     private struct SubjectRow: View {
         let row: AttRow
         let term: Term?
+        let blocker: AttRow?
 
         var body: some View {
             let b = row.budget
             let low = b.state == .short
             let idle = b.state == .empty
+            let tint = Color.urgencyTint(urgency(of: row, term: term, blocker: blocker))
 
             VStack(alignment: .leading, spacing: 13) {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
@@ -170,11 +172,11 @@ struct AttendanceView: View {
                         .contentTransition(.numericText())
                         .font(.r(idle ? 15 : (low ? 16 : 22), .bold))
                         .kerning(-0.6)
-                        .foregroundStyle(idle ? Color.ink4 : (low ? Color.coral : Color.mintHi))
+                        .foregroundStyle(idle ? Color.ink4 : tint)
                         .fixedSize()
                 }
                 HStack(spacing: 12) {
-                    Meter(pct: idle ? 0 : b.pct, low: low)
+                    Meter(pct: idle ? 0 : b.pct, tint: idle ? Color.ink4 : tint)
                     Text(idle ? "not started" : "\(Int(b.pct.rounded()))% · \(row.attended)/\(row.total)")
                         .font(.r(13.5, .medium))
                         .foregroundStyle(Color.ink3)

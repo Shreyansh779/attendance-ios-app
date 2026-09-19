@@ -104,7 +104,8 @@ struct RootView: View {
                 emptyState
             }
         }
-        .preferredColorScheme(.dark)
+        // No forced scheme. Every colour is a solved light/dark pair now, so
+        // the app follows the phone instead of insisting.
         .sensoryFeedback(.selection, trigger: route)
         .onReceive(clock) { tick = $0 }
         .fullScreenCover(isPresented: $portal.showingLogin) {
@@ -132,6 +133,7 @@ struct RootView: View {
                         day: day,
                         nowMin: nowMin,
                         terms: terms,
+                        blocker: summary.blocker,
                         picked: $picked,
                         marks: snapshot?.marks ?? [:],
                         today: today,
@@ -217,10 +219,9 @@ struct RootView: View {
                             .font(.r(14.5, .medium))
                             .foregroundStyle(Color.warnInk)
                             .fixedSize(horizontal: false, vertical: true)
-                            .slab(
-                                .warnBG, radius: 22,
-                                pad: EdgeInsets(top: 15, leading: 18, bottom: 15, trailing: 18)
-                            )
+                            .padding(EdgeInsets(top: 15, leading: 18, bottom: 15, trailing: 18))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .glassEffect(.regular, in: .rect(cornerRadius: 22))
                             .padding(.horizontal, 20)
                             .padding(.bottom, 8)
                     }
@@ -246,7 +247,7 @@ struct RootView: View {
                 .font(.r(16, .semibold))
                 .buttonStyle(.borderedProminent)
                 .tint(Color.mintHi)
-                .foregroundStyle(Color(0x1B2C24))
+                .foregroundStyle(Color.onAccent)
                 .disabled(portal.busy)
                 .padding(.top, 4)
             if let msg = portal.status {
@@ -363,6 +364,5 @@ private struct LoginSheet: View {
                 }
             }
         }
-        .preferredColorScheme(.dark)
     }
 }

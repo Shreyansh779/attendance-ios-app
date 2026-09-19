@@ -219,6 +219,23 @@ func shapeDay(sessions: [Session], rows: [AttRow], nowMin: Int) -> [Klass] {
     return list
 }
 
+/// Three states rather than two.
+///
+/// Coral used to mean "below the threshold", which in a term where every
+/// subject is short paints the entire screen red. Reserving it for the one
+/// subject actually gating you - and for anything now unreachable - gives the
+/// rest somewhere quieter to sit.
+enum Urgency {
+    case fine, behind, critical
+}
+
+/// - Parameter blocker: `Summary.blocker`, the subject needing the most in a row.
+func urgency(of row: AttRow, term: Term?, blocker: AttRow?) -> Urgency {
+    if let t = term, t.remaining > 0, !t.reachable { return .critical }
+    guard row.budget.state == .short else { return .fine }
+    return row.key == blocker?.key ? .critical : .behind
+}
+
 // MARK: - The rest of the term
 
 /// What the remaining timetable means for one subject.

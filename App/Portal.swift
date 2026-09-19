@@ -17,6 +17,9 @@ final class Portal: NSObject, ObservableObject {
     static let weekURL = URL(
         string: "https://myupes-beta.upes.ac.in/connectportal/user/student/curriculum-scheduling"
     )!
+    static let holidaysURL = URL(
+        string: "https://myupes-beta.upes.ac.in/connectportal/user/student/calendar-events"
+    )!
     static let profileURL = URL(
         string: "https://myupes-beta.upes.ac.in/connectportal/user/student/collaboration/studentprofile"
     )!
@@ -92,6 +95,8 @@ final class Portal: NSObject, ObservableObject {
         let weekDiag: String?
         /// Last day of the timetable, when the whole term came through.
         let termEnd: String?
+        /// Empty when already known, since the calendar does not change.
+        let holidays: [Holiday]
         /// `data:image/...;base64,` URI from the dashboard header, if present.
         let photo: String?
     }
@@ -100,6 +105,7 @@ final class Portal: NSObject, ObservableObject {
 
     func begin(
         knownStudent: String?,
+        knownHolidays: [Holiday] = [],
         onDone: @escaping (Reading) -> Void
     ) {
         // A second tap while a read is in flight used to reload the login page
@@ -108,6 +114,7 @@ final class Portal: NSObject, ObservableObject {
         guard !busy else { return }
         self.onDone = onDone
         self.student = knownStudent
+        self.holidays = knownHolidays
         status = "Log in and solve the captcha. Wait for the dashboard to appear."
         busy = true
         showingLogin = true
@@ -201,6 +208,14 @@ final class Portal: NSObject, ObservableObject {
                     self.status = "Reading this week's timetable."
                     let week = await self.fetchWeek()
 
+                    // Both of these are hard loads, so they come after the
+                    // timetable, which soft-routes inside the app instance the
+                    // dashboard bootstrapped.
+                    if self.holidays.isEmpty {
+                        self.status = "Reading the holiday calendar."
+                        self.holidays = await self.fetchHolidays()
+                    }
+
                     if self.student == nil {
                         self.status = "Getting your name from your profile."
                         self.student = await self.fetchStudentName()
@@ -223,6 +238,30 @@ final class Portal: NSObject, ObservableObject {
     }
 
     private var student: String?
+    private var holidays: [Holiday] = []
+
+    private struct HolidayPayload: Decodable {
+        let ok: Bool
+        let holidays: [Holiday]
+    }
+
+    /// The academic calendar. Fetched only when we do not already have it -
+    /// the holiday list for a year is fixed, and this is a whole extra page
+    /// load on a connection that has already done several.
+    private func fetchHolidays() async -> [Holiday] {
+        webView.load(URLRequest(url: Portal.holidaysURL))
+        for _ in 0..<25 {
+            if Task.isCancelled { return [] }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard let raw = ((try? await eval(Scrapers.holidays)) ?? nil) as? String,
+                let data = raw.data(using: .utf8),
+                let p = try? JSONDecoder().decode(HolidayPayload.self, from: data),
+                p.ok, !p.holidays.isEmpty
+            else { continue }
+            return p.holidays
+        }
+        return []
+    }
 
     private struct NamePayload: Decodable {
         let ok: Bool
@@ -427,6 +466,7 @@ final class Portal: NSObject, ObservableObject {
                 rows: rows, sessions: sessions, student: student,
                 week: week.days, weekDiag: week.diag,
                 termEnd: week.whole ? week.days.keys.max() : nil,
+                holidays: holidays,
                 photo: photo
             )
         )

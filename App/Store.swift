@@ -1,5 +1,16 @@
 import Foundation
 
+/// A day, or a run of days, the university is shut.
+///
+/// `from` and `to` are ISO and inclusive; most are a single day, but Diwali is
+/// five and Winter Break crosses a year.
+struct Holiday: Codable, Hashable {
+    let name: String
+    let type: String
+    let from: String
+    let to: String
+}
+
 /// What the portal said on one day.
 ///
 /// The app was entirely point-in-time: it knew you were at 72.6% but not that
@@ -40,6 +51,10 @@ struct Snapshot: Codable {
     var termEnd: String?
     /// Oldest first. Capped, because this lives in UserDefaults.
     var history: [Stamp] = []
+    /// Days with no teaching. The timetable feed still lists classes on some of
+    /// them, and counting those as "remaining" makes recovery look easier than
+    /// it is — which is the wrong direction to be wrong in.
+    var holidays: [Holiday] = []
     /// The student's photo as a `data:image/...;base64,` URI, read off the
     /// dashboard header. Stored rather than re-fetched: the portal serves it
     /// inline, so there is no URL to load later.
@@ -58,6 +73,7 @@ struct Snapshot: Codable {
         weekDiag = try? c.decodeIfPresent(String.self, forKey: .weekDiag)
         termEnd = try? c.decodeIfPresent(String.self, forKey: .termEnd)
         history = (try? c.decode([Stamp].self, forKey: .history)) ?? []
+        holidays = (try? c.decode([Holiday].self, forKey: .holidays)) ?? []
         photo = try? c.decodeIfPresent(String.self, forKey: .photo)
     }
 
@@ -66,7 +82,7 @@ struct Snapshot: Codable {
         student: String?, week: [String: [Session]] = [:],
         marks: [String: Mark] = [:], weekDiag: String? = nil,
         termEnd: String? = nil, history: [Stamp] = [],
-        photo: String? = nil
+        holidays: [Holiday] = [], photo: String? = nil
     ) {
         self.savedAt = savedAt
         self.rows = rows
@@ -77,6 +93,7 @@ struct Snapshot: Codable {
         self.weekDiag = weekDiag
         self.termEnd = termEnd
         self.history = history
+        self.holidays = holidays
         self.photo = photo
     }
 
@@ -100,13 +117,18 @@ struct Snapshot: Codable {
         return Snapshot.isoDay.string(from: savedAt) == key ? sessions : []
     }
 
-    /// Every class still to come, today onwards, ascending. The term maths
-    /// needs the whole tail - the timetable screen only pages through the
-    /// first fortnight of it.
+    /// The holiday covering this day, if any.
+    func holiday(on day: String) -> Holiday? {
+        holidays.first { $0.from <= day && day <= $0.to }
+    }
+
+    /// Every class still to come, today onwards, ascending — minus the ones
+    /// scheduled on days the university is shut, which will not be held and
+    /// must not be counted as recoverable.
     func upcoming(from date: Date) -> [Session] {
         let today = Snapshot.isoDay.string(from: date)
         return week
-            .filter { $0.key >= today }
+            .filter { $0.key >= today && holiday(on: $0.key) == nil }
             .sorted { $0.key < $1.key }
             .flatMap { $0.value }
     }

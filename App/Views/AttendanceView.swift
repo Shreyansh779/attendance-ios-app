@@ -18,7 +18,7 @@ struct AttendanceView: View {
     var body: some View {
         if summary.subjects.isEmpty {
             Text("No attendance data saved yet.")
-                .font(.r(16, .medium))
+                .r(16, .medium)
                 .foregroundStyle(Color.ink2)
                 .slab(.sur, radius: 28, pad: EdgeInsets(top: 26, leading: 24, bottom: 26, trailing: 24))
                 .padding(.top, 24)
@@ -53,7 +53,7 @@ struct AttendanceView: View {
         VStack(alignment: .leading, spacing: 8) {
             if let age {
                 Text(age)
-                    .font(.r(12.5, .medium))
+                    .r(12.5, .medium)
                     .foregroundStyle(Color.ink4)
             }
             if weekDays <= 1, let d = weekDiag {
@@ -66,7 +66,7 @@ struct AttendanceView: View {
                     UIPasteboard.general.string = d
                 } label: {
                     Text("Copy diagnostic")
-                        .font(.r(12, .semibold))
+                        .r(12, .semibold)
                         .foregroundStyle(Color.mintHi)
                 }
                 .buttonStyle(.pressable)
@@ -81,14 +81,14 @@ struct AttendanceView: View {
         return VStack(alignment: .leading, spacing: 4) {
             Text(o.state == .short ? "+\(o.value) to attend" : "\(o.value) to spare")
                 .contentTransition(.numericText())
-                .font(.r(27, .bold))
+                .r(27, .bold)
                 .kerning(-0.8)
             Text("\(summary.attended) of \(summary.total) attended, \(String(format: "%.1f", o.pct))% overall")
-                .font(.r(14.5, .medium))
+                .r(14.5, .medium)
                 .foregroundStyle(Color.ink3)
             if let end = termEnd {
                 Text("classes run to \(shortDate(end))")
-                    .font(.r(13, .medium))
+                    .r(13, .medium)
                     .foregroundStyle(Color.ink4)
             }
         }
@@ -113,13 +113,13 @@ struct AttendanceView: View {
             let b = worst.budget
             VStack(alignment: .leading, spacing: 10) {
                 Text("+\(b.value)")
-                    .font(.r(38, .bold))
+                    .r(38, .bold)
                     .kerning(-1.5)
                     .foregroundStyle(Color.coral)
                 Text(
                     "\(worst.key) is the one holding you back. It needs \(b.value) \(b.value == 1 ? "class" : "classes") in a row to clear \(THRESHOLD)%."
                 )
-                .font(.r(14.5, .medium))
+                .r(14.5, .medium)
                 .foregroundStyle(Color.ink2)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -133,14 +133,14 @@ struct AttendanceView: View {
                             } ?? "")
                             : "Only \(tm.remaining) \(tm.remaining == 1 ? "class is" : "classes are") left, so \(THRESHOLD)% is no longer reachable."
                     )
-                    .font(.r(13.5, .medium))
+                    .r(13.5, .medium)
                     .foregroundStyle(tm.reachable ? Color.ink2 : Color.coral)
                     .fixedSize(horizontal: false, vertical: true)
 
                     // "Nine in a row" is a number. These are the nine days.
                     if tm.reachable, b.state == .short, b.value >= 1 {
                         Text(plan(tm, need: b.value))
-                            .font(.r(13, .medium))
+                            .r(13, .medium)
                             .foregroundStyle(Color.ink3)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -164,13 +164,13 @@ struct AttendanceView: View {
             VStack(alignment: .leading, spacing: 13) {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     Text(row.key)
-                        .font(.r(16, .semibold))
+                        .r(16, .semibold)
                         .foregroundStyle(idle ? Color.ink4 : Color.ink)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 8)
                     Text(idle ? "—" : (low ? "+\(b.value)" : "\(b.value)"))
                         .contentTransition(.numericText())
-                        .font(.r(idle ? 15 : (low ? 16 : 22), .bold))
+                        .r(idle ? 15 : (low ? 16 : 22), .bold)
                         .kerning(-0.6)
                         .foregroundStyle(idle ? Color.ink4 : tint)
                         .fixedSize()
@@ -178,13 +178,13 @@ struct AttendanceView: View {
                 HStack(spacing: 12) {
                     Meter(pct: idle ? 0 : b.pct, tint: idle ? Color.ink4 : tint)
                     Text(idle ? "not started" : "\(Int(b.pct.rounded()))% · \(row.attended)/\(row.total)")
-                        .font(.r(13.5, .medium))
+                        .r(13.5, .medium)
                         .foregroundStyle(Color.ink3)
                         .fixedSize()
                 }
                 if let tm = term {
                     Text(termLine(b, tm))
-                        .font(.r(13, .medium))
+                        .r(13, .medium)
                         .foregroundStyle(tm.reachable ? Color.ink4 : Color.coral)
                         .fixedSize(horizontal: false, vertical: true)
                 }

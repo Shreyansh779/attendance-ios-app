@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 
 struct AttendanceView: View {
     let summary: Summary
@@ -7,6 +8,12 @@ struct AttendanceView: View {
     let terms: [String: Term]
     /// Last day of the timetable, when known.
     let termEnd: String?
+    /// How many days the cached timetable covers, and what the scrape saw.
+    /// Both used to live in the drawer; they belong next to the numbers they
+    /// explain.
+    let weekDays: Int
+    let weekDiag: String?
+    let age: String?
 
     var body: some View {
         if summary.subjects.isEmpty {
@@ -30,12 +37,43 @@ struct AttendanceView: View {
                     ForEach(summary.subjects) { row in
                         SubjectRow(row: row, term: terms[row.key])
                     }
+
+                    footer.padding(.top, 10)
                 }
                 // Enough for the last card to scroll clear of the home
                 // indicator without leaving a visible gap.
                 .padding(.bottom, 20)
             }
         }
+    }
+
+    /// Freshness, and — only when the weekly scrape came back thin — what the
+    /// page actually did, so a failure is diagnosable instead of silent.
+    @ViewBuilder private var footer: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let age {
+                Text(age)
+                    .font(.r(12.5, .medium))
+                    .foregroundStyle(Color.ink4)
+            }
+            if weekDays <= 1, let d = weekDiag {
+                Text("week: \(d)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(Color.ink4)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    UIPasteboard.general.string = d
+                } label: {
+                    Text("Copy diagnostic")
+                        .font(.r(12, .semibold))
+                        .foregroundStyle(Color.mintHi)
+                }
+                .buttonStyle(.pressable)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 6)
     }
 
     private var header: some View {

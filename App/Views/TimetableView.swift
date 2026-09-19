@@ -97,15 +97,12 @@ struct TimetableView: View {
         HStack(spacing: 12) {
             arrow("chevron.left", enabled: idx > 0) { idx -= 1 }
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(heading)
-                    .r(21, .bold)
-                    .kerning(-0.5)
-                Text(dateLabel)
-                    .r(13.5, .medium)
-                    .foregroundStyle(Color.ink3)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            // The screen's own large title already says "Timetable"; repeating
+            // a second heading under it was redundant. One line, which day.
+            Text(selectedKey == today ? "Today · \(dateLabel)" : dateLabel)
+                .r(17, .semibold)
+                .foregroundStyle(selectedKey == today ? Color.ink : Color.ink2)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
             arrow("chevron.right", enabled: idx < dates.count - 1) { idx += 1 }
         }
@@ -125,18 +122,9 @@ struct TimetableView: View {
         .disabled(!enabled)
     }
 
-    private var heading: String {
-        selectedKey == today ? "Today" : weekday(selectedKey)
-    }
-
     private var dateLabel: String {
         guard let d = Snapshot.isoDay.date(from: selectedKey) else { return selectedKey }
         return d.formatted(.dateTime.weekday(.wide).day().month(.abbreviated))
-    }
-
-    private func weekday(_ key: String) -> String {
-        guard let d = Snapshot.isoDay.date(from: key) else { return key }
-        return d.formatted(.dateTime.weekday(.wide))
     }
 
     private struct Row: View {

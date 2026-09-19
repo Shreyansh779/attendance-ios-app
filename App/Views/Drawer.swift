@@ -22,6 +22,8 @@ struct Drawer: View {
     /// `data:image/...;base64,` URI from the dashboard header.
     let photo: String?
     let weekDays: Int
+    /// A read is already in flight; tapping refresh again would be a no-op.
+    let busy: Bool
     /// Picking a route from the menu, as opposed to arriving at one
     /// programmatically. Kept separate from the `route` binding so the owner
     /// can tell the two apart - tapping "Today" here should drop any pinned
@@ -79,18 +81,20 @@ struct Drawer: View {
                 Button(action: onRefresh) {
                     HStack(spacing: 13) {
                         Circle()
-                            .strokeBorder(Color.ink2, lineWidth: 2.5)
+                            .strokeBorder(busy ? Color.ink4 : Color.ink2, lineWidth: 2.5)
                             .frame(width: 16, height: 16)
-                        Text("Refresh from portal").font(.r(16, .semibold))
+                        Text(busy ? "Reading from portal…" : "Refresh from portal")
+                            .font(.r(16, .semibold))
                         Spacer(minLength: 0)
                     }
-                    .foregroundStyle(Color.ink)
+                    .foregroundStyle(busy ? Color.ink4 : Color.ink)
                     .padding(.horizontal, 18)
                     .padding(.vertical, 15)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color.sur, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                 }
                 .buttonStyle(.plain)
+                .disabled(busy)
                 .padding(.top, 7)
             }
 

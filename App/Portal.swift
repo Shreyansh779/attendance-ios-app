@@ -89,6 +89,10 @@ final class Portal: NSObject, ObservableObject {
         knownStudent: String?,
         onDone: @escaping (Reading) -> Void
     ) {
+        // A second tap while a read is in flight used to reload the login page
+        // mid-scrape and restart polling, discarding rows that had already
+        // settled. busy existed for exactly this and was never consulted.
+        guard !busy else { return }
         self.onDone = onDone
         self.student = knownStudent
         status = "Log in and solve the captcha. Wait for the dashboard to appear."
@@ -121,7 +125,11 @@ final class Portal: NSObject, ObservableObject {
         pollTask = Task { [weak self] in
             guard let self else { return }
 
-            let deadline = Date().addingTimeInterval(90)
+            // Logging in is a human step - password, captcha, sometimes an OTP
+            // - so it gets a long window. The scrape itself is quick, and the
+            // budget restarts once the dashboard is up so a slow login cannot
+            // eat it.
+            var deadline = Date().addingTimeInterval(300)
             var lastSignature = ""
             var stableReads = 0
             var sawDashboard = false
@@ -146,6 +154,7 @@ final class Portal: NSObject, ObservableObject {
                 if !sawDashboard {
                     sawDashboard = true
                     dashboardSeenAt = Date()
+                    deadline = Date().addingTimeInterval(90)
                     self.showingLogin = false
                     self.hostingHidden = true
                     self.status = "Signed in. Reading your classes and attendance."
@@ -456,6 +465,10 @@ extension Portal: WKNavigationDelegate {
         didFailProvisionalNavigation navigation: WKNavigation!,
         withError error: Error
     ) {
+        // -999 is what WebKit reports whenever one load interrupts another,
+        // which this class does on purpose twice per read: the timetable hard
+        // load and the profile load. Not a failure worth showing.
+        guard (error as NSError).code != NSURLErrorCancelled else { return }
         let msg = error.localizedDescription
         Task { @MainActor [weak self] in
             self?.status = "Could not reach the portal: \(msg)"
@@ -467,6 +480,7 @@ extension Portal: WKNavigationDelegate {
         didFail navigation: WKNavigation!,
         withError error: Error
     ) {
+        guard (error as NSError).code != NSURLErrorCancelled else { return }
         let msg = error.localizedDescription
         Task { @MainActor [weak self] in
             self?.status = "Page failed to load: \(msg)"

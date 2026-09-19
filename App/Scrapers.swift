@@ -244,7 +244,11 @@ enum Scrapers {
     var txt = clean(r.textContent || '');
 
     var room = null;
-    var rm = txt.match(/room\s*:\s*([^\s].*?)\s*$/i);
+    // Bounded on the right. The $ anchor alone made the lazy group run to the
+    // end of the row, so a join URL rendered after the room was swallowed into
+    // the room name - and the "11213(11213)" de-duplication below then stopped
+    // matching too.
+    var rm = txt.match(/room\s*:\s*([^\s].*?)\s*(?:\s(?:https?:\/\/|meeting\s*link)|$)/i);
     if (rm) {
       room = rm[1];
       // The portal prints the room twice, as "11213(11213)". Keep one.
@@ -824,18 +828,26 @@ enum Scrapers {
     try { if (window.__spy.length < 60) window.__spy.push(rec); } catch (e) {}
   };
 
+  // Patched on the prototype, in place. Replacing the global with a wrapper
+  // function - which is what this used to do - detaches the real constructor:
+  // zone.js bootstraps by patching window.XMLHttpRequest.prototype, so it
+  // would patch the wrapper's empty prototype while every actual request went
+  // through the untouched original. Angular then never runs change detection
+  // when a response lands, which is exactly the "fetches the whole timetable
+  // and renders none of it" symptom weekApi exists to work around. Patching
+  // the prototype also leaves XMLHttpRequest.DONE and instanceof intact.
   var OX = window.XMLHttpRequest;
-  if (OX) {
-    window.XMLHttpRequest = function () {
-      var x = new OX();
-      var rec = { k: 'xhr', u: '', m: '', s: 0, n: 0, b: '' };
-      var open = x.open;
-      x.open = function (m, u) {
-        rec.m = String(m || '');
-        rec.u = String(u || '');
-        return open.apply(x, arguments);
-      };
+  if (OX && OX.prototype && OX.prototype.open) {
+    var oOpen = OX.prototype.open;
+    OX.prototype.open = function (m, u) {
+      var x = this;
+      x.__spyRec = { k: 'xhr', u: String(u || ''), m: String(m || ''), s: 0, n: 0, b: '' };
+      // One listener per instance, even when open() is called again to reuse it.
+      if (x.__spyWired) return oOpen.apply(this, arguments);
+      x.__spyWired = true;
       x.addEventListener('loadend', function () {
+        var rec = x.__spyRec;
+        if (!rec) return;
         try {
           rec.s = x.status;
           var t = '';
@@ -864,7 +876,7 @@ enum Scrapers {
         } catch (e) {}
         keep(rec);
       });
-      return x;
+      return oOpen.apply(this, arguments);
     };
   }
 

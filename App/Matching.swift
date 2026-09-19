@@ -36,11 +36,24 @@ func matchSubject(_ name: String, in rows: [AttRow]) -> AttRow? {
 
     if let hit = rows.first(where: { normalise($0.key) == n }) { return hit }
 
-    if let hit = rows.first(where: {
-        let k = normalise($0.key)
-        return k.count > 6 && n.count > 6 && (k.hasPrefix(n) || n.hasPrefix(k))
-    }) {
-        return hit
+    // Several rows can be prefix-compatible at once: "Engineering Physics" and
+    // "Engineering Physics Lab" both prefix "Engineering Physics Laboratory".
+    // Taking the first in document order picked by accident, so prefer the key
+    // closest in length to the query, and give up on a tie rather than tossing
+    // a coin between two subjects.
+    if n.count > 6 {
+        let prefixHits =
+            rows
+            .map { ($0, normalise($0.key)) }
+            .filter { $0.1.count > 6 && ($0.1.hasPrefix(n) || n.hasPrefix($0.1)) }
+            .sorted { abs($0.1.count - n.count) < abs($1.1.count - n.count) }
+
+        if prefixHits.count == 1 { return prefixHits[0].0 }
+        if prefixHits.count > 1 {
+            let best = abs(prefixHits[0].1.count - n.count)
+            let tied = abs(prefixHits[1].1.count - n.count) == best
+            return tied ? nil : prefixHits[0].0
+        }
     }
 
     let a = tokenSet(name)

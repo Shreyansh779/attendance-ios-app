@@ -61,11 +61,12 @@ struct TimetableView: View {
     private var list: [Klass] {
         let sessions = week[selectedKey] ?? []
         if sessions.isEmpty && selectedKey == today { return day }
-        return shapeDay(
-            sessions: sessions,
-            rows: rows,
-            nowMin: selectedKey == today ? nowMin : -1
-        )
+        // -1 means "nothing has happened yet", which is right for a future day
+        // and wrong for a past one - it rendered yesterday's finished classes
+        // as upcoming, complete with Join buttons. A past day is entirely over.
+        let clock: Int
+        if offset == 0 { clock = nowMin } else if offset < 0 { clock = 24 * 60 } else { clock = -1 }
+        return shapeDay(sessions: sessions, rows: rows, nowMin: clock)
     }
 
     var body: some View {

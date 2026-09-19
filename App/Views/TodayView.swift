@@ -10,6 +10,8 @@ struct TodayView: View {
     let nowMin: Int
     /// Keyed by `AttRow.key`. Empty when the whole term is not known.
     let terms: [String: Term]
+    /// The subject gating everything, so only it gets the loudest colour.
+    let blocker: AttRow?
     /// Tapping the day strip pins a class; nil means follow the clock.
     @Binding var picked: String?
     let marks: [String: Mark]
@@ -51,7 +53,7 @@ struct TodayView: View {
                             Text("Join the class").font(.r(15.5, .semibold))
                             Text("\u{2197}").font(.r(15, .semibold))
                         }
-                        .foregroundStyle(Color(0x1B2C24))
+                        .foregroundStyle(Color.onAccent)
                         .padding(.horizontal, 20)
                         .padding(.vertical, 11)
                         .background(Color.mintHi, in: Capsule())
@@ -65,7 +67,7 @@ struct TodayView: View {
                     .foregroundStyle(Color.ink3)
                     .padding(.top, 9)
 
-                OwnSlack(att: h.att, term: h.att.flatMap { terms[$0.key] })
+                OwnSlack(att: h.att, term: h.att.flatMap { terms[$0.key] }, blocker: blocker)
                     .padding(.top, 22)
 
                 // Answering here is what keeps you off the portal: one tap
@@ -191,7 +193,7 @@ private struct Tag: View {
     private var live: Bool { state == "In class now" }
 
     var body: some View {
-        let ink: Color = live ? (virtual ? Color(0xE58FC0) : .mint) : Color(0x93A0B4)
+        let ink: Color = live ? (virtual ? Color.violet : .mint) : Color.ink3
         HStack(spacing: 8) {
             Circle().fill(ink).frame(width: 7, height: 7)
             Text(state).font(.r(13.5, .semibold))
@@ -199,7 +201,7 @@ private struct Tag: View {
         .foregroundStyle(ink)
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(live ? Color.surLive : Color(0x232833), in: Capsule())
+        .glassEffect(live ? .regular.tint(Color.surLive) : .regular, in: .capsule)
     }
 }
 
@@ -207,25 +209,27 @@ private struct Tag: View {
 private struct OwnSlack: View {
     let att: AttRow?
     let term: Term?
+    let blocker: AttRow?
 
     var body: some View {
         if let a = att {
             let b = a.budget
             let low = b.state == .short
+            let tint = Color.urgencyTint(urgency(of: a, term: term, blocker: blocker))
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .firstTextBaseline, spacing: 14) {
                     Text(b.state == .empty ? "—" : (low ? "+\(b.value)" : "\(b.value)"))
                         .contentTransition(.numericText())
                         .font(.r(34, .bold))
                         .kerning(-1.3)
-                        .foregroundStyle(low ? Color.coral : Color.mintHi)
+                        .foregroundStyle(tint)
                     Text(caption(b))
                         .font(.r(14.5, .medium))
                         .foregroundStyle(Color.ink2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 HStack(spacing: 12) {
-                    Meter(pct: b.pct, low: low)
+                    Meter(pct: b.pct, tint: b.state == .empty ? Color.ink4 : tint)
                     Text("\(Int(b.pct.rounded()))% · \(a.attended)/\(a.total)")
                         .font(.r(14, .semibold))
                         .foregroundStyle(Color.ink2)

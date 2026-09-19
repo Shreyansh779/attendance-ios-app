@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Minimal, nothing sharp. Corners are never under 18, there are no borders or
 /// hairline rules anywhere, and separation is carried by space and tone. The
@@ -14,30 +15,62 @@ extension Color {
         )
     }
 
-    static let bg = Color(0x191C23)
-    static let sur = Color(0x22262F)
-    static let surDim = Color(0x1E2129)
-    static let surLive = Color(0x2C4B3E)
-    static let surVirtual = Color(0x332A38)
-    static let surLow = Color(0x3A2C2B)
-    static let drawerBG = Color(0x1E222A)
-    static let track = Color(0x2C313C)
+    /// Dark value first, because this app was designed dark-first and that is
+    /// still the one anyone looks at.
+    ///
+    /// Every pair below was solved rather than picked: each ink clears WCAG AA
+    /// (4.5:1) against every surface in its own scheme, and each step of the
+    /// ramp stays ~1.4x apart in luminance so the hierarchy survives the floor.
+    init(_ dark: UInt32, _ light: UInt32) {
+        self.init(UIColor { $0.userInterfaceStyle == .dark ? UIColor(dark) : UIColor(light) })
+    }
 
-    // A four-step ramp where even the dimmest step clears WCAG AA (4.5:1) on
-    // every neutral surface, and each step stays ~1.4x brighter than the one
-    // below so the hierarchy still reads. The old ramp bottomed out at 2.71:1
-    // - the "past class" rows were genuinely unreadable, not just quiet.
-    static let ink = Color(0xEDEFF3)  // 11.58:1
-    static let ink2 = Color(0xC4D0E4)  // 8.56:1
-    static let ink3 = Color(0xA9B2C4)  // 6.26:1
-    static let ink4 = Color(0x8F97A6)  // 4.54:1 - the floor
+    static let bg = Color(0x191C23, 0xF2F4F8)
+    static let sur = Color(0x22262F, 0xFFFFFF)
+    static let surDim = Color(0x1E2129, 0xE9ECF2)
+    static let surLive = Color(0x2C4B3E, 0xE4F4EC)
+    static let surVirtual = Color(0x332A38, 0xF4EFF7)
+    static let surLow = Color(0x3A2C2B, 0xFBEDEA)
+    static let track = Color(0x2C313C, 0xDDE1E9)
 
-    static let mint = Color(0x6FD4A6)
-    static let mintHi = Color(0x8BE3B8)
-    static let mintDim = Color(0x6FBF9A)
-    static let coral = Color(0xF08A70)
-    static let warnBG = Color(0x33302A)
-    static let warnInk = Color(0xE8CE9C)
+    static let ink = Color(0xEDEFF3, 0x11151C)
+    static let ink2 = Color(0xC4D0E4, 0x3D424D)
+    static let ink3 = Color(0xA9B2C4, 0x4F5664)
+    static let ink4 = Color(0x8F97A6, 0x626B7C)
+
+    static let mint = Color(0x6FD4A6, 0x3D755C)
+    static let mintHi = Color(0x8BE3B8, 0x2F6B4E)
+    static let mintDim = Color(0x6FBF9A, 0x4A806A)
+    static let coral = Color(0xF08A70, 0x9B5948)
+    /// The middle state. Before this there was only "fine" and "alarm", so a
+    /// term where every subject is short rendered as an unbroken wall of red -
+    /// and when everything is an alarm, nothing is.
+    static let amber = Color(0xE8B14C, 0x85652C)
+    static let violet = Color(0xE58FC0, 0x8A4A72)
+    static let warnBG = Color(0x33302A, 0xFCF3E0)
+    static let warnInk = Color(0xE8CE9C, 0x6B5320)
+    /// Text that sits on top of a mint-filled control.
+    static let onAccent = Color(0x1B2C24, 0xFFFFFF)
+
+    /// How loudly a subject should shout.
+    static func urgencyTint(_ u: Urgency) -> Color {
+        switch u {
+        case .fine: return .mintHi
+        case .behind: return .amber
+        case .critical: return .coral
+        }
+    }
+}
+
+extension UIColor {
+    fileprivate convenience init(_ hex: UInt32) {
+        self.init(
+            red: CGFloat((hex >> 16) & 0xFF) / 255,
+            green: CGFloat((hex >> 8) & 0xFF) / 255,
+            blue: CGFloat(hex & 0xFF) / 255,
+            alpha: 1
+        )
+    }
 }
 
 // MARK: - Motion
@@ -146,14 +179,16 @@ extension View {
 /// Progress toward the threshold. Capsule, so there is nothing to line.
 struct Meter: View {
     let pct: Double
-    let low: Bool
+    /// A colour rather than a bool, because "behind" and "cannot recover" are
+    /// not the same state and should not look the same.
+    let tint: Color
 
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
                 Capsule().fill(Color.track)
                 Capsule()
-                    .fill(low ? Color.coral : Color.mint)
+                    .fill(tint)
                     .frame(width: max(0, min(1, pct / 100)) * geo.size.width)
             }
         }

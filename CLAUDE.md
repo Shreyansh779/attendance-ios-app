@@ -52,7 +52,9 @@ The IPA ships **unsigned** by design; a sideloader re-signs it. Pushing to
 - **No app extensions.** No widget, no Live Activity, no App Intents extension.
   An extension means a second bundle ID, which breaks the free-tier signing this
   project deliberately protects. This is why there is no widget despite the
-  obvious use case. App Intents in the *main* target are fine.
+  obvious use case. App Intents would have been fine (main target, no
+  extension) but were removed at the owner's request — unused. Don't re-add
+  them without asking; Siri, Shortcuts and Spotlight all went with them.
 - **No App Group, no entitlements file.** Same reason.
 - **Local notifications and EventKit are fine** — neither needs an entitlement.
 
@@ -70,7 +72,15 @@ The IPA ships **unsigned** by design; a sideloader re-signs it. Pushing to
   Brute-forced against 893,101 combinations in the verify suite.
 - `Matching.swift` — ties timetable subject names to attendance rows. Returning
   nil is a valid answer; showing another subject's numbers is not.
-- `Store.swift` — `UserDefaults`. `Snapshot.termEnd` is set **only** when a
+- `Notify.swift` — local reminders before each class, plus one end-of-day
+  nudge. iOS caps pending local notifications at 64 and silently drops the
+  rest, so it schedules 60 and each refresh tops the queue up. It reschedules
+  on *launch* too, because a re-signed sideload is a reinstall and a reinstall
+  clears the queue.
+- `Store.swift` — `UserDefaults`. `Snapshot.history` is one `Stamp` per day the
+  portal was read, holding the portal's own rows — not the marked ones, or the
+  trend would move when you ticked a box rather than when you attended
+  something. `Snapshot.termEnd` is set **only** when a
   whole-term read succeeded; everything term-aware is gated on it, because
   calling a subject hopeless on the strength of a six-day agenda would be a lie.
 

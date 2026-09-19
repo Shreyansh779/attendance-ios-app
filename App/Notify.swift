@@ -7,6 +7,22 @@ import UserNotifications
 /// free-tier signing this project depends on still works. (A Live Activity
 /// would be the better experience and is exactly what the extension ban rules
 /// out — see CLAUDE.md.)
+/// Shows notifications while the app is open.
+///
+/// Without this, iOS silently swallows the banner whenever the app is
+/// frontmost - so a reminder that fires while you are looking at the app
+/// looks exactly like a reminder that never fired. Set at launch.
+final class NotifyPresenter: NSObject, UNUserNotificationCenterDelegate {
+    static let shared = NotifyPresenter()
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        [.banner, .sound, .list]
+    }
+}
+
 enum Notify {
     /// How long before the class starts.
     static let lead = 30

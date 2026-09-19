@@ -16,6 +16,13 @@ struct TimetableView: View {
     /// What has already been ticked off, and how to tick.
     let marks: [String: Mark]
     let onMark: (String, String, Bool?) -> Void
+    /// Days the university is shut. The feed still lists classes on some of
+    /// them, and showing those would be a lie about the day.
+    let holidays: [Holiday]
+
+    private var holidayToday: Holiday? {
+        holidays.first { $0.from <= selectedKey && selectedKey <= $0.to }
+    }
 
     /// Days from today. Negative is the past, which is the whole point of
     /// letting it go backwards: a class you missed on Tuesday is only
@@ -73,7 +80,20 @@ struct TimetableView: View {
         VStack(alignment: .leading, spacing: 0) {
             nav
 
-            if list.isEmpty {
+            if let h = holidayToday {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(h.name)
+                        .r(20, .bold)
+                        .kerning(-0.4)
+                    Text(h.type.isEmpty ? "No classes" : h.type)
+                        .r(14, .medium)
+                        .foregroundStyle(Color.ink3)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .slab(.sur, radius: 28, pad: EdgeInsets(top: 24, leading: 22, bottom: 24, trailing: 22))
+                .padding(.top, 18)
+                Spacer()
+            } else if list.isEmpty {
                 Text(
                     offset < 0 && week[selectedKey] == nil
                         ? "Nothing cached for this day. Days are stored as you refresh."

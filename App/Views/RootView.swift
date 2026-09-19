@@ -177,7 +177,8 @@ struct RootView: View {
                             route = .today
                         },
                         marks: snapshot?.marks ?? [:],
-                        onMark: mark
+                        onMark: mark,
+                        holidays: snapshot?.holidays ?? []
                     )
                 }
             }
@@ -339,7 +340,10 @@ struct RootView: View {
     }
 
     private func refresh() {
-        portal.begin(knownStudent: snapshot?.student) { r in
+        portal.begin(
+            knownStudent: snapshot?.student,
+            knownHolidays: snapshot?.holidays ?? []
+        ) { r in
             // Merge rather than replace: the agenda only shows six days, so old
             // days stay cached until they are superseded.
             var merged = snapshot?.week ?? [:]
@@ -359,6 +363,7 @@ struct RootView: View {
                 // an earlier whole-term read established.
                 termEnd: r.termEnd ?? snapshot?.termEnd,
                 history: Snapshot.extend(snapshot?.history ?? [], with: r.rows, on: Date()),
+                holidays: r.holidays.isEmpty ? (snapshot?.holidays ?? []) : r.holidays,
                 photo: r.photo ?? snapshot?.photo
             )
             Store.save(snap)

@@ -343,6 +343,63 @@ check('scraped term feeds the maths and every session is counted once', () => {
 });
 
 /* ---------------------------------------------------------------------
+   The holiday grid. Dates arrive DD-MM-YYYY with a weekday chip beside them,
+   and a row can span days - so both the ordering and the range matter.
+   --------------------------------------------------------------------- */
+console.log('\nHOLIDAYS  (real code out of Scrapers.swift)');
+
+check('the holiday grid parses, including ranges and a year boundary', () => {
+  const ROWS = [
+    ['Harela Parv', 'State Holiday', '16-07-2026', 'THURSDAY', '16-07-2026', 'THURSDAY'],
+    ['Gandhi Jayanti', 'National Holiday', '02-10-2026', 'FRIDAY', '02-10-2026', 'FRIDAY'],
+    ['Diwali', 'City Holiday', '09-11-2026', 'MONDAY', '13-11-2026', 'FRIDAY'],
+    ['Winter Break', 'State Holiday', '25-12-2026', 'FRIDAY', '01-01-2027', 'FRIDAY'],
+  ];
+  const cell = (v) => ({ textContent: String(v) });
+  const trs = [
+    // a header row, which has no <td> and must be skipped
+    { textContent: 'Holiday/Event name Type Start Date End Date',
+      querySelector: () => null, querySelectorAll: () => [] },
+    ...ROWS.map((r) => {
+      const tds = [cell(r[0]), cell(r[1]), cell(r[2] + ' ' + r[3]), cell(r[4] + ' ' + r[5])];
+      return {
+        textContent: r.join(' '),
+        querySelector: () => null,
+        querySelectorAll: (sel) => (sel === 'td' ? tds : []),
+      };
+    }),
+  ];
+  const doc = { querySelectorAll: (sel) => (sel === 'tr' ? trs : []) };
+  const out = JSON.parse(new Function('document', 'return (' + blobs.holidays + ')')(doc));
+
+  truthy(out.ok, 'parsed nothing: ' + JSON.stringify(out).slice(0, 120));
+  eq(out.holidays.length, 4, 'four data rows, header skipped');
+
+  const by = Object.fromEntries(out.holidays.map((h) => [h.name, h]));
+  eq([by['Gandhi Jayanti'].from, by['Gandhi Jayanti'].to], ['2026-10-02', '2026-10-02'], 'single day');
+  eq([by['Diwali'].from, by['Diwali'].to], ['2026-11-09', '2026-11-13'], 'five-day range');
+  eq([by['Winter Break'].from, by['Winter Break'].to], ['2026-12-25', '2027-01-01'], 'crosses a year');
+  eq(by['Gandhi Jayanti'].type, 'National Holiday', 'type captured');
+});
+
+check('a weekday chip is never mistaken for a date', () => {
+  // THURSDAY contains no digits, but the guard that matters is that the name
+  // comes from the first cell rather than the whole row.
+  const tds = [
+    { textContent: 'Diwali' }, { textContent: 'City Holiday' },
+    { textContent: '09-11-2026 MONDAY' }, { textContent: '13-11-2026 FRIDAY' },
+  ];
+  const tr = {
+    textContent: 'Diwali City Holiday 09-11-2026 MONDAY 13-11-2026 FRIDAY',
+    querySelector: () => null,
+    querySelectorAll: (sel) => (sel === 'td' ? tds : []),
+  };
+  const doc = { querySelectorAll: (sel) => (sel === 'tr' ? [tr] : []) };
+  const out = JSON.parse(new Function('document', 'return (' + blobs.holidays + ')')(doc));
+  eq(out.holidays[0].name, 'Diwali', 'name is the first cell only');
+});
+
+/* ---------------------------------------------------------------------
    survivingMarks: which hand-marks a refresh is allowed to throw away.
 
    Too eager and you silently lose work you did by hand; too lax and a class

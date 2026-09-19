@@ -1055,6 +1055,58 @@ enum Scrapers {
 })()
 """#
 
+    /// The holiday table, so the term maths stops counting classes that will
+    /// never be held.
+    ///
+    /// Dates are DD-MM-YYYY with a weekday chip beside them, and a row can
+    /// span days — Diwali is five, Winter Break crosses a year boundary. Rows
+    /// are matched by shape rather than column index: take every DD-MM-YYYY
+    /// in the row, first is the start and last is the end. That survives a
+    /// column being added or reordered, which a fixed index would not.
+    static let holidays = #"""
+(function () {
+  var clean = function (t) { return String(t == null ? '' : t).replace(/\s+/g, ' ').trim(); };
+  var DMY = /\b(\d{2})-(\d{2})-(\d{4})\b/g;
+
+  var out = [];
+  var rows = document.querySelectorAll('tr');
+
+  for (var i = 0; i < rows.length; i++) {
+    var tr = rows[i];
+    // A row holding another row is a layout wrapper, not a data row.
+    if (tr.querySelector('tr')) continue;
+
+    var tds = tr.querySelectorAll('td');
+    if (tds.length < 2) continue;
+
+    var whole = clean(tr.textContent);
+    var found = [], m;
+    DMY.lastIndex = 0;
+    while ((m = DMY.exec(whole))) {
+      // DD-MM-YYYY in, ISO out.
+      found.push(m[3] + '-' + m[2] + '-' + m[1]);
+    }
+    if (!found.length) continue;
+
+    // The name is the first cell. Reading it from the cell rather than the
+    // row keeps the weekday chips in the date columns out of it.
+    var name = clean(tds[0].textContent);
+    if (!name || !/[A-Za-z]{3,}/.test(name)) continue;
+
+    out.push({
+      name: name,
+      type: clean(tds[1].textContent),
+      from: found[0],
+      to: found[found.length - 1]
+    });
+  }
+
+  // The grid paginates, so the visible page is all there is to see. The row
+  // count goes back too: a short list is then a signal rather than silence.
+  return JSON.stringify({ ok: out.length > 0, holidays: out, rows: rows.length });
+})()
+"""#
+
     /// Cheap check for whether the router has landed on the dashboard yet.
     static let route = "location.pathname"
 }

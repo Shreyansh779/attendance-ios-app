@@ -64,6 +64,14 @@ struct RootView: View {
         return shapeDay(sessions: s.sessions(for: tick), rows: rows, nowMin: nowMin)
     }
 
+    /// Shaped with a clock of -1, so nothing in it reads as past or live.
+    private var tomorrow: [Klass] {
+        guard let s = snapshot,
+            let next = Calendar.current.date(byAdding: .day, value: 1, to: tick)
+        else { return [] }
+        return shapeDay(sessions: s.sessions(for: next), rows: rows, nowMin: -1)
+    }
+
     private var summary: Summary { Summary(rows) }
 
     /// Only computed when the whole term is known and has not already run out;
@@ -147,6 +155,7 @@ struct RootView: View {
                         nowMin: nowMin,
                         terms: terms,
                         blocker: summary.blocker,
+                        tomorrow: tomorrow,
                         picked: $picked,
                         marks: snapshot?.marks ?? [:],
                         today: today,

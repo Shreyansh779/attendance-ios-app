@@ -3,12 +3,38 @@ import Foundation
 import SwiftUI
 import UIKit
 
+/// The three screens, as a real tab bar.
+///
+/// This used to be a hamburger drawer, which is a Material Design pattern — no
+/// Apple app on the phone has one. A tab bar is what iOS users already know,
+/// and on iOS 26 the system gives it Liquid Glass for free.
+enum Route: String, CaseIterable, Hashable {
+    case today, timetable, attendance
+
+    var title: String {
+        switch self {
+        case .today: return "Today"
+        case .timetable: return "Timetable"
+        case .attendance: return "Attendance"
+        }
+    }
+
+    /// SF Symbols, rather than the hand-drawn circles and bars this app used to
+    /// carry. They come weight-matched to the system font and adapt on their own.
+    var symbol: String {
+        switch self {
+        case .today: return "location.fill"
+        case .timetable: return "calendar"
+        case .attendance: return "chart.bar.fill"
+        }
+    }
+}
+
 struct RootView: View {
     @StateObject private var portal = Portal()
 
     @State private var snapshot: Snapshot? = Store.load()
     @State private var route: Route = .today
-    @State private var menuOpen = false
     @State private var tick = Date()
     @State private var picked: String?
     @State private var didAutoOpen = false
@@ -16,8 +42,8 @@ struct RootView: View {
     /// Motion is gentler, never absent, when the system asks for less of it.
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// Recomputed each minute so "12 min left" and the live class stay honest
-    /// without the user reopening the app.
+    /// Recomputed each half-minute so "12 min left" and the live class stay
+    /// honest without the user reopening the app.
     private let clock = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
 
     private var nowMin: Int {
@@ -48,8 +74,12 @@ struct RootView: View {
         return termMap(rows: rows, upcoming: s.upcoming(from: tick))
     }
 
+    private var hasData: Bool { !(snapshot?.rows.isEmpty ?? true) }
+
+    private var today: String { Snapshot.isoDay.string(from: tick) }
+
     var body: some View {
-        ZStack(alignment: .leading) {
+        ZStack {
             // The live webview, full size, underneath an opaque background.
             //
             // It used to be pinned to 1x1pt while reading in the background,
@@ -68,68 +98,13 @@ struct RootView: View {
 
             Color.bg.ignoresSafeArea()
 
-            VStack(alignment: .leading, spacing: 0) {
-                header
-
-                if let msg = portal.status ?? staleNote {
-                    Text(msg)
-                        .font(.r(14.5, .medium))
-                        .foregroundStyle(Color.warnInk)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .slab(.warnBG, radius: 22, pad: EdgeInsets(top: 15, leading: 18, bottom: 15, trailing: 18))
-                        .padding(.top, 14)
-                }
-
-                content
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 22)
-            // The drawer is a modal task, so the page behind it goes back
-            // rather than just being dimmed - depth says "this is still here,
-            // underneath" in a way a flat scrim cannot.
-            .scaleEffect(menuOpen && !reduceMotion ? 0.95 : 1)
-            // No blanket bottom padding: it left a dead band under the
-            // scrolling lists, which clipped the last card and looked like
-            // empty space. Each screen pads its own scroll content instead.
-
-            // Kept in the hierarchy so WebKit doesn't throttle it; see the
-            // full-size copies at the bottom of the stack.
-            if menuOpen {
-                Color(0x090B0F).opacity(0.62)
-                    .ignoresSafeArea()
-                    .transition(.opacity)
-                    .onTapGesture { withAnimation(Motion.panel.reduced(reduceMotion)) { menuOpen = false } }
-            }
-
-            if menuOpen {
-                Drawer(
-                    route: $route,
-                    day: day,
-                    summary: summary,
-                    snapshot: snapshot,
-                    student: snapshot?.student,
-                    photo: snapshot?.photo,
-                    weekDays: snapshot?.week.count ?? 0,
-                    busy: portal.busy,
-                    onSelect: { r in
-                        // Only a menu tap resets the pinned class. Doing this
-                        // in onChange(of: route) also caught the timetable's
-                        // own navigation and cleared the class just tapped.
-                        if r == .today { picked = nil }
-                        route = r
-                    },
-                    onRefresh: refresh,
-                    close: { withAnimation(Motion.panel.reduced(reduceMotion)) { menuOpen = false } }
-                )
-                .frame(width: 306)
-                .ignoresSafeArea(edges: .bottom)
-                .transition(.move(edge: .leading))
+            if hasData {
+                tabs
+            } else {
+                emptyState
             }
         }
-        .animation(Motion.panel.reduced(reduceMotion), value: menuOpen)
         .preferredColorScheme(.dark)
-        // Causality: the tap moved the drawer, so the tap is what you feel.
-        .sensoryFeedback(.impact(weight: .light), trigger: menuOpen)
         .sensoryFeedback(.selection, trigger: route)
         .onReceive(clock) { tick = $0 }
         .fullScreenCover(isPresented: $portal.showingLogin) {
@@ -140,107 +115,161 @@ struct RootView: View {
         .onAppear {
             guard !didAutoOpen else { return }
             didAutoOpen = true
-            if snapshot?.rows.isEmpty ?? true { refresh() }
+            if !hasData { refresh() }
             // A re-signed sideload is a reinstall, and a reinstall clears the
             // pending queue - so rebuild it every launch, not only on refresh.
             rescheduleReminders()
         }
     }
 
+    // MARK: - Tabs
+
+    private var tabs: some View {
+        TabView(selection: $route) {
+            Tab(Route.today.title, systemImage: Route.today.symbol, value: Route.today) {
+                screen(title: snapshot?.student ?? "Today", leadingAvatar: true) {
+                    TodayView(
+                        day: day,
+                        nowMin: nowMin,
+                        terms: terms,
+                        picked: $picked,
+                        marks: snapshot?.marks ?? [:],
+                        today: today,
+                        onMark: mark
+                    )
+                }
+            }
+
+            Tab(Route.timetable.title, systemImage: Route.timetable.symbol, value: Route.timetable) {
+                screen(title: Route.timetable.title) {
+                    TimetableView(
+                        day: day,
+                        nowMin: nowMin,
+                        week: snapshot?.week ?? [:],
+                        rows: rows,
+                        today: today,
+                        onOpenToday: { id in
+                            picked = id
+                            route = .today
+                        }
+                    )
+                }
+            }
+
+            Tab(Route.attendance.title, systemImage: Route.attendance.symbol, value: Route.attendance) {
+                screen(title: Route.attendance.title) {
+                    AttendanceView(
+                        summary: summary,
+                        terms: terms,
+                        // Tied to the same guard, so the header cannot announce
+                        // a term end the rows below have gone quiet about.
+                        termEnd: terms.isEmpty ? nil : snapshot?.termEnd,
+                        weekDays: snapshot?.week.count ?? 0,
+                        weekDiag: snapshot?.weekDiag,
+                        age: snapshot?.ageText
+                    )
+                }
+            }
+        }
+        .tint(Color.mintHi)
+    }
+
+    /// One screen's chrome: a real navigation bar, the refresh control, and the
+    /// status line — so every tab answers "where am I / what can I do here" the
+    /// same way.
+    @ViewBuilder
+    private func screen<Content: View>(
+        title: String,
+        leadingAvatar: Bool = false,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        NavigationStack {
+            content()
+                .padding(.horizontal, 20)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .background(Color.bg)
+                .navigationTitle(title)
+                .navigationBarTitleDisplayMode(.large)
+                .toolbar {
+                    if leadingAvatar, let img = photoImage {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Image(uiImage: img)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: 30, height: 30)
+                                .clipShape(Circle())
+                                .accessibilityHidden(true)
+                        }
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            refresh()
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .disabled(portal.busy)
+                        .accessibilityLabel("Refresh from portal")
+                    }
+                }
+                .safeAreaInset(edge: .top) {
+                    if let msg = portal.status ?? staleNote {
+                        Text(msg)
+                            .font(.r(14.5, .medium))
+                            .foregroundStyle(Color.warnInk)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .slab(
+                                .warnBG, radius: 22,
+                                pad: EdgeInsets(top: 15, leading: 18, bottom: 15, trailing: 18)
+                            )
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 8)
+                    }
+                }
+        }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 18) {
+            Spacer()
+            Image(systemName: "calendar.badge.exclamationmark")
+                .font(.system(size: 44, weight: .light))
+                .foregroundStyle(Color.ink3)
+            Text("Nothing saved yet")
+                .font(.r(22, .semibold))
+                .foregroundStyle(Color.ink)
+            Text("Sign in to the portal and your classes and attendance land here.")
+                .font(.r(16, .medium))
+                .foregroundStyle(Color.ink2)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Open the portal") { refresh() }
+                .font(.r(16, .semibold))
+                .buttonStyle(.borderedProminent)
+                .tint(Color.mintHi)
+                .foregroundStyle(Color(0x1B2C24))
+                .disabled(portal.busy)
+                .padding(.top, 4)
+            if let msg = portal.status {
+                Text(msg)
+                    .font(.r(13.5, .medium))
+                    .foregroundStyle(Color.warnInk)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 32)
+    }
+
     // MARK: - Pieces
 
-    private var header: some View {
-        HStack(spacing: 14) {
-            Button {
-                withAnimation(Motion.panel.reduced(reduceMotion)) { menuOpen = true }
-            } label: {
-                VStack(spacing: 4) {
-                    Capsule().fill(Color.ink2).frame(width: 15, height: 2)
-                    Capsule().fill(Color.ink2).frame(width: 15, height: 2)
-                }
-                .frame(width: 40, height: 40)
-                .background(Color.sur, in: Circle())
-            }
-            .buttonStyle(.pressable)
-
-            Text(title)
-                .font(.r(16, .semibold))
-                .foregroundStyle(Color.ink3)
-
-            Spacer(minLength: 0)
-
-            Text(subtitle)
-                .font(.r(14, .medium))
-                .foregroundStyle(Color.ink4)
-        }
-    }
-
-    @ViewBuilder private var content: some View {
-        if snapshot == nil || (snapshot?.rows.isEmpty ?? true) {
-            VStack {
-                Spacer()
-                Text("Nothing saved yet. Open the menu and tap refresh, then log in — today's classes and your attendance land here.")
-                    .font(.r(16, .medium))
-                    .foregroundStyle(Color.ink2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .slab(.sur, radius: 28, pad: EdgeInsets(top: 26, leading: 24, bottom: 26, trailing: 24))
-                Spacer()
-            }
-        } else {
-            switch route {
-            case .today:
-                TodayView(
-                    day: day,
-                    nowMin: nowMin,
-                    terms: terms,
-                    picked: $picked,
-                    marks: snapshot?.marks ?? [:],
-                    today: Snapshot.isoDay.string(from: tick),
-                    onMark: mark
-                )
-            case .timetable:
-                TimetableView(
-                    day: day,
-                    nowMin: nowMin,
-                    week: snapshot?.week ?? [:],
-                    rows: rows,
-                    today: Snapshot.isoDay.string(from: tick),
-                    onOpenToday: { id in
-                        picked = id
-                        route = .today
-                    }
-                )
-            case .attendance:
-                AttendanceView(
-                    summary: summary,
-                    terms: terms,
-                    // Tied to the same guard, so the header cannot announce a
-                    // term end that the rows below have gone quiet about.
-                    termEnd: terms.isEmpty ? nil : snapshot?.termEnd
-                )
-            }
-        }
-    }
-
-    private var title: String {
-        switch route {
-        case .today: return snapshot?.student ?? "Today"
-        case .timetable: return "Timetable"
-        case .attendance: return "Attendance"
-        }
-    }
-
-    private var subtitle: String {
-        switch route {
-        case .attendance:
-            return summary.subjects.isEmpty ? "" : String(format: "%.1f%%", summary.overall.pct)
-        case .timetable:
-            return ""
-        case .today:
-            let left = day.filter { !$0.past }.count
-            if day.isEmpty { return "" }
-            return left > 0 ? "\(left) left" : "done"
-        }
+    /// Decoded from the `data:` URI the dashboard header carries.
+    private var photoImage: UIImage? {
+        guard let p = snapshot?.photo,
+            let comma = p.firstIndex(of: ","),
+            let data = Data(base64Encoded: String(p[p.index(after: comma)...]))
+        else { return nil }
+        return UIImage(data: data)
     }
 
     private var staleNote: String? {
@@ -276,7 +305,6 @@ struct RootView: View {
     }
 
     private func refresh() {
-        withAnimation(Motion.panel.reduced(reduceMotion)) { menuOpen = false }
         portal.begin(knownStudent: snapshot?.student) { r in
             // Merge rather than replace: the agenda only shows six days, so old
             // days stay cached until they are superseded.
@@ -312,34 +340,29 @@ private struct LoginSheet: View {
     @ObservedObject var portal: Portal
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Portal login")
-                    .font(.r(16, .semibold))
-                    .foregroundStyle(Color.ink)
-                Spacer()
-                Button("Done") { portal.cancel() }
-                    .font(.r(16, .semibold))
-                    .foregroundStyle(Color.mintHi)
+        NavigationStack {
+            VStack(spacing: 0) {
+                if let s = portal.status {
+                    Text(s)
+                        .font(.r(13.5, .medium))
+                        .foregroundStyle(Color.warnInk)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 12)
+                        .background(Color.bg)
+                }
+                PortalWebView(webView: portal.webView)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
             .background(Color.bg)
-
-            if let s = portal.status {
-                Text(s)
-                    .font(.r(13.5, .medium))
-                    .foregroundStyle(Color.warnInk)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 12)
-                    .background(Color.bg)
+            .navigationTitle("Portal login")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { portal.cancel() }
+                }
             }
-
-            PortalWebView(webView: portal.webView)
         }
-        .background(Color.bg)
         .preferredColorScheme(.dark)
     }
 }

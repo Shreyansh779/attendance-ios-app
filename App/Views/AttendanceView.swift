@@ -17,6 +17,8 @@ struct AttendanceView: View {
     /// Oldest first. Empty until the portal has been read on two separate days.
     let history: [Stamp]
 
+    @State private var notifyResult: String?
+
     var body: some View {
         if summary.subjects.isEmpty {
             Text("No attendance data saved yet.")
@@ -79,6 +81,22 @@ struct AttendanceView: View {
     /// page actually did, so a failure is diagnosable instead of silent.
     @ViewBuilder private var footer: some View {
         VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                Button {
+                    Task { notifyResult = await Notify.test() }
+                } label: {
+                    Text("Test a reminder")
+                        .r(12.5, .semibold)
+                        .foregroundStyle(Color.mintHi)
+                }
+                .buttonStyle(.pressable)
+                if let notifyResult {
+                    Text(notifyResult)
+                        .r(12, .medium)
+                        .foregroundStyle(Color.ink4)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
             if let age {
                 Text(age)
                     .r(12.5, .medium)

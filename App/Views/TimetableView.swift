@@ -29,16 +29,17 @@ struct TimetableView: View {
     private var bounds: (min: Int, max: Int) {
         let cal = Calendar.current
         guard let base = Snapshot.isoDay.date(from: today) else { return (0, 0) }
-        var lo = 0, hi = 0
-        for d in -7...13 {
+        // Backwards is always open. It used to require the day to be cached
+        // already, but the scrape only ever returns today onwards, so a past
+        // day is only there if you happened to refresh on it - meaning a fresh
+        // install had the arrow permanently disabled. A day with nothing
+        // cached says so; a dead control says nothing.
+        var hi = 0
+        for d in 0...13 {
             guard let date = cal.date(byAdding: .day, value: d, to: base) else { continue }
-            let key = Snapshot.isoDay.string(from: date)
-            if week[key] != nil || key == today {
-                lo = Swift.min(lo, d)
-                hi = Swift.max(hi, d)
-            }
+            if week[Snapshot.isoDay.string(from: date)] != nil { hi = Swift.max(hi, d) }
         }
-        return (lo, hi)
+        return (-7, hi)
     }
 
     private var selectedKey: String {
@@ -72,7 +73,11 @@ struct TimetableView: View {
             nav
 
             if list.isEmpty {
-                Text("No classes this day.")
+                Text(
+                    offset < 0 && week[selectedKey] == nil
+                        ? "Nothing cached for this day. Days are stored as you refresh."
+                        : "No classes this day."
+                )
                     .r(16, .medium)
                     .foregroundStyle(Color.ink2)
                     .slab(.sur, radius: 28, pad: EdgeInsets(top: 26, leading: 24, bottom: 26, trailing: 24))

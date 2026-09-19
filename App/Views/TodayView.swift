@@ -12,6 +12,9 @@ struct TodayView: View {
     let terms: [String: Term]
     /// The subject gating everything, so only it gets the loudest colour.
     let blocker: AttRow?
+    /// Tomorrow's classes, shown once today is done — at which point "what is
+    /// next" is the only question left, and the screen was otherwise empty.
+    let tomorrow: [Klass]
     /// Tapping the day strip pins a class; nil means follow the clock.
     @Binding var picked: String?
     let marks: [String: Mark]
@@ -87,17 +90,15 @@ struct TodayView: View {
                 )
                 .padding(.top, 10)
             } else {
-                // A finished day is still a day. Say so near the top and point
-                // at the strip, rather than centring one slab in a void.
-                Text(
-                    day.isEmpty
-                        ? "No classes listed for today."
-                        : "That was the last class. Tap one below to tick it off."
-                )
-                .r(16, .medium)
-                .foregroundStyle(Color.ink2)
-                .fixedSize(horizontal: false, vertical: true)
-                .slab(.sur, radius: 28, pad: EdgeInsets(top: 22, leading: 22, bottom: 22, trailing: 22))
+                VStack(alignment: .leading, spacing: 14) {
+                    Text(doneText)
+                        .r(16, .medium)
+                        .foregroundStyle(Color.ink2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .slab(.sur, radius: 28, pad: EdgeInsets(top: 22, leading: 22, bottom: 22, trailing: 22))
+
+                    if !tomorrow.isEmpty { Tomorrow(day: tomorrow) }
+                }
                 .padding(.top, 12)
             }
 
@@ -108,6 +109,17 @@ struct TodayView: View {
             }
         }
         .padding(.bottom, 20)
+    }
+
+    /// How the day ended, including how much of it is still unticked - the
+    /// number is the reason to look at the strip below.
+    private var doneText: String {
+        guard !day.isEmpty else { return "No classes listed for today." }
+        let markable = day.filter { $0.att != nil }.count
+        let ticked = day.filter { marks[markKey($0, on: today)] != nil }.count
+        if markable == 0 { return "That was the last class for today." }
+        if ticked >= markable { return "That was the last class. All \(ticked) ticked off." }
+        return "That was the last class. \(markable - ticked) still to tick off below."
     }
 
     private func tagState(_ k: Klass) -> String {
@@ -186,6 +198,42 @@ private struct AttendAsk: View {
             }
             .buttonStyle(.pressable)
         }
+    }
+}
+
+/// Tomorrow at a glance: when it starts, where, and how much of it there is.
+private struct Tomorrow: View {
+    let day: [Klass]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Tomorrow")
+                .r(13.5, .semibold)
+                .foregroundStyle(Color.ink3)
+
+            if let first = day.first {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(hhmm(first.s0))
+                        .r(34, .bold)
+                        .kerning(-1.2)
+                    Text(ampm(first.s0))
+                        .r(15, .semibold)
+                        .foregroundStyle(Color.ink3)
+                }
+                Text(first.subject)
+                    .r(17, .semibold)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(first.online ? "Online classroom" : "Room \(first.room ?? "not listed")")
+                    .r(14, .medium)
+                    .foregroundStyle(Color.ink3)
+            }
+
+            Text(day.count == 1 ? "1 class" : "\(day.count) classes")
+                .r(13.5, .medium)
+                .foregroundStyle(Color.ink4)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .slab(.sur, radius: 28, pad: EdgeInsets(top: 20, leading: 22, bottom: 20, trailing: 22))
     }
 }
 

@@ -52,6 +52,8 @@ const PINS = [
   ['App/Models.swift', 'let skippable = reachable ? max(0, min(R, raw)) : 0'],
   ['App/Models.swift', 'if let e = toMinutes(s.end), e > a { b = e } else { b = a + 55 }'],
   ['App/Matching.swift', 'abs($0.1.count - n.count) < abs($1.1.count - n.count)'],
+  ['App/Models.swift', 'let absorbed = Swift.max(0, row.total - base)'],
+  ['App/Models.swift', 'let ordered = list.sorted { markOrder($0.key) < markOrder($1.key) }'],
   ['App/Notify.swift', 'f.dateFormat = "yyyy-MM-dd hh:mm a"'],
   ['App/Notify.swift', 'f.locale = Locale(identifier: "en_US_POSIX")'],
 ];
@@ -338,6 +340,91 @@ check('scraped term feeds the maths and every session is counted once', () => {
     if (r.key === 'Engineering Physics') truthy(tm.clearsAt !== null, '60% recoverable has a clearance class');
   }
   eq(counted, scraped.length, 'every scraped session counted exactly once');
+});
+
+/* ---------------------------------------------------------------------
+   survivingMarks: which hand-marks a refresh is allowed to throw away.
+
+   Too eager and you silently lose work you did by hand; too lax and a class
+   gets counted twice, which is worse - it overstates attendance, which is the
+   direction that gets you a surprise at the end of term.
+   --------------------------------------------------------------------- */
+console.log('\nMARKS  (transcribed from Swift - see PINS)');
+
+function survivingMarks(marks, rows) {
+  if (!Object.keys(marks).length || !rows.length) return {};
+  const grouped = {};
+  for (const [key, mark] of Object.entries(marks)) {
+    const row = rows.find(r => r.key === mark.subject);
+    if (!row) continue;
+    (grouped[row.key] = grouped[row.key] || []).push({ key, mark });
+  }
+  const out = {};
+  for (const [rowKey, list] of Object.entries(grouped)) {
+    const row = rows.find(r => r.key === rowKey);
+    if (!row) continue;
+    // Same ordering as markOrder() in Swift: by clock time, not string order.
+    const order = (k) => {
+      const p = k.split('|');
+      const m = (p[1] || '').match(/^(\d{1,2}):(\d{2}) ([AP])M$/);
+      const mins = m ? ((+m[1] % 12) + (m[3] === 'P' ? 12 : 0)) * 60 + +m[2] : 0;
+      return `${p[0]}|${String(mins).padStart(4, '0')}`;
+    };
+    const ordered = [...list].sort((a, b) => (order(a.key) < order(b.key) ? -1 : 1));
+    const base = Math.min(...ordered.map(e => e.mark.total));
+    const absorbed = Math.max(0, row.total - base);
+    ordered.forEach((e, i) => { if (i >= absorbed) out[e.key] = e.mark; });
+  }
+  return out;
+}
+
+check('a mark survives until the portal counts it', () => {
+  const rows = (total) => [{ key: 'Physics', attended: 10, total }];
+  const one = { '2026-09-19|09:00 AM|Physics': { subject: 'Physics', attended: true, total: 19 } };
+
+  eq(Object.keys(survivingMarks(one, rows(19))).length, 1, 'portal unchanged -> mark kept');
+  eq(Object.keys(survivingMarks(one, rows(20))).length, 0, 'portal caught up -> mark spent');
+  eq(Object.keys(survivingMarks(one, rows(25))).length, 0, 'portal well past -> mark spent');
+});
+
+check('partial catch-up spends the oldest marks first', () => {
+  const rows = (total) => [{ key: 'Physics', attended: 10, total }];
+  const two = {
+    '2026-09-19|09:00 AM|Physics': { subject: 'Physics', attended: true, total: 19 },
+    '2026-09-19|03:00 PM|Physics': { subject: 'Physics', attended: false, total: 19 },
+  };
+  eq(Object.keys(survivingMarks(two, rows(19))).length, 2, 'neither counted');
+  const after20 = survivingMarks(two, rows(20));
+  eq(Object.keys(after20).length, 1, 'one counted -> one kept');
+  truthy(after20['2026-09-19|03:00 PM|Physics'], 'the later one is the survivor');
+  eq(Object.keys(survivingMarks(two, rows(21))).length, 0, 'both counted');
+});
+
+check('legacy marks and unmatched subjects are dropped', () => {
+  const rows = [{ key: 'Physics', attended: 10, total: 19 }];
+  // total 0 is what a mark written before the field existed decodes to.
+  const legacy = { 'k': { subject: 'Physics', attended: true, total: 0 } };
+  eq(Object.keys(survivingMarks(legacy, rows)).length, 0, 'legacy mark dropped');
+  const orphan = { 'k': { subject: 'Astrophysics', attended: true, total: 19 } };
+  eq(Object.keys(survivingMarks(orphan, rows)).length, 0, 'unmatched subject dropped');
+});
+
+check('a mark can never be counted twice', () => {
+  // The invariant that matters: applying surviving marks after a refresh must
+  // never push a subject above what the portal says plus the marks still held.
+  const rows = [{ key: 'Physics', attended: 10, total: 19 }];
+  for (let newTotal = 19; newTotal <= 30; newTotal++) {
+    const marks = {};
+    for (let i = 0; i < 4; i++) {
+      marks[`2026-09-${20 + i}|09:00 AM|Physics`] = { subject: 'Physics', attended: true, total: 19 };
+    }
+    const kept = Object.keys(survivingMarks(marks, [{ ...rows[0], total: newTotal }])).length;
+    const counted = newTotal - 19;
+    // The portal counts classes you never marked too, so "counted" can exceed
+    // the four. What must hold is that a marked class is never both counted
+    // and still held: every class the portal absorbed retires one mark.
+    truthy(kept <= Math.max(0, 4 - counted), `total ${newTotal}: kept ${kept} with ${counted} absorbed`);
+  }
 });
 
 /* ---------------------------------------------------------------------

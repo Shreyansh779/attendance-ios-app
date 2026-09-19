@@ -38,6 +38,7 @@ struct RootView: View {
     @State private var tick = Date()
     @State private var picked: String?
     @State private var didAutoOpen = false
+    @State private var showingSettings = false
 
     /// Motion is gentler, never absent, when the system asks for less of it.
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -115,6 +116,14 @@ struct RootView: View {
         .fullScreenCover(isPresented: $portal.showingLogin) {
             LoginSheet(portal: portal)
         }
+        .sheet(isPresented: $showingSettings) {
+            SettingsView(
+                weekDays: snapshot?.week.count ?? 0,
+                weekDiag: snapshot?.weekDiag,
+                age: snapshot?.ageText,
+                onSettingsChanged: rescheduleReminders
+            )
+        }
         // Nothing stored means nothing to look at, so go straight to the portal
         // rather than showing an empty screen and an instruction.
         .onAppear {
@@ -172,9 +181,6 @@ struct RootView: View {
                         // Tied to the same guard, so the header cannot announce
                         // a term end the rows below have gone quiet about.
                         termEnd: terms.isEmpty ? nil : snapshot?.termEnd,
-                        weekDays: snapshot?.week.count ?? 0,
-                        weekDiag: snapshot?.weekDiag,
-                        age: snapshot?.ageText,
                         history: snapshot?.history ?? []
                     )
                 }
@@ -218,6 +224,14 @@ struct RootView: View {
                         }
                         .disabled(portal.busy)
                         .accessibilityLabel("Refresh from portal")
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            showingSettings = true
+                        } label: {
+                            Image(systemName: "gearshape")
+                        }
+                        .accessibilityLabel("Settings")
                     }
                 }
                 .safeAreaInset(edge: .top) {
@@ -289,7 +303,10 @@ struct RootView: View {
     private func mark(_ key: String, _ subject: String, _ attended: Bool?) {
         guard var snap = snapshot else { return }
         if let a = attended {
-            snap.marks[key] = Mark(subject: subject, attended: a)
+            // The portal's own total, not the marked one, or the baseline
+            // would drift every time you ticked something.
+            let seen = matchSubject(subject, in: snap.rows)?.total ?? 0
+            snap.marks[key] = Mark(subject: subject, attended: a, total: seen)
         } else {
             snap.marks.removeValue(forKey: key)
         }
@@ -325,9 +342,9 @@ struct RootView: View {
                 sessions: r.sessions,
                 student: r.student ?? snapshot?.student,
                 week: merged,
-                // A fresh read from the portal is authoritative, so hand marks
-                // are spent.
-                marks: [:],
+                // Only the marks the portal has actually absorbed are spent;
+                // the rest survive a refresh that beat the portal to it.
+                marks: survivingMarks(snapshot?.marks ?? [:], after: r.rows),
                 weekDiag: r.weekDiag,
                 // A read that only managed the agenda keeps whatever term end
                 // an earlier whole-term read established.

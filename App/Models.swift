@@ -149,6 +149,73 @@ func ampm(_ m: Int) -> String { m < 720 ? "am" : "pm" }
 struct Mark: Codable, Hashable {
     var subject: String
     var attended: Bool
+    /// The subject's portal total at the moment this was ticked. Once the
+    /// portal's own total moves past it, this class has been counted for real
+    /// and the mark is spent — which is how a mark survives a refresh that
+    /// happened before the portal caught up.
+    var total: Int
+
+    init(subject: String, attended: Bool, total: Int) {
+        self.subject = subject
+        self.attended = attended
+        self.total = total
+    }
+
+    /// Marks written before `total` existed decode as 0, which reads as
+    /// "already absorbed" and drops them. That is the old behaviour, and the
+    /// safe direction: under-counting beats double-counting.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        subject = (try? c.decode(String.self, forKey: .subject)) ?? ""
+        attended = (try? c.decode(Bool.self, forKey: .attended)) ?? false
+        total = (try? c.decode(Int.self, forKey: .total)) ?? 0
+    }
+}
+
+/// The marks the portal has *not* yet counted.
+///
+/// A refresh used to clear every mark, on the theory that a portal read is
+/// authoritative. It is — but it lags. Marking three classes and refreshing
+/// the next morning threw them all away and the numbers fell back, leaving you
+/// to re-mark from memory.
+///
+/// Each mark records the subject's portal total when it was made. If the
+/// portal's total has since risen by n, then n of that subject's marked
+/// classes have been counted; the oldest n are spent and the rest survive.
+/// A mark key ("2026-09-19|03:00 PM|Physics") as something sortable.
+///
+/// Sorting the raw key is wrong: "03:00 PM" sorts before "09:00 AM" but
+/// happens six hours later, so the afternoon's mark would be spent before the
+/// morning's. Minutes since midnight, not string order.
+private func markOrder(_ key: String) -> String {
+    let parts = key.split(separator: "|", maxSplits: 2, omittingEmptySubsequences: false)
+    let day = parts.first.map(String.init) ?? ""
+    let mins = parts.count > 1 ? (toMinutes(String(parts[1])) ?? 0) : 0
+    return day + String(format: "|%04d", mins)
+}
+
+func survivingMarks(_ marks: [String: Mark], after rows: [AttRow]) -> [String: Mark] {
+    guard !marks.isEmpty, !rows.isEmpty else { return [:] }
+
+    var grouped: [String: [(key: String, mark: Mark)]] = [:]
+    for (key, mark) in marks {
+        // A mark whose subject no longer resolves was never going to move a
+        // number anyway, so it goes.
+        guard let row = matchSubject(mark.subject, in: rows) else { continue }
+        grouped[row.key, default: []].append((key, mark))
+    }
+
+    var out: [String: Mark] = [:]
+    for (rowKey, list) in grouped {
+        guard let row = rows.first(where: { $0.key == rowKey }) else { continue }
+        let ordered = list.sorted { markOrder($0.key) < markOrder($1.key) }
+        let base = ordered.map(\.mark.total).min() ?? row.total
+        let absorbed = Swift.max(0, row.total - base)
+        for (i, entry) in ordered.enumerated() where i >= absorbed {
+            out[entry.key] = entry.mark
+        }
+    }
+    return out
 }
 
 func markKey(_ k: Klass, on date: String) -> String {

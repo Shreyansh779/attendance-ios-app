@@ -24,8 +24,21 @@ final class NotifyPresenter: NSObject, UNUserNotificationCenterDelegate {
 }
 
 enum Notify {
-    /// How long before the class starts.
-    static let lead = 30
+    static let enabledKey = "reminders.enabled"
+    static let leadKey = "reminders.lead"
+    static let defaultLead = 30
+
+    /// How long before the class starts. Chosen in Settings; 30 until then.
+    static var lead: Int {
+        let v = UserDefaults.standard.integer(forKey: leadKey)
+        return v > 0 ? v : defaultLead
+    }
+
+    /// Reminders are on unless explicitly turned off, so the feature works
+    /// without anyone visiting Settings first.
+    static var isEnabled: Bool {
+        UserDefaults.standard.object(forKey: enabledKey) as? Bool ?? true
+    }
 
     /// iOS keeps at most 64 pending local notifications per app and silently
     /// drops the rest, so schedule a little under that and let each refresh
@@ -64,8 +77,10 @@ enum Notify {
     /// pending notifications. Rescheduling on launch makes that invisible.
     static func reschedule(from snap: Snapshot, terms: [String: Term], rows: [AttRow]) async {
         let centre = UNUserNotificationCenter.current()
-        guard await authorise() else { return }
+        // Clear first either way: switching reminders off has to empty the
+        // queue, not just stop adding to it.
         centre.removeAllPendingNotificationRequests()
+        guard isEnabled, await authorise() else { return }
 
         let now = Date()
         let fmt = stamp

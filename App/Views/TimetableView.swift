@@ -150,10 +150,15 @@ struct TimetableView: View {
         var body: some View {
             HStack(alignment: .top, spacing: 15) {
                 VStack(alignment: .leading, spacing: 4) {
+                    // fixedSize, because 58pt fitted "8:00 am" and "3:00 pm"
+                    // but not "11:00 am" - which wrapped to "11:0 / 0 am" on
+                    // every 11 o'clock class.
                     HStack(alignment: .firstTextBaseline, spacing: 2) {
                         Text(hhmm(k.s0)).font(.r(16, .bold)).kerning(-0.3)
                         Text(ampm(k.s0)).font(.r(11.5, .semibold)).foregroundStyle(Color.ink3)
                     }
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
                     .foregroundStyle(k.live ? Color.mintHi : (k.past ? Color.ink4 : Color.ink))
 
                     if k.live {
@@ -162,7 +167,7 @@ struct TimetableView: View {
                             .foregroundStyle(Color.mintDim)
                     }
                 }
-                .frame(width: 58, alignment: .leading)
+                .frame(width: 70, alignment: .leading)
 
                 VStack(alignment: .leading, spacing: 5) {
                     Text(k.subject)

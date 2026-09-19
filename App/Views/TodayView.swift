@@ -24,9 +24,10 @@ struct TodayView: View {
     var body: some View {
         if let h = hero {
             VStack(alignment: .leading, spacing: 0) {
-                Spacer(minLength: 12)
-
+                // One expanding spacer, at the bottom. Two of them split the
+                // free space and left the hero marooned in the middle.
                 Tag(state: tagState(h), virtual: h.mode == "virtual")
+                    .padding(.top, 12)
 
                 Text(h.online ? "Online" : (h.room ?? "No room"))
                     .font(.r(h.online ? 52 : 92, .bold))

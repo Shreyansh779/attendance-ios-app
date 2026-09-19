@@ -23,10 +23,14 @@ extension Color {
     static let drawerBG = Color(0x1E222A)
     static let track = Color(0x2C313C)
 
-    static let ink = Color(0xEDEFF3)
-    static let ink2 = Color(0x9AA3B3)
-    static let ink3 = Color(0x7D8698)
-    static let ink4 = Color(0x5C6474)
+    // A four-step ramp where even the dimmest step clears WCAG AA (4.5:1) on
+    // every neutral surface, and each step stays ~1.4x brighter than the one
+    // below so the hierarchy still reads. The old ramp bottomed out at 2.71:1
+    // - the "past class" rows were genuinely unreadable, not just quiet.
+    static let ink = Color(0xEDEFF3)  // 11.58:1
+    static let ink2 = Color(0xC4D0E4)  // 8.56:1
+    static let ink3 = Color(0xA9B2C4)  // 6.26:1
+    static let ink4 = Color(0x8F97A6)  // 4.54:1 - the floor
 
     static let mint = Color(0x6FD4A6)
     static let mintHi = Color(0x8BE3B8)

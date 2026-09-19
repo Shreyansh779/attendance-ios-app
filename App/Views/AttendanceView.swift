@@ -14,6 +14,8 @@ struct AttendanceView: View {
     let weekDays: Int
     let weekDiag: String?
     let age: String?
+    /// Oldest first. Empty until the portal has been read on two separate days.
+    let history: [Stamp]
 
     var body: some View {
         if summary.subjects.isEmpty {
@@ -35,7 +37,17 @@ struct AttendanceView: View {
                     }
 
                     ForEach(summary.subjects) { row in
-                        SubjectRow(row: row, term: terms[row.key], blocker: summary.blocker)
+                        NavigationLink {
+                            SubjectView(
+                                row: row,
+                                term: terms[row.key],
+                                blocker: summary.blocker,
+                                history: history
+                            )
+                        } label: {
+                            SubjectRow(row: row, term: terms[row.key], blocker: summary.blocker)
+                        }
+                        .buttonStyle(.pressableCard)
                     }
 
                     footer.padding(.top, 10)
@@ -45,6 +57,22 @@ struct AttendanceView: View {
                 .padding(.bottom, 20)
             }
         }
+    }
+
+    /// Which way it is going, and by how much, since the first reading kept.
+    ///
+    /// Nil until there are two days of history: one point is not a direction,
+    /// and drawing a flat line from a single reading would imply otherwise.
+    private var trend: (series: [Double], delta: Double, label: String)? {
+        let usable = history.filter { $0.total > 0 }
+        guard usable.count >= 2, let first = usable.first, let last = usable.last else { return nil }
+        let delta = last.pct - first.pct
+        let since = shortDate(first.day)
+        let word = delta >= 0.05 ? "up" : (delta <= -0.05 ? "down" : "flat")
+        let label = word == "flat"
+            ? "flat since \(since)"
+            : "\(word) \(String(format: "%.1f", abs(delta))) points since \(since)"
+        return (usable.map(\.pct), delta, label)
     }
 
     /// Freshness, and — only when the weekly scrape came back thin — what the
@@ -86,6 +114,16 @@ struct AttendanceView: View {
             Text("\(summary.attended) of \(summary.total) attended, \(String(format: "%.1f", o.pct))% overall")
                 .r(14.5, .medium)
                 .foregroundStyle(Color.ink3)
+            if let t = trend {
+                HStack(spacing: 10) {
+                    Spark(values: t.series, tint: t.delta >= 0 ? Color.mintHi : Color.coral)
+                        .frame(width: 58, height: 16)
+                    Text(t.label)
+                        .r(13, .medium)
+                        .foregroundStyle(t.delta >= 0 ? Color.mintHi : Color.coral)
+                }
+                .padding(.top, 2)
+            }
             if let end = termEnd {
                 Text("classes run to \(shortDate(end))")
                     .r(13, .medium)

@@ -84,6 +84,33 @@ enum Notify {
         }
     }
 
+    /// Fires one notification a few seconds from now, so the feature can be
+    /// judged without waiting for the next class. Returns what happened, since
+    /// the interesting failure - permission denied - is otherwise silent.
+    static func test() async -> String {
+        let centre = UNUserNotificationCenter.current()
+        guard await authorise() else {
+            return "Notifications are off for this app. Settings › Today › Notifications."
+        }
+        let content = UNMutableNotificationContent()
+        content.title = "Reminders are working"
+        content.body = "A real one arrives 30 minutes before each class."
+        content.sound = .default
+
+        let request = UNNotificationRequest(
+            identifier: "test-\(Date().timeIntervalSince1970)",
+            content: content,
+            trigger: UNTimeIntervalNotificationTrigger(timeInterval: 5, repeats: false)
+        )
+        do {
+            try await centre.add(request)
+            let pending = await centre.pendingNotificationRequests().count
+            return "Arriving in 5s. \(pending - 1) class reminders queued."
+        } catch {
+            return "Could not schedule: \(error.localizedDescription)"
+        }
+    }
+
     /// One nudge per day, shortly after the last class ends.
     ///
     /// Marks are what keep the numbers honest between portal refreshes, and

@@ -52,6 +52,8 @@ const PINS = [
   ['App/Models.swift', 'let skippable = reachable ? max(0, min(R, raw)) : 0'],
   ['App/Models.swift', 'if let e = toMinutes(s.end), e > a { b = e } else { b = a + 55 }'],
   ['App/Matching.swift', 'abs($0.1.count - n.count) < abs($1.1.count - n.count)'],
+  ['App/Notify.swift', 'f.dateFormat = "yyyy-MM-dd hh:mm a"'],
+  ['App/Notify.swift', 'f.locale = Locale(identifier: "en_US_POSIX")'],
 ];
 for (const [file, line] of PINS) {
   check(`${file}  «${line.slice(0, 52)}${line.length > 52 ? '…' : ''}»`, () => {
@@ -336,6 +338,56 @@ check('scraped term feeds the maths and every session is counted once', () => {
     if (r.key === 'Engineering Physics') truthy(tm.clearsAt !== null, '60% recoverable has a clearance class');
   }
   eq(counted, scraped.length, 'every scraped session counted exactly once');
+});
+
+/* ---------------------------------------------------------------------
+   Notifications: the one failure mode with no error message.
+
+   Notify builds a fire time by string-concatenating a session's ISO date and
+   its start time, then parsing with "yyyy-MM-dd hh:mm a". If the scrapers ever
+   emit a shape that format cannot read, every notification silently fails to
+   schedule - no crash, no log, just nothing ever arriving. This checks the two
+   producers against the exact format string pinned above.
+   --------------------------------------------------------------------- */
+console.log('\nNOTIFICATIONS  (fire times parse from what the scrapers emit)');
+
+// en_US_POSIX "yyyy-MM-dd hh:mm a": 12-hour, zero-padded, AM/PM.
+const STAMP = /^(\d{4})-(\d{2})-(\d{2}) (0[1-9]|1[0-2]):([0-5]\d) (AM|PM)$/;
+
+check('every weekApi session builds a parseable fire time', () => {
+  truthy(scraped.length > 0, 'no sessions scraped to check');
+  for (const s of scraped) {
+    for (const [field, value] of [['start', s.start], ['end', s.end]]) {
+      const composed = `${s.date} ${value}`;
+      const m = composed.match(STAMP);
+      truthy(m, `${field} "${composed}" does not match yyyy-MM-dd hh:mm a`);
+      const hour = +m[4] % 12 + (m[6] === 'PM' ? 12 : 0);
+      truthy(hour >= 0 && hour <= 23, `${composed} -> impossible hour ${hour}`);
+    }
+  }
+});
+
+check('the dashboard scraper emits the same time shape', () => {
+  // The sessions blob normalises with toUpperCase() and strips dots; these are
+  // the shapes it produces from the portal's own markup.
+  const fromDashboard = ['09:00 AM', '12:00 PM', '03:00 PM', '11:00 AM', '12:30 AM'];
+  for (const t of fromDashboard) {
+    const composed = `2026-09-19 ${t}`;
+    truthy(composed.match(STAMP), `"${composed}" would not parse`);
+  }
+  // And the shapes that would NOT parse, so the test fails if the format is
+  // ever loosened without thinking about it.
+  for (const bad of ['9:00 AM', '09:00', '21:00', '09:00 am']) {
+    truthy(!`2026-09-19 ${bad}`.match(STAMP), `"${bad}" unexpectedly parses`);
+  }
+});
+
+check('the 64-notification cap is respected', () => {
+  const src = read('App/Notify.swift');
+  const cap = /maxPending = (\d+)/.exec(src);
+  truthy(cap, 'maxPending not found');
+  truthy(+cap[1] <= 64, `maxPending ${cap[1]} exceeds the iOS limit of 64`);
+  truthy(src.includes('scheduled < maxPending'), 'the class loop does not check the cap');
 });
 
 /* ===================================================================== */

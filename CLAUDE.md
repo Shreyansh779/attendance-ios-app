@@ -92,20 +92,35 @@ The IPA ships **unsigned** by design; a sideloader re-signs it. Pushing to
 
 ## Design
 
-Dark only. Corners never under 18, no borders or hairline rules anywhere,
+Three tabs in a `TabView`, each with its own `NavigationStack` and large title —
+not a drawer. Corners never under 18, no borders or hairline rules anywhere,
 separation carried by space and tone. Motion lives in `Theme.swift`: Apple's own
 figures (drawer = damping 0.8 / response 0.3; general UI critically damped),
 with `bounce = 1 - damping`. Bounce is spent only where the gesture carried
 momentum. `Animation.reduced(_:)` honours Reduce Motion everywhere.
 
-The ink ramp is contrast-solved — even the dimmest step clears WCAG AA (4.5:1)
-on every neutral surface. Do not dim text below `ink4`.
+Every colour is a solved light/dark pair, and the ink ramp is contrast-solved so
+even the dimmest step clears WCAG AA (4.5:1) on every surface in its own scheme.
+Do not dim text below `ink4`, and do not introduce a raw hex — it cannot adapt.
+
+Urgency has three states, not two: mint (fine), amber (short but recoverable),
+coral (the blocker, or no longer reachable). Coral is spent on one row, not on
+every row that happens to be below the line — when everything is an alarm,
+nothing is.
+
+Type scales. Use `View.r(_:_:)`, never `.font(.r(...))`, or the size stops
+responding to the reader's text-size setting. Clamped at `accessibility1`.
 
 ## Known debt
 
-- **Dynamic Type is unsupported** — font sizes are fixed points. The real
-  remaining accessibility gap.
+- The weekly timetable is delivered by the `weekApi` path in practice — if the
+  app shows term lines then `termEnd` is set, and only that path sets it. The
+  DOM scraper, `agenda`, `nudge` and `spyDump` are the untravelled fallback.
+  They are kept deliberately: the portal is not under our control, and deleting
+  the recovery path for an external dependency is fragility, not simplicity.
 - Classes earlier *today* count as "remaining" in the term maths, so late in the
   day a subject can look one class better off than it is. Errs toward
   "recoverable", which is the safe direction.
+- The light palette is computed and contrast-verified but has never been seen on
+  a device. If it looks wrong, that is why.
 - `ponytail:` comments mark deliberate shortcuts with their ceiling.

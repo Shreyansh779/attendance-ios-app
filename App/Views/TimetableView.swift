@@ -13,40 +13,48 @@ struct TimetableView: View {
     /// this to `picked = id; route = .today` — same as tapping the class on
     /// the dashboard itself.
     let onOpenToday: (String) -> Void
+    /// What has already been ticked off, and how to tick.
+    let marks: [String: Mark]
+    let onMark: (String, String, Bool?) -> Void
 
-    @State private var idx = 0
+    /// Days from today. Negative is the past, which is the whole point of
+    /// letting it go backwards: a class you missed on Tuesday is only
+    /// markable if you can still navigate to Tuesday.
+    @State private var offset = 0
 
-    /// Continuous day-by-day range, today through the furthest date the
-    /// portal has actually handed us — not just the days that happen to have
-    /// a class, so a free day still gets a page instead of vanishing and
-    /// throwing off the arrow count.
-    private var dates: [String] {
-        // The cache holds the whole term now, for the attendance maths. Paging
-        // through three months one arrow at a time is not a timetable, so the
-        // screen still stops at a fortnight - which is all the portal's own
-        // agenda ever showed.
-        let horizon = Snapshot.isoDay.string(
-            from: Calendar.current.date(byAdding: .day, value: 13, to: Date()) ?? Date()
-        )
-        guard let maxKey = week.keys.filter({ $0 >= today && $0 <= horizon }).max(),
-            let start = Snapshot.isoDay.date(from: today),
-            let end = Snapshot.isoDay.date(from: maxKey),
-            start <= end
-        else { return [today] }
-
-        var out: [String] = []
-        var d = start
+    /// A fortnight forward, a week back. Forward is capped because paging
+    /// through a whole term one arrow at a time is not a timetable; backward
+    /// is capped because `week` only keeps what past refreshes happened to
+    /// leave behind.
+    private var bounds: (min: Int, max: Int) {
         let cal = Calendar.current
-        while d <= end {
-            out.append(Snapshot.isoDay.string(from: d))
-            guard let next = cal.date(byAdding: .day, value: 1, to: d) else { break }
-            d = next
+        guard let base = Snapshot.isoDay.date(from: today) else { return (0, 0) }
+        var lo = 0, hi = 0
+        for d in -7...13 {
+            guard let date = cal.date(byAdding: .day, value: d, to: base) else { continue }
+            let key = Snapshot.isoDay.string(from: date)
+            if week[key] != nil || key == today {
+                lo = Swift.min(lo, d)
+                hi = Swift.max(hi, d)
+            }
         }
-        return out
+        return (lo, hi)
     }
 
     private var selectedKey: String {
-        dates.indices.contains(idx) ? dates[idx] : today
+        guard let base = Snapshot.isoDay.date(from: today),
+            let d = Calendar.current.date(byAdding: .day, value: offset, to: base)
+        else { return today }
+        return Snapshot.isoDay.string(from: d)
+    }
+
+    /// Marking a class that has not happened yet is nonsense, so the swipe is
+    /// only offered on days that are done or under way.
+    private func markable(_ k: Klass) -> Bool {
+        guard k.att != nil else { return false }
+        if offset < 0 { return true }
+        if offset > 0 { return false }
+        return k.past || k.live
     }
 
     private var list: [Klass] {
@@ -71,31 +79,60 @@ struct TimetableView: View {
                     .padding(.top, 18)
                 Spacer()
             } else {
-                ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 9) {
-                        ForEach(list) { k in
-                            Row(
-                                k: k, nowMin: nowMin,
-                                tappable: selectedKey == today,
-                                onTap: { onOpenToday(k.id) }
-                            )
+                // A real List, so rows get swipe actions - which is the native
+                // answer to "how do I tick off a class I already attended"
+                // rather than a custom control invented for the purpose.
+                List {
+                    ForEach(list) { k in
+                        Row(
+                            k: k, nowMin: nowMin,
+                            tappable: selectedKey == today,
+                            mark: marks[markKey(k, on: selectedKey)],
+                            onTap: { onOpenToday(k.id) }
+                        )
+                        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 5, trailing: 0))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            if markable(k) {
+                                Button {
+                                    onMark(markKey(k, on: selectedKey), k.subject, false)
+                                } label: {
+                                    Label("Missed", systemImage: "xmark")
+                                }
+                                .tint(Color.coral)
+
+                                Button {
+                                    onMark(markKey(k, on: selectedKey), k.subject, true)
+                                } label: {
+                                    Label("Attended", systemImage: "checkmark")
+                                }
+                                .tint(Color.mintHi)
+                            }
+                            if marks[markKey(k, on: selectedKey)] != nil {
+                                Button {
+                                    onMark(markKey(k, on: selectedKey), k.subject, nil)
+                                } label: {
+                                    Label("Clear", systemImage: "arrow.uturn.backward")
+                                }
+                                .tint(Color.ink4)
+                            }
                         }
                     }
-                    .padding(.bottom, 20)
-                    .padding(.top, 18)
                 }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .padding(.top, 10)
             }
         }
-        // Clamp if `week` shrinks (e.g. a fresh refresh with a shorter range)
-        // and the current page no longer exists.
-        .onChange(of: dates.count) { _, count in
-            if idx >= count { idx = max(0, count - 1) }
-        }
+        // A refresh can drop days off either end; keep the page inside them.
+        .onChange(of: bounds.min) { _, lo in offset = Swift.max(offset, lo) }
+        .onChange(of: bounds.max) { _, hi in offset = Swift.min(offset, hi) }
     }
 
     private var nav: some View {
         HStack(spacing: 12) {
-            arrow("chevron.left", enabled: idx > 0) { idx -= 1 }
+            arrow("chevron.left", enabled: offset > bounds.min) { offset -= 1 }
 
             // The screen's own large title already says "Timetable"; repeating
             // a second heading under it was redundant. One line, which day.
@@ -104,7 +141,7 @@ struct TimetableView: View {
                 .foregroundStyle(selectedKey == today ? Color.ink : Color.ink2)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            arrow("chevron.right", enabled: idx < dates.count - 1) { idx += 1 }
+            arrow("chevron.right", enabled: offset < bounds.max) { offset += 1 }
         }
         .padding(.horizontal, 6)
         .padding(.top, 4)
@@ -133,6 +170,8 @@ struct TimetableView: View {
         let k: Klass
         let nowMin: Int
         let tappable: Bool
+        /// Shown as a dot, so a marked class is obvious without opening it.
+        let mark: Mark?
         let onTap: () -> Void
 
         var body: some View {
@@ -142,6 +181,11 @@ struct TimetableView: View {
                     // but not "11:00 am" - which wrapped to "11:0 / 0 am" on
                     // every 11 o'clock class.
                     HStack(alignment: .firstTextBaseline, spacing: 2) {
+                        if let m = mark {
+                            Circle()
+                                .fill(m.attended ? Color.mintHi : Color.coral)
+                                .frame(width: 5, height: 5)
+                        }
                         Text(hhmm(k.s0)).r(16, .bold).kerning(-0.3)
                         Text(ampm(k.s0)).r(11.5, .semibold).foregroundStyle(Color.ink3)
                     }

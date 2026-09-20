@@ -1,0 +1,111 @@
+# Screenshots of every screen, from a simulator, with fake data.
+#
+# The app is empty until somebody has solved a captcha on the portal, so
+# nothing automated could ever see a populated screen. `-demo` swaps the cache
+# for a fixture (App/Demo.swift, DEBUG only) and `-tab` picks where to land,
+# which is enough to photograph the whole app without a login.
+#
+# Manual only. macOS runners bill at ten times the rate of Linux ones, and this
+# is a thing to run when a layout is in question rather than on every push.
+name: Screenshots
+
+on:
+  workflow_dispatch:
+    inputs:
+      appearance:
+        description: dark, light, or both
+        default: both
+
+jobs:
+  shots:
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pick newest Xcode
+        run: |
+          LATEST=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -1)
+          [ -n "$LATEST" ] || LATEST=/Applications/Xcode.app
+          echo "DEVELOPER_DIR=$LATEST/Contents/Developer" >> "$GITHUB_ENV"
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate project
+        run: xcodegen generate
+
+      # Whatever iPhone this image happens to ship. Naming a model means a
+      # runner image bump silently breaks the job.
+      - name: Boot a simulator
+        run: |
+          xcrun simctl list devices available
+          UDID=$(xcrun simctl list devices available \
+            | grep -E '^\s+iPhone' \
+            | tail -1 \
+            | sed -E 's/.*\(([0-9A-Fa-f-]{36})\).*/\1/')
+          test -n "$UDID" || { echo "no iPhone simulator on this runner"; exit 1; }
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          # A clean status bar, so a screenshot is about the app rather than
+          # about the runner's battery.
+          xcrun simctl status_bar "$UDID" override \
+            --time "9:41" --batteryState charged --batteryLevel 100 \
+            --cellularMode active --cellularBars 4 --wifiMode active --wifiBars 3
+
+      - name: Build for the simulator
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Today.xcodeproj \
+            -scheme Today \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -derivedDataPath build \
+            -destination "id=$UDID" \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee build.log | grep -Ev '^\s*(export|cd |/usr/bin|builtin-)' | tail -40
+
+      - name: Show errors
+        if: failure()
+        run: grep -nE "error:|error " build.log | head -40 || true
+
+      - name: Install
+        run: |
+          APP=$(find build/Build/Products/Debug-iphonesimulator -maxdepth 1 -name '*.app' | head -1)
+          test -n "$APP" || { echo "no .app produced"; exit 1; }
+          xcrun simctl install "$UDID" "$APP"
+
+      - name: Shoot every screen
+        run: |
+          mkdir -p shots
+          ID=com.shreyansh.today
+
+          shoot() {
+            local name=$1; shift
+            xcrun simctl terminate "$UDID" "$ID" >/dev/null 2>&1 || true
+            xcrun simctl launch "$UDID" "$ID" -demo "$@" >/dev/null
+            # Long enough for the first frame, the glass to composite and the
+            # skeleton pulse to settle.
+            sleep 5
+            xcrun simctl io "$UDID" screenshot "shots/$name.png"
+            echo "shot $name"
+          }
+
+          for MODE in $(echo "${{ inputs.appearance }}" | sed 's/both/dark light/'); do
+            xcrun simctl ui "$UDID" appearance "$MODE"
+            sleep 1
+            shoot "$MODE-1-today"      -tab today
+            shoot "$MODE-2-timetable"  -tab timetable
+            shoot "$MODE-3-attendance" -tab attendance
+            shoot "$MODE-4-subject"    -tab subject
+            shoot "$MODE-5-settings"   -tab today -sheet settings
+          done
+          ls -la shots
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shots
+          path: shots
+          retention-days: 5

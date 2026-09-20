@@ -202,6 +202,11 @@ enum Store {
     private static let key = "today.snapshot.v1"
 
     static func load() -> Snapshot? {
+        #if DEBUG
+            // -demo replaces the cache wholesale, so a simulator with no
+            // portal session still has every screen full of something.
+            if Demo.isOn { return Demo.snapshot() }
+        #endif
         guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
         return try? JSONDecoder().decode(Snapshot.self, from: data)
     }

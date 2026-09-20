@@ -31,6 +31,24 @@ enum Route: String, CaseIterable, Hashable {
 }
 
 struct RootView: View {
+    /// New York on the navigation bar, and a material behind it.
+    ///
+    /// SwiftUI has no modifier for the large-title font, so this is the one
+    /// place UIKit still has to be asked. Transparent would let content slide
+    /// under bare text; the default background is the system's own glass,
+    /// which is exactly what the rest of the app is made of.
+    init() {
+        let bar = UINavigationBarAppearance()
+        bar.configureWithDefaultBackground()
+        bar.largeTitleTextAttributes = [
+            .font: Display.uiFont(33, .bold), .kern: -0.5,
+        ]
+        bar.titleTextAttributes = [.font: Display.uiFont(17, .semibold)]
+        UINavigationBar.appearance().standardAppearance = bar
+        UINavigationBar.appearance().scrollEdgeAppearance = bar
+        UINavigationBar.appearance().compactAppearance = bar
+    }
+
     @StateObject private var portal = Portal()
 
     @State private var snapshot: Snapshot? = Store.load()
@@ -105,10 +123,12 @@ struct RootView: View {
                     .accessibilityHidden(true)
             }
 
-            Color.bg.ignoresSafeArea()
+            Backdrop()
 
             if hasData {
                 tabs
+                PillBar(route: $route)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             } else {
                 emptyState
             }
@@ -196,7 +216,7 @@ struct RootView: View {
                 }
             }
         }
-        .tint(Color.mintHi)
+        .tint(Color.ink)
     }
 
     /// One screen's chrome: a real navigation bar, the refresh control, and the
@@ -212,7 +232,10 @@ struct RootView: View {
             content()
                 .padding(.horizontal, 20)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .background(Color.bg)
+                // Clear, not bg: the backdrop is one layer down and every card
+                // on this screen is blurring it. An opaque screen background
+                // would give them nothing to see.
+                .background(Color.clear)
                 .navigationTitle(title)
                 .navigationBarTitleDisplayMode(.large)
                 .toolbar {
@@ -244,6 +267,11 @@ struct RootView: View {
                         .accessibilityLabel("Settings")
                     }
                 }
+                // The pill bar floats over the content, so the content has
+                // to be told to end above it.
+                .safeAreaInset(edge: .bottom) {
+                    Color.clear.frame(height: 58)
+                }
                 .safeAreaInset(edge: .top) {
                     if let msg = portal.status ?? staleNote {
                         Text(msg)
@@ -255,9 +283,14 @@ struct RootView: View {
                             .glassEffect(.regular, in: .rect(cornerRadius: 22))
                             .padding(.horizontal, 20)
                             .padding(.bottom, 8)
+                            .transition(.soft)
                     }
                 }
+                .animation(Motion.ui.reduced(reduceMotion), value: portal.status)
         }
+        // The system bar is replaced, not restyled: a floating capsule with a
+        // margin on every side is not a shape UITabBar can be talked into.
+        .toolbar(.hidden, for: .tabBar)
     }
 
     private var emptyState: some View {
@@ -267,7 +300,7 @@ struct RootView: View {
                 .font(.system(size: 44, weight: .light))
                 .foregroundStyle(Color.ink3)
             Text("Nothing saved yet")
-                .r(22, .semibold)
+                .d(24, .bold)
                 .foregroundStyle(Color.ink)
             Text("Sign in to the portal and your classes and attendance land here.")
                 .r(16, .medium)
@@ -277,8 +310,8 @@ struct RootView: View {
             Button("Open the portal") { refresh() }
                 .r(16, .semibold)
                 .buttonStyle(.borderedProminent)
-                .tint(Color.mintHi)
-                .foregroundStyle(Color.onAccent)
+                .tint(Color.ink)
+                .foregroundStyle(Color.onInk)
                 .disabled(portal.busy)
                 .padding(.top, 4)
             if let msg = portal.status {
@@ -372,6 +405,54 @@ struct RootView: View {
             tick = Date()
             rescheduleReminders()
         }
+    }
+}
+
+/// A floating capsule of glass, clear of every edge.
+///
+/// The selected tab is the only filled thing on the screen - ink on glass,
+/// carrying its label; the others are icons alone. The fill slides between
+/// them rather than cutting, which is the whole of the animation.
+private struct PillBar: View {
+    @Binding var route: Route
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var slot
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(Route.allCases, id: \.self) { r in
+                let on = route == r
+                Button {
+                    withAnimation(Motion.ui.reduced(reduceMotion)) { route = r }
+                } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: r.symbol)
+                            .font(.system(size: 14, weight: .semibold))
+                        if on {
+                            Text(r.title).r(14.5, .semibold).fixedSize()
+                        }
+                    }
+                    .foregroundStyle(on ? Color.onInk : Color.ink3)
+                    .padding(.horizontal, on ? 17 : 15)
+                    .padding(.vertical, 11)
+                    .background {
+                        if on {
+                            Capsule()
+                                .fill(Color.ink)
+                                .matchedGeometryEffect(id: "fill", in: slot)
+                        }
+                    }
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.pressable)
+                .accessibilityLabel(r.title)
+                .accessibilityAddTraits(on ? [.isSelected] : [])
+            }
+        }
+        .padding(5)
+        .glassy(Capsule(), tint: .sur, material: .ultraThinMaterial)
+        .padding(.horizontal, 26)
+        .padding(.bottom, 6)
     }
 }
 

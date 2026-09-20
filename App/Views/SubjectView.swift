@@ -38,7 +38,7 @@ struct SubjectView: View {
             .padding(.top, 8)
             .padding(.bottom, 28)
         }
-        .background(Color.bg)
+        .background(Backdrop())
         .navigationTitle(row.key)
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -50,8 +50,8 @@ struct SubjectView: View {
         return VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(b.state == .empty ? "—" : (b.state == .short ? "+\(b.value)" : "\(b.value)"))
-                    .r(40, .bold)
-                    .kerning(-1.5)
+                    .d(42, .bold)
+                    .kerning(-1.0)
                     .foregroundStyle(b.state == .empty ? Color.ink4 : tint)
                     .contentTransition(.numericText())
                 Text(caption(b))
@@ -164,7 +164,7 @@ private struct FlowDates: View {
                             .foregroundStyle(key ? Color.onAccent : Color.ink3)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
-                            .background(key ? tint : Color.surDim, in: Capsule())
+                            .glassy(Capsule(), tint: key ? tint : Color.surDim, soft: false)
                     }
                     Spacer(minLength: 0)
                 }

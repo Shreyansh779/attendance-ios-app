@@ -24,6 +24,8 @@ struct TimetableView: View {
         holidays.first { $0.from <= selectedKey && selectedKey <= $0.to }
     }
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     /// Days from today. Negative is the past, which is the whole point of
     /// letting it go backwards: a class you missed on Tuesday is only
     /// markable if you can still navigate to Tuesday.
@@ -83,8 +85,8 @@ struct TimetableView: View {
             if let h = holidayToday {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(h.name)
-                        .r(20, .bold)
-                        .kerning(-0.4)
+                        .d(23, .bold)
+                        .kerning(-0.3)
                     Text(h.type.isEmpty ? "No classes" : h.type)
                         .r(14, .medium)
                         .foregroundStyle(Color.ink3)
@@ -151,6 +153,7 @@ struct TimetableView: View {
                 .padding(.top, 10)
             }
         }
+        .animation(Motion.ui.reduced(reduceMotion), value: offset)
         // A refresh can drop days off either end; keep the page inside them.
         .onChange(of: bounds.min) { _, lo in offset = Swift.max(offset, lo) }
         .onChange(of: bounds.max) { _, hi in offset = Swift.min(offset, hi) }
@@ -163,7 +166,7 @@ struct TimetableView: View {
             // The screen's own large title already says "Timetable"; repeating
             // a second heading under it was redundant. One line, which day.
             Text(selectedKey == today ? "Today · \(dateLabel)" : dateLabel)
-                .r(17, .semibold)
+                .d(18, .semibold)
                 .foregroundStyle(selectedKey == today ? Color.ink : Color.ink2)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -179,7 +182,7 @@ struct TimetableView: View {
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(enabled ? Color.ink : Color.ink4)
                 .frame(width: 36, height: 36)
-                .background(Color.sur, in: Circle())
+                .glassy(Circle(), soft: false)
         }
         .buttonStyle(.pressable)
         .disabled(!enabled)
@@ -212,7 +215,7 @@ struct TimetableView: View {
                                 .fill(m.attended ? Color.mintHi : Color.coral)
                                 .frame(width: 5, height: 5)
                         }
-                        Text(hhmm(k.s0)).r(16, .bold).kerning(-0.3)
+                        Text(hhmm(k.s0)).d(17, .bold).kerning(-0.2)
                         Text(ampm(k.s0)).r(11.5, .semibold).foregroundStyle(Color.ink3)
                     }
                     .lineLimit(1)
@@ -242,10 +245,10 @@ struct TimetableView: View {
                         Button { openURL(url) } label: {
                             Text("Join \u{2197}")
                                 .r(13.5, .semibold)
-                                .foregroundStyle(Color.mintHi)
+                                .foregroundStyle(Color.ink)
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 7)
-                                .background(Color.mintHi.opacity(0.16), in: Capsule())
+                                .glassy(Capsule(), soft: false)
                         }
                         .buttonStyle(.pressable)
                         .padding(.top, 8)

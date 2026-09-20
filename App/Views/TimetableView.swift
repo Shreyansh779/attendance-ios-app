@@ -35,6 +35,9 @@ struct TimetableView: View {
     /// through a whole term one arrow at a time is not a timetable; backward
     /// is capped because `week` only keeps what past refreshes happened to
     /// leave behind.
+    /// The date picker, for when paging one day at a time is the wrong tool.
+    @State private var picking = false
+
     private var bounds: (min: Int, max: Int) {
         let cal = Calendar.current
         guard let base = Snapshot.isoDay.date(from: today) else { return (0, 0) }
@@ -48,7 +51,8 @@ struct TimetableView: View {
             guard let date = cal.date(byAdding: .day, value: d, to: base) else { continue }
             if week[Snapshot.isoDay.string(from: date)] != nil { hi = Swift.max(hi, d) }
         }
-        return (-7, hi)
+        // Sixty, matching how far back the scrape now keeps days.
+        return (-60, hi)
     }
 
     private var selectedKey: String {
@@ -79,10 +83,32 @@ struct TimetableView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            nav
+        content
+            // The stepper is chrome, not content. It used to sit in a VStack
+            // above the List, which left the navigation bar with no scroll
+            // view of its own to track: the large title collapsed against the
+            // wrong thing and, halfway through, drew itself *below* the
+            // stepper with a hole where the list should be. As a top safe-area
+            // inset it is pinned, and the List underneath is what the title
+            // watches.
+            .safeAreaInset(edge: .top, spacing: 0) { nav }
+            .animation(Motion.ui.reduced(reduceMotion), value: offset)
+            // A refresh can drop days off either end; keep the page inside them.
+            .onChange(of: bounds.min) { _, lo in offset = Swift.max(offset, lo) }
+            .onChange(of: bounds.max) { _, hi in offset = Swift.min(offset, hi) }
+            .sheet(isPresented: $picking) {
+                DayPicker(today: today, offset: $offset)
+                    .presentationDetents([.medium])
+                    .presentationBackground(.regularMaterial)
+            }
+    }
 
-            if let h = holidayToday {
+    /// Always a scroll view at the root, never a stack wrapping one - that was
+    /// the whole of the bug.
+    @ViewBuilder
+    private var content: some View {
+        if let h = holidayToday {
+            ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(h.name)
                         .d(23, .bold)
@@ -93,20 +119,19 @@ struct TimetableView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .slab(.sur, radius: 28, pad: EdgeInsets(top: 24, leading: 22, bottom: 24, trailing: 22))
-                .padding(.top, 18)
-                Spacer()
-            } else if list.isEmpty {
+            }
+        } else if list.isEmpty {
+            ScrollView(showsIndicators: false) {
                 Text(
                     offset < 0 && week[selectedKey] == nil
                         ? "Nothing cached for this day. Days are stored as you refresh."
                         : "No classes this day."
                 )
-                    .r(16, .medium)
-                    .foregroundStyle(Color.ink2)
-                    .slab(.sur, radius: 28, pad: EdgeInsets(top: 26, leading: 24, bottom: 26, trailing: 24))
-                    .padding(.top, 18)
-                Spacer()
-            } else {
+                .p(16)
+                .foregroundStyle(Color.ink2)
+                .slab(.sur, radius: 28, pad: EdgeInsets(top: 26, leading: 24, bottom: 26, trailing: 24))
+            }
+        } else {
                 // A real List, so rows get swipe actions - which is the native
                 // answer to "how do I tick off a class I already attended"
                 // rather than a custom control invented for the purpose.
@@ -148,44 +173,53 @@ struct TimetableView: View {
                         }
                     }
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .padding(.top, 10)
-            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
         }
-        .animation(Motion.ui.reduced(reduceMotion), value: offset)
-        // A refresh can drop days off either end; keep the page inside them.
-        .onChange(of: bounds.min) { _, lo in offset = Swift.max(offset, lo) }
-        .onChange(of: bounds.max) { _, hi in offset = Swift.min(offset, hi) }
     }
 
+    /// One capsule of glass: back a day, which day, forward a day, and a way
+    /// out to any day at all. The list scrolls underneath it, which is the
+    /// only reason it can be pinned without a slab of solid colour behind it.
     private var nav: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 4) {
             arrow("chevron.left", enabled: offset > bounds.min) { offset -= 1 }
 
-            // The screen's own large title already says "Timetable"; repeating
-            // a second heading under it was redundant. One line, which day.
             Text(selectedKey == today ? "Today · \(dateLabel)" : dateLabel)
-                .d(18, .semibold)
+                .r(16, .semibold)
                 .foregroundStyle(selectedKey == today ? Color.ink : Color.ink2)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity)
 
+            arrow("calendar", enabled: true) { picking = true }
             arrow("chevron.right", enabled: offset < bounds.max) { offset += 1 }
         }
-        .padding(.horizontal, 6)
-        .padding(.top, 4)
+        .padding(.horizontal, 5)
+        .padding(.vertical, 5)
+        .glassy(Capsule(), material: .ultraThinMaterial)
+        .padding(.bottom, 12)
     }
 
     private func arrow(_ system: String, enabled: Bool, _ act: @escaping () -> Void) -> some View {
         Button(action: act) {
             Image(systemName: system)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(enabled ? Color.ink : Color.ink4)
-                .frame(width: 36, height: 36)
-                .glassy(Circle(), soft: false)
+                .frame(width: 34, height: 34)
+                .contentShape(Circle())
         }
         .buttonStyle(.pressable)
         .disabled(!enabled)
+        .accessibilityLabel(label(for: system))
+    }
+
+    private func label(for system: String) -> String {
+        switch system {
+        case "calendar": return "Pick a date"
+        case "chevron.left": return "Previous day"
+        default: return "Next day"
+        }
     }
 
     private var dateLabel: String {
@@ -215,7 +249,7 @@ struct TimetableView: View {
                                 .fill(m.attended ? Color.mintHi : Color.coral)
                                 .frame(width: 5, height: 5)
                         }
-                        Text(hhmm(k.s0)).d(17, .bold).kerning(-0.2)
+                        Text(hhmm(k.s0)).r(17, .bold).kerning(-0.3)
                         Text(ampm(k.s0)).r(11.5, .semibold).foregroundStyle(Color.ink3)
                     }
                     .lineLimit(1)
@@ -232,7 +266,7 @@ struct TimetableView: View {
 
                 VStack(alignment: .leading, spacing: 5) {
                     Text(k.subject)
-                        .r(k.live ? 18 : 16, .semibold)
+                        .p(k.live ? 18 : 16, .semibold)
                         .foregroundStyle(k.past ? Color.ink4 : Color.ink)
                         .fixedSize(horizontal: false, vertical: true)
                     Text(place)
@@ -288,5 +322,48 @@ struct TimetableView: View {
             if k.past { return .surDim }
             return k.mode == "virtual" ? .surVirtual : .sur
         }
+    }
+}
+
+/// Any day, rather than one arrow at a time.
+///
+/// Days the scrape never reached will say so when you land on them - which is
+/// a better answer than a disabled control that explains nothing.
+private struct DayPicker: View {
+    let today: String
+    @Binding var offset: Int
+    @Environment(\.dismiss) private var dismiss
+    @State private var date = Date()
+
+    var body: some View {
+        NavigationStack {
+            DatePicker("Day", selection: $date, displayedComponents: .date)
+                .datePickerStyle(.graphical)
+                .tint(Color.ink)
+                .padding(.horizontal, 12)
+                .navigationTitle("Go to a day")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { commit() }
+                    }
+                }
+        }
+        .onAppear {
+            guard let base = Snapshot.isoDay.date(from: today),
+                let d = Calendar.current.date(byAdding: .day, value: offset, to: base)
+            else { return }
+            date = d
+        }
+    }
+
+    private func commit() {
+        let cal = Calendar.current
+        if let base = Snapshot.isoDay.date(from: today) {
+            let a = cal.startOfDay(for: base)
+            let b = cal.startOfDay(for: date)
+            offset = cal.dateComponents([.day], from: a, to: b).day ?? offset
+        }
+        dismiss()
     }
 }

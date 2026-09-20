@@ -120,6 +120,7 @@ final class Portal: NSObject, ObservableObject {
         // mid-scrape and restart polling, discarding rows that had already
         // settled. busy existed for exactly this and was never consulted.
         guard !busy else { return }
+        registerTask?.cancel()
         self.onDone = onDone
         self.student = knownStudent
         self.holidays = knownHolidays
@@ -133,6 +134,8 @@ final class Portal: NSObject, ObservableObject {
     func cancel() {
         pollTask?.cancel()
         pollTask = nil
+        registerTask?.cancel()
+        registerTask = nil
         showingLogin = false
         hostingHidden = false
         busy = false
@@ -256,25 +259,32 @@ final class Portal: NSObject, ObservableObject {
                         self.student = await self.fetchStudentName()
                     }
 
-                    // Last, because it is the slowest thing the app does - one
-                    // form submission per subject - and by this point every
-                    // screen is already filled in and usable.
-                    let span = Portal.registerSpan(week.days.keys.min())
-                    self.daywise = await self.fetchDaywise(
-                        rows: rows, from: span.from, to: span.to
-                    )
-
                     // The photo is inline in the dashboard header, so it is
                     // read while that page is still the live document.
                     self.finish(
                         rows: rows, sessions: sessions,
                         week: week, photo: photo
                     )
+
+                    // The register goes after the read finishes, not inside
+                    // it. One form submission per subject is the slowest thing
+                    // this app does, and while it was on the critical path a
+                    // portal that would not cooperate with it held `busy` and
+                    // the status banner hostage - a read that had in fact
+                    // succeeded looked like one that had hung.
+                    self.startRegister(
+                        rows: rows, span: Portal.registerSpan(week.days.keys.min())
+                    )
                     return
                 }
             }
 
-            self.status = "Gave up waiting for the dashboard. Try again, and make sure it is fully loaded."
+            // Which half of the wait ran out matters: one means the login
+            // never completed, the other means the dashboard's own cards never
+            // filled in. They are different problems with different fixes.
+            self.status = sawDashboard
+                ? "The dashboard loaded but its attendance card never filled in. Try again."
+                : "Gave up waiting for the dashboard. Log in, wait for it to finish loading, then try again."
             self.hostingHidden = false
             self.busy = false
         }
@@ -305,6 +315,14 @@ final class Portal: NSObject, ObservableObject {
         let rows: [GridRow]
         let diag: String
     }
+    /// So a diagnostic says which run it came from.
+    private static let stamp: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "HH:mm:ss"
+        return f
+    }()
+
 
     /// The form wants dd-MM-yyyy, which is not what anything else here speaks.
     private static let dmy: DateFormatter = {
@@ -458,7 +476,12 @@ final class Portal: NSObject, ObservableObject {
             }
             note.append(w.key.prefix(20) + ": " + last)
         }
-        attDiag = out.isEmpty ? note.joined(separator: "\n") : nil
+        // Always written, never cleared on success: a diagnostic that only
+        // shows up on failure is indistinguishable from a stale one, and the
+        // first question asked about this screen was whether it was showing
+        // this run or the one before it. Settings only surfaces it when the
+        // register came back empty anyway.
+        attDiag = Portal.stamp.string(from: Date()) + " " + note.joined(separator: "\n")
         return out
     }
 
@@ -685,17 +708,49 @@ final class Portal: NSObject, ObservableObject {
         hostingHidden = false
         busy = false
         status = nil
-        onDone?(
-            Reading(
-                rows: rows, sessions: sessions, student: student,
-                week: week.days, weekDiag: week.diag,
-                termEnd: week.whole ? week.days.keys.max() : nil,
-                holidays: holidays,
-                daywise: daywise,
-                attDiag: attDiag,
-                photo: photo
-            )
+        let reading = Reading(
+            rows: rows, sessions: sessions, student: student,
+            week: week.days, weekDiag: week.diag,
+            termEnd: week.whole ? week.days.keys.max() : nil,
+            holidays: holidays,
+            daywise: daywise,
+            attDiag: attDiag,
+            photo: photo
         )
+        last = reading
+        onDone?(reading)
+    }
+
+    /// The last complete read, so the register can hand the same thing back
+    /// with its own findings added rather than with everything else blank.
+    private var last: Reading?
+    private var registerTask: Task<Void, Never>?
+
+    /// Read the register in the background, after the app is already usable.
+    ///
+    /// `busy` is already false by the time this runs, so the refresh control
+    /// works and nothing waits on it. A second refresh cancels it, because the
+    /// read it would be adding to has been replaced.
+    private func startRegister(rows: [AttRow], span: (from: String, to: String)) {
+        registerTask?.cancel()
+        registerTask = Task { [weak self] in
+            guard let self else { return }
+            let found = await self.fetchDaywise(rows: rows, from: span.from, to: span.to)
+            if Task.isCancelled { return }
+            self.status = nil
+            self.daywise = found
+            guard let base = self.last else { return }
+            self.onDone?(
+                Reading(
+                    rows: base.rows, sessions: base.sessions, student: base.student,
+                    week: base.week, weekDiag: base.weekDiag, termEnd: base.termEnd,
+                    holidays: base.holidays,
+                    daywise: found,
+                    attDiag: self.attDiag,
+                    photo: base.photo
+                )
+            )
+        }
     }
 
     // MARK: - Reading

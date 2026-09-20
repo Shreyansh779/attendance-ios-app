@@ -354,6 +354,35 @@ struct Backdrop: View {
     }
 }
 
+/// A card that has not arrived yet.
+///
+/// Not a spinner: a spinner says "wait" and says nothing about what for. A
+/// shape the size of the thing that is coming says both, and the screen does
+/// not jump when the real card lands on top of it. The pulse is opacity only
+/// - a sweeping highlight is the fashionable version and it draws the eye to
+/// the loading state, which is the opposite of the point.
+struct Skeleton: View {
+    var height: CGFloat = 96
+    var radius: CGFloat = 24
+
+    @State private var lit = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Color.clear
+            .frame(height: height)
+            .glassy(RoundedRectangle(cornerRadius: radius, style: .continuous), soft: false)
+            .opacity(lit ? 1 : 0.55)
+            .onAppear {
+                guard !reduceMotion else { return }
+                withAnimation(.easeInOut(duration: 1.15).repeatForever(autoreverses: true)) {
+                    lit = true
+                }
+            }
+            .accessibilityHidden(true)
+    }
+}
+
 // MARK: - Charts
 
 /// A trend line with no axes, no labels and no grid.

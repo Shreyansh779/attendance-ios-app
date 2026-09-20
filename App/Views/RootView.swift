@@ -129,10 +129,13 @@ struct RootView: View {
                 tabs
                 PillBar(route: $route)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            } else if portal.busy {
+                loadingState
             } else {
                 emptyState
             }
         }
+        .animation(Motion.ui.reduced(reduceMotion), value: hasData)
         // Text scales with the reader's setting, but only so far: past
         // accessibility1 a 92pt room number stops being a layout and starts
         // being a single digit. The hero keeps minimumScaleFactor as well.
@@ -152,12 +155,13 @@ struct RootView: View {
                 onSettingsChanged: rescheduleReminders
             )
         }
-        // Nothing stored means nothing to look at, so go straight to the portal
-        // rather than showing an empty screen and an instruction.
+        // A fresh install used to throw the portal's login page up the instant
+        // it opened, before the app had shown itself at all. Opening an app
+        // and being handed somebody else's website is a jarring first second;
+        // the empty state says what is missing and offers the same button.
         .onAppear {
             guard !didAutoOpen else { return }
             didAutoOpen = true
-            if !hasData { refresh() }
             // A re-signed sideload is a reinstall, and a reinstall clears the
             // pending queue - so rebuild it every launch, not only on refresh.
             rescheduleReminders()
@@ -301,6 +305,27 @@ struct RootView: View {
                 }
                 .animation(Motion.ui.reduced(reduceMotion), value: portal.status)
         }
+    }
+
+    /// The shape of the screen that is coming, while it is being read.
+    private var loadingState: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Skeleton(height: 40, radius: 20).frame(width: 190)
+            Skeleton(height: 150, radius: 28)
+            Skeleton(height: 104, radius: 28)
+            Skeleton(height: 76, radius: 28)
+            if let msg = portal.status {
+                Text(msg)
+                    .p(13.5)
+                    .foregroundStyle(Color.ink3)
+                    .padding(.horizontal, 4)
+                    .padding(.top, 2)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 70)
+        .transition(.soft)
     }
 
     private var emptyState: some View {

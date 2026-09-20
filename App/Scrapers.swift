@@ -1407,6 +1407,88 @@ enum Scrapers {
 })()
 """#
 
+    /// The results grid, once it has settled.
+    ///
+    /// Not ok until the row count matches the pager total, because a grid
+    /// halfway through rendering looks exactly like a finished short one.
+    /// The page size is pushed to 200 first, so one read is the whole course.
+    static let attGrid = #"""
+(function () {
+  function norm(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
+  function low(s) { return norm(s).toLowerCase(); }
+
+  function iso(v) {
+    var m = norm(v).match(/(\d{2})-(\d{2})-(\d{4})/);
+    if (m) return m[3] + '-' + m[2] + '-' + m[1];
+    m = norm(v).match(/(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return m[1] + '-' + m[2] + '-' + m[3];
+    return null;
+  }
+
+  // The grid is paged at ten. Ask for the biggest page the pager offers
+  // before reading anything, so one pass is the whole course.
+  var grew = false;
+  if (window.jQuery) {
+    try {
+      var grids = window.jQuery('[data-role=grid]');
+      grids.each(function () {
+        var g = window.jQuery(this).data('kendoGrid');
+        if (!g || !g.dataSource) return;
+        if (g.dataSource.pageSize && g.dataSource.pageSize() < 200) {
+          g.dataSource.pageSize(200);
+          grew = true;
+        }
+      });
+    } catch (e) { }
+  }
+
+  var rows = [];
+  var tables = document.querySelectorAll('table');
+  for (var t = 0; t < tables.length; t++) {
+    var heads = tables[t].querySelectorAll('th');
+    var idx = { date: -1, time: -1, status: -1 };
+    for (var h = 0; h < heads.length; h++) {
+      var ht = low(heads[h].textContent);
+      if (idx.date < 0 && ht.indexOf('session date') === 0) idx.date = h;
+      else if (idx.time < 0 && ht.indexOf('session time') === 0) idx.time = h;
+      else if (idx.status < 0 && ht === 'attendance') idx.status = h;
+    }
+    if (idx.date < 0 || idx.status < 0) continue;
+
+    var trs = tables[t].querySelectorAll('tr');
+    for (var r = 0; r < trs.length; r++) {
+      var tds = trs[r].querySelectorAll('td');
+      if (!tds.length || tds.length <= idx.status) continue;
+      var d = iso(tds[idx.date].textContent);
+      if (!d) continue;
+      var st = low(tds[idx.status].textContent);
+      if (st.indexOf('present') < 0 && st.indexOf('absent') < 0) continue;
+      rows.push({
+        date: d,
+        time: idx.time >= 0 ? norm(tds[idx.time].textContent) : '',
+        present: st.indexOf('present') >= 0
+      });
+    }
+    if (rows.length) break;
+  }
+
+  // "1 - 7 of 7 items" is the only honest statement of completeness on the
+  // page; without it a half-rendered grid reads as a finished one.
+  var total = -1;
+  var info = document.querySelectorAll('.k-pager-info, .k-pager-sizes, span');
+  for (var p = 0; p < info.length; p++) {
+    var m = norm(info[p].textContent).match(/^\d+\s*-\s*\d+\s+of\s+(\d+)\s+items$/i);
+    if (m) { total = +m[1]; break; }
+  }
+
+  return JSON.stringify({
+    ok: rows.length > 0 && !grew && (total < 0 || rows.length >= total),
+    rows: rows,
+    diag: 'rows=' + rows.length + ' total=' + total + (grew ? ' resized' : '')
+  });
+})()
+"""#
+
     /// Cheap check for whether the router has landed on the dashboard yet.
     static let route = "location.pathname"
 }

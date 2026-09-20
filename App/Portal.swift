@@ -315,6 +315,13 @@ final class Portal: NSObject, ObservableObject {
         let rows: [GridRow]
         let diag: String
     }
+    /// Every diagnostic carries the time it was written: one that is only
+    /// written on failure is indistinguishable from one left over from the
+    /// run before, which is exactly the confusion it caused.
+    private func stamped(_ lines: [String]) -> String {
+        Portal.stamp.string(from: Date()) + String(UnicodeScalar(10)) + lines.joined(separator: String(UnicodeScalar(10)))
+    }
+
     /// So a diagnostic says which run it came from.
     private static let stamp: DateFormatter = {
         let f = DateFormatter()
@@ -361,6 +368,30 @@ final class Portal: NSObject, ObservableObject {
         return try? JSONDecoder().decode(type, from: data)
     }
 
+    /// Open the course dropdown and wait for its list, by pointer and then by
+    /// keyboard.
+    ///
+    /// Two independent ways in, because a synthetic click travels the pointer
+    /// stack and whatever is listening may not be on it - Kendo for Angular
+    /// binds the popup to the component, not to the element. Alt+Down goes
+    /// through the key handler instead.
+    private func openCourseList() async -> (options: [String], diag: String) {
+        var diag = "open:"
+        for attempt in 0..<2 {
+            if Task.isCancelled { return ([], diag + " cancelled") }
+            let step = await decode(StepPayload.self, attempt == 0 ? Scrapers.attOpen : Scrapers.attKeys)
+            diag += " [" + (step?.diag ?? "no reply") + "]"
+            for _ in 0..<6 {
+                if Task.isCancelled { return ([], diag + " cancelled") }
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                guard let p = await decode(ListPayload.self, Scrapers.attList) else { continue }
+                if p.ok { return (p.courses, diag + " " + p.diag) }
+                diag = "open: " + p.diag
+            }
+        }
+        return ([], diag)
+    }
+
     /// The request the blobs read, set in its own eval so they stay literals
     /// the syntax gate can parse.
     private func setRequest(course: String, from: String, to: String) async {
@@ -400,7 +431,7 @@ final class Portal: NSObject, ObservableObject {
             break
         }
         guard let f = fields else {
-            attDiag = (["form not usable"] + note).joined(separator: "\n")
+            attDiag = stamped(["form not usable"] + note)
             return []
         }
 
@@ -410,18 +441,12 @@ final class Portal: NSObject, ObservableObject {
         // and looked at.
         var courses = f.courses
         if courses.isEmpty {
-            _ = try? await eval(Scrapers.attOpen)
-            for _ in 0..<8 {
-                if Task.isCancelled { return [] }
-                try? await Task.sleep(nanoseconds: 400_000_000)
-                guard let p = await decode(ListPayload.self, Scrapers.attList), p.ok else { continue }
-                courses = p.courses
-                note.append("list " + p.diag)
-                break
-            }
+            let opened = await openCourseList()
+            courses = opened.options
+            note.append(opened.diag)
         }
         guard !courses.isEmpty else {
-            attDiag = (["no course list"] + note).joined(separator: "\n")
+            attDiag = stamped(["no course list"] + note)
             return []
         }
 
@@ -439,7 +464,7 @@ final class Portal: NSObject, ObservableObject {
             note.append("no attendance row for: " + unmatched.prefix(5).joined(separator: ", "))
         }
         guard !wanted.isEmpty else {
-            attDiag = (["no course matched a subject"] + note).joined(separator: "\n")
+            attDiag = stamped(["no course matched a subject"] + note)
             return []
         }
 
@@ -449,8 +474,11 @@ final class Portal: NSObject, ObservableObject {
             status = "Reading the register, \(i + 1) of \(wanted.count)."
 
             await setRequest(course: w.option, from: from, to: to)
-            _ = try? await eval(Scrapers.attOpen)
-            try? await Task.sleep(nanoseconds: 600_000_000)
+            let reopened = await openCourseList()
+            guard !reopened.options.isEmpty else {
+                note.append(w.key.prefix(20) + ": " + reopened.diag)
+                continue
+            }
 
             let picked = await decode(StepPayload.self, Scrapers.attPick)
             guard picked?.ok == true else {
@@ -481,7 +509,7 @@ final class Portal: NSObject, ObservableObject {
         // first question asked about this screen was whether it was showing
         // this run or the one before it. Settings only surfaces it when the
         // register came back empty anyway.
-        attDiag = Portal.stamp.string(from: Date()) + " " + note.joined(separator: "\n")
+        attDiag = stamped(note)
         return out
     }
 

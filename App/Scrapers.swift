@@ -1264,11 +1264,12 @@ enum Scrapers {
     for (var i = 0; i < kinds.length; i++) {
       try { el.dispatchEvent(new Event(kinds[i], { bubbles: true })); } catch (e) { }
     }
-    if (window.jQuery) { try { window.jQuery(el).trigger('change'); } catch (e) { } }
   }
 
-  // A real click, not element.click(): both Kendo flavours open on mousedown
-  // and a bare click() never produces one.
+  // One tap on the host, and only the host. Kendo for Angular toggles the
+  // popup on the component's own click handler, so tapping the button inside
+  // it and then the host itself opens the list and immediately closes it
+  // again - which is exactly what the first attempt did.
   function tap(el) {
     var kinds = ['pointerdown', 'mousedown', 'mouseup', 'click'];
     for (var i = 0; i < kinds.length; i++) {
@@ -1285,20 +1286,13 @@ enum Scrapers {
     if (!f || !value) return false;
     var input = f.ctrl.tagName === 'INPUT' ? f.ctrl : f.ctrl.querySelector('input');
     if (!input) return false;
-    // The native setter, because Angular and React both wrap the property and
-    // a plain assignment is invisible to them.
+    // The native setter, because Angular wraps the property and a plain
+    // assignment never reaches the form model.
     try {
-      var proto = Object.getPrototypeOf(input);
-      var desc = Object.getOwnPropertyDescriptor(proto, 'value');
+      var desc = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value');
       if (desc && desc.set) { desc.set.call(input, value); } else { input.value = value; }
     } catch (e) { input.value = value; }
     fire(input);
-    if (window.jQuery) {
-      try {
-        var w = window.jQuery(input).data('kendoDatePicker');
-        if (w && w.value) { w.value(value); w.trigger('change'); }
-      } catch (e2) { }
-    }
     return true;
   }
 
@@ -1308,15 +1302,74 @@ enum Scrapers {
   var f = labelled('course');
   if (!f) return JSON.stringify({ ok: false, diag: 'no course field' });
 
-  var target = f.ctrl.querySelector('.k-input-button,.k-select,.k-input-inner,input,span')
-    || f.ctrl;
-  tap(target);
+  try { f.ctrl.focus(); } catch (e) { }
   tap(f.ctrl);
 
+  var pops = document.querySelectorAll('kendo-popup,.k-animation-container,.k-popup').length;
   return JSON.stringify({
     ok: true,
-    diag: 'dates=' + okFrom + '/' + okTo + ' opened=' + f.ctrl.tagName.toLowerCase()
+    diag: 'dates=' + okFrom + '/' + okTo + ' tapped=' + f.ctrl.tagName.toLowerCase() + ' pops=' + pops
   });
+})()
+"""#
+
+    /// The keyboard route into the same dropdown.
+    ///
+    /// A synthetic click goes through the pointer stack, and whatever is
+    /// listening may not be there. Every Kendo dropdown also opens on Alt+Down
+    /// and on Down, which goes through the component's own key handler
+    /// instead - a second, independent way in.
+    static let attKeys = #"""
+(function () {
+  function norm(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
+  function low(s) { return norm(s).toLowerCase(); }
+  function ownText(el) {
+    var s = '', c = el.childNodes;
+    for (var i = 0; i < c.length; i++) { if (c[i].nodeType === 3) s += c[i].nodeValue; }
+    return norm(s);
+  }
+  var CTRL = 'select,input,textarea,kendo-dropdownlist,kendo-combobox,kendo-datepicker,'
+    + '.k-dropdownlist,.k-dropdown,.k-combobox,.k-picker,[role=combobox],[role=listbox]';
+
+  function labelled(name) {
+    var all = document.querySelectorAll('label,span,div,p,strong,b');
+    for (var i = 0; i < all.length; i++) {
+      var t = low(ownText(all[i])).replace(/[*:]+$/, '').trim();
+      if (t !== name) continue;
+      var p = all[i].parentElement, hop = 0;
+      while (p && hop < 5) {
+        var c = p.querySelector(CTRL);
+        if (c) return { label: all[i], ctrl: c, box: p };
+        hop++;
+        p = p.parentElement;
+      }
+    }
+    return null;
+  }
+
+  // The keyboard route, for when a synthetic click does not reach whatever is
+  // listening. Every Kendo dropdown opens on Alt+Down and on Down, and this
+  // path goes through the component's own key handler rather than through the
+  // pointer stack.
+  function press(el, key, alt) {
+    var init = { key: key, code: key, bubbles: true, cancelable: true, altKey: !!alt };
+    var kinds = ['keydown', 'keyup'];
+    for (var i = 0; i < kinds.length; i++) {
+      try { el.dispatchEvent(new KeyboardEvent(kinds[i], init)); } catch (e) { }
+    }
+  }
+
+  var f = labelled('course');
+  if (!f) return JSON.stringify({ ok: false, diag: 'no course field' });
+
+  var target = f.ctrl.querySelector('[role=combobox],input,.k-input-inner') || f.ctrl;
+  try { target.focus(); } catch (e) { }
+  try { f.ctrl.focus(); } catch (e) { }
+  press(target, 'ArrowDown', true);
+  press(target, 'ArrowDown', false);
+
+  var pops = document.querySelectorAll('kendo-popup,.k-animation-container,.k-popup').length;
+  return JSON.stringify({ ok: true, diag: 'keys sent, pops=' + pops });
 })()
 """#
 
@@ -1328,21 +1381,37 @@ enum Scrapers {
 (function () {
   function norm(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
 
-  var nodes = document.querySelectorAll('[role=option],.k-list-item,li.k-item,li.k-list-item');
-  var out = [], seen = {};
+  var SEL = '[role=option],.k-list-item,li.k-item,li.k-list-item,kendo-list li,.k-popup li,.k-list li';
+  var nodes = document.querySelectorAll(SEL);
+
+  var vis = [], all = [], seen = {};
   for (var i = 0; i < nodes.length; i++) {
     var el = nodes[i];
-    // A closed popup is still in the DOM; offsetParent is what says otherwise.
-    if (!el.offsetParent && el.offsetHeight === 0) continue;
     var t = norm(el.textContent);
-    if (!t || seen[t]) continue;
+    if (!t) continue;
+    all.push(t);
+    // A closed popup is still in the DOM, so visibility is the only thing
+    // separating this dropdown's list from every other one on the page.
+    if (!el.offsetParent && !el.offsetHeight) continue;
+    if (seen[t]) continue;
     seen[t] = 1;
-    out.push(t);
+    vis.push(t);
   }
+
+  var pops = document.querySelectorAll('kendo-popup,.k-animation-container,.k-popup').length;
+  var out = vis;
+  // If nothing measures as visible but the page has exactly one list in it,
+  // that list is the answer - some popups are positioned off-screen until the
+  // animation lands, and offsetParent is null for the whole of it.
+  if (!out.length && all.length && pops === 1) {
+    var uniq = {};
+    out = all.filter(function (t) { if (uniq[t]) { return false; } uniq[t] = 1; return true; });
+  }
+
   return JSON.stringify({
     ok: out.length > 0,
     courses: out,
-    diag: 'visible=' + out.length + ' total=' + nodes.length
+    diag: 'nodes=' + nodes.length + ' visible=' + vis.length + ' pops=' + pops
   });
 })()
 """#

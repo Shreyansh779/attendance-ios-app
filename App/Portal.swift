@@ -540,6 +540,23 @@ final class Portal: NSObject, ObservableObject {
         return false
     }
 
+    /// Drop the deadlines that are not yours.
+    ///
+    /// The calendar feed the deadlines come from knows nothing about sections,
+    /// so it hands over every assignment in every course you are enrolled in -
+    /// including the nineteen other teachers' ones. The course scrape has
+    /// already worked out which material is yours, and both name the same
+    /// module by the same URL, so that answer is reused here rather than
+    /// worked out twice.
+    ///
+    /// An empty course list means the scrape failed, not that nothing is
+    /// yours, so in that case everything stays.
+    static func mine(_ due: [Deadline], in courses: [LmsCourse]) -> [Deadline] {
+        let known = Set(courses.flatMap { $0.items.map(\.url) })
+        guard !known.isEmpty else { return due }
+        return due.filter { known.contains($0.url) }
+    }
+
     private struct CoursePayload: Decodable {
         let done: Bool
         let ok: Bool
@@ -911,12 +928,13 @@ final class Portal: NSObject, ObservableObject {
             // getting there means spending a one-shot key and leaving the
             // portal's origin behind.
             self.status = "Checking the LMS."
-            let due = await self.fetchDeadlines()
+            let all = await self.fetchDeadlines()
             if Task.isCancelled { return }
-            self.deadlines = due
             // Same Moodle page, so this costs a request rather than a login.
             self.courses = await self.fetchCourses(faculty: self.faculty)
             if Task.isCancelled { return }
+            let due = Portal.mine(all, in: self.courses)
+            self.deadlines = due
             self.status = nil
             self.hostingHidden = false
             guard let base = self.last else { return }

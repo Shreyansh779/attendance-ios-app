@@ -397,6 +397,27 @@ check('lmsDue keeps only real deadlines and tidies the course name', () => {
   truthy(/\.\d{3}Z$/.test(out.items[0].due), 'due is not fractional-second ISO: ' + out.items[0].due);
 });
 
+check('a deadline of another teacher does not survive the course list', () => {
+  const due = [
+    { title: 'Class Test 1 is due', course: 'Ethical Hacking', due: '', kind: 'assign',
+      url: 'https://lms.upes.ac.in/mod/assign/view.php?id=114785' },
+    { title: 'PBL_Submission 1 is due', course: 'Ethical Hacking', due: '', kind: 'assign',
+      url: 'https://lms.upes.ac.in/mod/assign/view.php?id=118605' },
+  ];
+  // Only the second one is in a section belonging to one of your teachers.
+  const courses = [{ items: [{ url: 'https://lms.upes.ac.in/mod/assign/view.php?id=118605' }] }];
+  const known = new Set(courses.flatMap((c) => c.items.map((i) => i.url)));
+  const kept = known.size ? due.filter((d) => known.has(d.url)) : due;
+  eq(kept.map((d) => d.title), ['PBL_Submission 1 is due'], "another teacher's deadline survived");
+  // A failed course scrape must not empty the card.
+  const none = new Set();
+  eq((none.size ? due.filter((d) => none.has(d.url)) : due).length, 2, 'an empty course list dropped everything');
+  // And the Swift really is this, not something that has drifted from it.
+  const src = read('App/Portal.swift');
+  truthy(src.includes('guard !known.isEmpty else { return due }'), 'the fallback is gone from Portal.mine');
+  truthy(src.includes('return due.filter { known.contains($0.url) }'), 'the filter is gone from Portal.mine');
+});
+
 check('lmsCourses keeps your teachers, their folders, and the shared sections', () => {
   const courses = [
     { id: 100891, fullname: 'Cryptography and Network Security_Sem5' },

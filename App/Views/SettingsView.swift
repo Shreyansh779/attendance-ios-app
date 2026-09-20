@@ -14,6 +14,8 @@ struct SettingsView: View {
 
     let weekDays: Int
     let weekDiag: String?
+    let registerRows: Int
+    let attDiag: String?
     let age: String?
     /// Re-runs the schedule, because changing the lead time or switching
     /// reminders off should take effect now rather than at the next refresh.
@@ -31,7 +33,17 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 26) {
                     reminders
                     data
-                    if weekDays <= 1, let weekDiag { diagnostic(weekDiag) }
+                    if weekDays <= 1, let weekDiag {
+                    diagnostic("Timetable", weekDiag, "The weekly scrape returned little or nothing.")
+                }
+                if registerRows == 0, let attDiag {
+                    diagnostic(
+                        "Register",
+                        attDiag,
+                        "The day-by-day attendance search came back empty, so This week and "
+                            + "Day by day are hidden."
+                    )
+                }
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
@@ -73,32 +85,19 @@ struct SettingsView: View {
                         Text("How early")
                             .r(13, .medium)
                             .foregroundStyle(Color.ink3)
-                        // A row of five, rather than a wheel. Every option is
-                        // on screen and one tap away, which is the whole of
-                        // what this setting is.
-                        HStack(spacing: 6) {
-                            ForEach(Self.leads, id: \.self) { m in
-                                Button {
-                                    withAnimation(Motion.ui.reduced(reduceMotion)) { lead = m }
-                                } label: {
-                                    Text("\(m)")
-                                        .r(15, .semibold)
-                                        .foregroundStyle(lead == m ? Color.onInk : Color.ink2)
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 9)
-                                        .background(
-                                            lead == m ? Color.ink : Color.clear,
-                                            in: Capsule()
-                                        )
-                                        .contentShape(Capsule())
-                                }
-                                .buttonStyle(.pressable)
+                        // A row of five, rather than a wheel: every option is
+                        // on screen and one tap away, and the thumb can be
+                        // dragged across them.
+                        SlideBar(items: Self.leads, selection: $lead) { m, on in
+                            Text("\(m)")
+                                .r(15, .semibold)
+                                .foregroundStyle(on ? Color.onInk : Color.ink2)
+                                .padding(.vertical, 9)
                                 .accessibilityLabel("\(m) minutes before")
-                                .accessibilityAddTraits(lead == m ? [.isSelected] : [])
-                            }
+                                .accessibilityAddTraits(on ? [.isSelected] : [])
                         }
                         .padding(4)
-                        .glassy(Capsule(), tint: .surDim, soft: false)
+                        .background(Color.well, in: Capsule())
                     }
                     .padding(.vertical, 14)
 
@@ -149,12 +148,12 @@ struct SettingsView: View {
 
     // MARK: - Diagnostic
 
-    /// Only worth showing when the weekly scrape came back thin — otherwise it
-    /// is noise about a thing that is working.
-    private func diagnostic(_ text: String) -> some View {
+    /// Only worth showing when a scrape came back thin — otherwise it is noise
+    /// about a thing that is working.
+    private func diagnostic(_ name: String, _ text: String, _ why: String) -> some View {
         Card(
-            "Timetable diagnostic",
-            note: "The weekly scrape returned little or nothing. This is what the page actually did."
+            "\(name) diagnostic",
+            note: why + " This is what the page actually did."
         ) {
             VStack(alignment: .leading, spacing: 12) {
                 Text(text)

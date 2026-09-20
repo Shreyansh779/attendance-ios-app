@@ -151,6 +151,8 @@ struct RootView: View {
             SettingsView(
                 weekDays: snapshot?.week.count ?? 0,
                 weekDiag: snapshot?.weekDiag,
+                registerRows: snapshot?.daywise.count ?? 0,
+                attDiag: snapshot?.attDiag,
                 age: snapshot?.ageText,
                 onSettingsChanged: rescheduleReminders
             )
@@ -435,6 +437,7 @@ struct RootView: View {
                 history: Snapshot.extend(snapshot?.history ?? [], with: r.rows, on: Date()),
                 holidays: r.holidays.isEmpty ? (snapshot?.holidays ?? []) : r.holidays,
                 daywise: r.daywise.isEmpty ? (snapshot?.daywise ?? []) : r.daywise,
+                attDiag: r.attDiag ?? snapshot?.attDiag,
                 photo: r.photo ?? snapshot?.photo
             )
             Store.save(snap)
@@ -453,68 +456,26 @@ struct RootView: View {
 /// them rather than cutting, which is the whole of the animation.
 private struct PillBar: View {
     @Binding var route: Route
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Namespace private var slot
-    @State private var width: CGFloat = 0
-
-    /// Slide a thumb along the bar and the screens follow it.
-    ///
-    /// The thirds are nominal - the selected chip is wider than the other two
-    /// because it carries its label - but for a gesture that is settling on
-    /// one of three targets, nominal is close enough, and it means the drag
-    /// needs no geometry from the chips themselves.
-    private var drag: some Gesture {
-        DragGesture(minimumDistance: 10)
-            .onChanged { v in
-                guard width > 0 else { return }
-                let all = Route.allCases
-                let i = Int(v.location.x / (width / CGFloat(all.count)))
-                let hit = all[Swift.min(Swift.max(i, 0), all.count - 1)]
-                guard hit != route else { return }
-                withAnimation(Motion.ui.reduced(reduceMotion)) { route = hit }
-            }
-    }
 
     var body: some View {
-        HStack(spacing: 2) {
-            ForEach(Route.allCases, id: \.self) { r in
-                let on = route == r
-                Button {
-                    withAnimation(Motion.ui.reduced(reduceMotion)) { route = r }
-                } label: {
-                    HStack(spacing: 7) {
-                        Image(systemName: r.symbol)
-                            .font(.system(size: 14, weight: .semibold))
-                        if on {
-                            Text(r.title).r(14.5, .semibold).fixedSize()
-                        }
-                    }
-                    .foregroundStyle(on ? Color.onInk : Color.ink3)
-                    .padding(.horizontal, on ? 17 : 15)
-                    .padding(.vertical, 11)
-                    .background {
-                        if on {
-                            Capsule()
-                                .fill(Color.ink)
-                                .matchedGeometryEffect(id: "fill", in: slot)
-                        }
-                    }
-                    .contentShape(Capsule())
+        SlideBar(items: Route.allCases, selection: $route) { r, on in
+            HStack(spacing: 6) {
+                Image(systemName: r.symbol)
+                    .font(.system(size: 14, weight: .semibold))
+                if on {
+                    Text(r.title)
+                        .r(13.5, .semibold)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                 }
-                .buttonStyle(.pressable)
-                .accessibilityLabel(r.title)
-                .accessibilityAddTraits(on ? [.isSelected] : [])
             }
+            .foregroundStyle(on ? Color.onInk : Color.ink3)
+            .padding(.vertical, 11)
+            .accessibilityLabel(r.title)
+            .accessibilityAddTraits(on ? [.isSelected] : [])
         }
         .padding(5)
-        .glassy(Capsule(), tint: .sur, material: .ultraThinMaterial)
-        .background {
-            GeometryReader { geo in
-                Color.clear.onAppear { width = geo.size.width }
-            }
-        }
-        .contentShape(Capsule())
-        .gesture(drag)
+        .glassy(Capsule(), tint: .well, material: .ultraThinMaterial)
         .padding(.horizontal, 26)
         .padding(.bottom, 6)
     }

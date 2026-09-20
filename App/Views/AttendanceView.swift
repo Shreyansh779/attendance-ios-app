@@ -24,12 +24,6 @@ struct AttendanceView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     header.padding(.horizontal, 6).padding(.top, 20).padding(.bottom, 7)
 
-                    // A healthy aggregate can hide one subject that is already
-                    // drowning, so name it before the list.
-                    if let worst = summary.blocker {
-                        Callout(worst: worst, term: terms[worst.key]).padding(.bottom, 6)
-                    }
-
                     if !thisWeek.isEmpty {
                         WeekRegister(sessions: thisWeek).padding(.bottom, 6)
                     }
@@ -65,6 +59,18 @@ struct AttendanceView: View {
             .sorted { ($0.date, $0.time) < ($1.date, $1.time) }
     }
 
+    /// The day the last subject still short of the line gets there.
+    ///
+    /// Every row already carries its own clear date; the only question the
+    /// list cannot answer at a glance is which of them is last, and that is
+    /// the day the whole term stops needing to be managed.
+    private var allClear: (date: String?, stuck: Int) {
+        let short = summary.subjects
+            .filter { $0.budget.state == .short }
+            .compactMap { terms[$0.key] }
+        return (short.compactMap(\.clears).max(), short.filter { !$0.reachable }.count)
+    }
+
     /// Which way it is going, and by how much, since the first reading kept.
     ///
     /// Nil until there are two days of history: one point is not a direction,
@@ -92,6 +98,20 @@ struct AttendanceView: View {
                     .contentTransition(.numericText())
                     .d(29, .bold)
                     .kerning(-0.5)
+                if allClear.stuck > 0 {
+                    Text(
+                        allClear.stuck == 1
+                            ? "one subject can no longer reach \(THRESHOLD)%"
+                            : "\(allClear.stuck) subjects can no longer reach \(THRESHOLD)%"
+                    )
+                    .r(13.5, .medium)
+                    .foregroundStyle(Color.coral)
+                    .fixedSize(horizontal: false, vertical: true)
+                } else if let d = allClear.date {
+                    Text("all clear by \(shortDate(d))")
+                        .r(13.5, .medium)
+                        .foregroundStyle(Color.ink2)
+                }
                 if let t = trend {
                     HStack(spacing: 9) {
                         Spark(values: t.series, tint: t.delta >= 0 ? Color.mintHi : Color.coral)
@@ -110,105 +130,6 @@ struct AttendanceView: View {
                 .padding(.vertical, 7)
                 .glassy(Capsule(), soft: false)
                 .fixedSize()
-        }
-    }
-
-    /// The subject in the way, as a shape rather than as a paragraph.
-    ///
-    /// This card used to be four sentences of prose - the subject name, the
-    /// count, the clear date and the run of dates, each spelled out in full.
-    /// Nobody reads four sentences on a screen they open to check one number.
-    /// It is now a label, a number, a bar and a row of dates: the same facts,
-    /// none of them in a sentence.
-    private struct Callout: View {
-        let worst: AttRow
-        let term: Term?
-
-        var body: some View {
-            let b = worst.budget
-            VStack(alignment: .leading, spacing: 13) {
-                Text(worst.key)
-                    .r(12.5, .semibold)
-                    .textCase(.uppercase)
-                    .kerning(0.6)
-                    .foregroundStyle(Color.coral)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Text("+\(b.value)")
-                        .d(40, .bold)
-                        .kerning(-1.0)
-                        .foregroundStyle(Color.coral)
-                    Text("in a row to clear \(THRESHOLD)%")
-                        .r(14.5, .medium)
-                        .foregroundStyle(Color.ink2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                HStack(spacing: 12) {
-                    Meter(pct: b.pct, tint: Color.coral)
-                    Text("\(Int(b.pct.rounded()))% · \(worst.attended)/\(worst.total)")
-                        .r(13.5, .semibold)
-                        .foregroundStyle(Color.ink2)
-                        .fixedSize()
-                }
-
-                if let tm = term {
-                    if tm.reachable {
-                        // The dates you have to turn up to, picked out of the
-                        // ones that follow. A date you can look at is a plan in
-                        // a way that "seven in a row" never is.
-                        if b.state == .short, b.value >= 1, !tm.dates.isEmpty {
-                            Chips(dates: tm.dates, need: b.value)
-                        }
-                        if let c = tm.clears {
-                            Label("Clears \(shortDate(c))", systemImage: "checkmark.circle")
-                                .r(13, .semibold)
-                                .foregroundStyle(Color.ink3)
-                        }
-                    } else {
-                        Label(
-                            "\(THRESHOLD)% is out of reach - only \(tm.remaining) left",
-                            systemImage: "exclamationmark.triangle"
-                        )
-                        .r(13, .semibold)
-                        .foregroundStyle(Color.coral)
-                        .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-            }
-            .slab(.surLow, radius: 28, pad: EdgeInsets(top: 20, leading: 22, bottom: 20, trailing: 22))
-        }
-
-        /// The next few dates, the required ones filled in.
-        private struct Chips: View {
-            let dates: [String]
-            let need: Int
-
-            var body: some View {
-                let shown = Array(dates.prefix(Swift.min(Swift.max(need, 1), 7)))
-                HStack(spacing: 5) {
-                    ForEach(Array(shown.enumerated()), id: \.offset) { i, d in
-                        Text(shortDate(d))
-                            .r(11.5, .semibold)
-                            .foregroundStyle(i < need ? Color.onInk : Color.ink3)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.75)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 5)
-                            .background(
-                                i < need ? Color.ink : Color.clear,
-                                in: Capsule()
-                            )
-                    }
-                    if dates.count > shown.count, need > shown.count {
-                        Text("+\(need - shown.count)")
-                            .r(11.5, .semibold)
-                            .foregroundStyle(Color.ink3)
-                    }
-                    Spacer(minLength: 0)
-                }
-            }
         }
     }
 

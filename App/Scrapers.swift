@@ -1140,10 +1140,14 @@ enum Scrapers {
       var l = document.querySelector('label[for="' + el.id + '"]');
       if (l) return low(l.textContent);
     }
+    // Walk up, but only accept a level holding exactly one label. The row
+    // that wraps all five fields also holds all five labels, and taking the
+    // first would quietly call every control on the form "program".
     var p = el.parentElement, hop = 0;
     while (p && hop < 5) {
-      var lab = p.querySelector('label');
-      if (lab) return low(lab.textContent);
+      var labs = p.querySelectorAll('label');
+      if (labs.length === 1) return low(labs[0].textContent);
+      if (labs.length > 1) return '';
       hop++;
       p = p.parentElement;
     }
@@ -1240,10 +1244,14 @@ enum Scrapers {
       var l = document.querySelector('label[for="' + el.id + '"]');
       if (l) return low(l.textContent);
     }
+    // Walk up, but only accept a level holding exactly one label. The row
+    // that wraps all five fields also holds all five labels, and taking the
+    // first would quietly call every control on the form "program".
     var p = el.parentElement, hop = 0;
     while (p && hop < 5) {
-      var lab = p.querySelector('label');
-      if (lab) return low(lab.textContent);
+      var labs = p.querySelectorAll('label');
+      if (labs.length === 1) return low(labs[0].textContent);
+      if (labs.length > 1) return '';
       hop++;
       p = p.parentElement;
     }

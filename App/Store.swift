@@ -74,6 +74,9 @@ struct Snapshot: Codable {
     /// Every session the register has, across every subject. Read last, on a
     /// separate page, and empty until that read has succeeded once.
     var daywise: [DaySession] = []
+    /// What the register search actually did, kept only so an empty week is
+    /// explainable rather than mysterious.
+    var attDiag: String?
     /// The student's photo as a `data:image/...;base64,` URI, read off the
     /// dashboard header. Stored rather than re-fetched: the portal serves it
     /// inline, so there is no URL to load later.
@@ -94,6 +97,7 @@ struct Snapshot: Codable {
         history = (try? c.decode([Stamp].self, forKey: .history)) ?? []
         holidays = (try? c.decode([Holiday].self, forKey: .holidays)) ?? []
         daywise = (try? c.decode([DaySession].self, forKey: .daywise)) ?? []
+        attDiag = try? c.decodeIfPresent(String.self, forKey: .attDiag)
         photo = try? c.decodeIfPresent(String.self, forKey: .photo)
     }
 
@@ -103,7 +107,7 @@ struct Snapshot: Codable {
         marks: [String: Mark] = [:], weekDiag: String? = nil,
         termEnd: String? = nil, history: [Stamp] = [],
         holidays: [Holiday] = [], daywise: [DaySession] = [],
-        photo: String? = nil
+        attDiag: String? = nil, photo: String? = nil
     ) {
         self.savedAt = savedAt
         self.rows = rows
@@ -116,6 +120,7 @@ struct Snapshot: Codable {
         self.history = history
         self.holidays = holidays
         self.daywise = daywise
+        self.attDiag = attDiag
         self.photo = photo
     }
 

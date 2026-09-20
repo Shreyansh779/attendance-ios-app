@@ -1113,6 +1113,308 @@ enum Scrapers {
 })()
 """#
 
+    /// What the day-by-day attendance form is made of.
+    ///
+    /// Kendo renders a dropdown as a span over a hidden control, so the
+    /// options are in the widget dataSource rather than in the DOM. This
+    /// reads both, and reports what it found either way - a search that
+    /// silently sets nothing is the failure mode to avoid.
+    static let attFields = #"""
+(function () {
+  function norm(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
+  function low(s) { return norm(s).toLowerCase(); }
+
+  function widget(el) {
+    if (!window.jQuery) return null;
+    var d;
+    try { d = window.jQuery(el).data(); } catch (e) { return null; }
+    if (!d) return null;
+    for (var k in d) {
+      if (k.indexOf('kendo') === 0 && d[k] && typeof d[k] === 'object') return d[k];
+    }
+    return null;
+  }
+
+  function labelFor(el) {
+    if (el.id) {
+      var l = document.querySelector('label[for="' + el.id + '"]');
+      if (l) return low(l.textContent);
+    }
+    var p = el.parentElement, hop = 0;
+    while (p && hop < 5) {
+      var lab = p.querySelector('label');
+      if (lab) return low(lab.textContent);
+      hop++;
+      p = p.parentElement;
+    }
+    return '';
+  }
+
+  function textsOf(el) {
+    var w = widget(el);
+    var out = [];
+    if (w && w.dataSource && typeof w.dataSource.data === 'function') {
+      var ds = w.dataSource.data() || [];
+      var tf = (w.options && w.options.dataTextField) || '';
+      for (var i = 0; i < ds.length; i++) {
+        var it = ds[i];
+        var t = '';
+        if (tf && it[tf] != null) t = String(it[tf]);
+        else if (typeof it === 'string') t = it;
+        else t = norm(it.Text || it.text || it.Name || it.name || it.Description || '');
+        if (t) out.push(norm(t));
+      }
+      if (out.length) return out;
+    }
+    if (el.tagName === 'SELECT') {
+      for (var j = 0; j < el.options.length; j++) {
+        var o = norm(el.options[j].textContent);
+        if (o) out.push(o);
+      }
+    }
+    return out;
+  }
+
+  var fields = [];
+  var els = document.querySelectorAll('select, input, textarea');
+  for (var i = 0; i < els.length; i++) {
+    var el = els[i];
+    if (el.type === 'hidden') continue;
+    var lab = labelFor(el);
+    if (!lab) continue;
+    fields.push({ label: lab, tag: el.tagName, id: el.id || '', n: textsOf(el).length });
+  }
+
+  function find(want) {
+    for (var i = 0; i < els.length; i++) {
+      if (els[i].type === 'hidden') continue;
+      if (labelFor(els[i]).indexOf(want) === 0) return els[i];
+    }
+    return null;
+  }
+
+  var course = find('course');
+  var hasSearch = false;
+  var btns = document.querySelectorAll('button, a, input[type=submit], span');
+  for (var b = 0; b < btns.length; b++) {
+    if (low(btns[b].textContent) === 'search' || low(btns[b].value) === 'search') { hasSearch = true; break; }
+  }
+
+  return JSON.stringify({
+    ok: !!course,
+    courses: course ? textsOf(course) : [],
+    hasSearch: hasSearch,
+    diag: 'fields=' + fields.length
+      + ' labels=' + fields.map(function (f) { return f.label.slice(0, 14) + ':' + f.n; }).join('|').slice(0, 300)
+  });
+})()
+"""#
+
+    /// Fill the form for one course and press Search.
+    ///
+    /// Reads `window.__attReq` = { course, from, to }, which Swift sets in a
+    /// separate eval so this stays a plain literal the syntax gate can check.
+    /// Writing `el.value` alone is not enough: the Kendo widget keeps its own
+    /// state, so the span still shows the old choice and the postback sends it.
+    static let attRun = #"""
+(function () {
+  var req = window.__attReq;
+  if (!req) return JSON.stringify({ ok: false, diag: 'no request' });
+
+  function norm(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
+  function low(s) { return norm(s).toLowerCase(); }
+
+  function widget(el) {
+    if (!window.jQuery) return null;
+    var d;
+    try { d = window.jQuery(el).data(); } catch (e) { return null; }
+    if (!d) return null;
+    for (var k in d) {
+      if (k.indexOf('kendo') === 0 && d[k] && typeof d[k] === 'object') return d[k];
+    }
+    return null;
+  }
+
+  function labelFor(el) {
+    if (el.id) {
+      var l = document.querySelector('label[for="' + el.id + '"]');
+      if (l) return low(l.textContent);
+    }
+    var p = el.parentElement, hop = 0;
+    while (p && hop < 5) {
+      var lab = p.querySelector('label');
+      if (lab) return low(lab.textContent);
+      hop++;
+      p = p.parentElement;
+    }
+    return '';
+  }
+
+  var els = document.querySelectorAll('select, input, textarea');
+  function find(want) {
+    for (var i = 0; i < els.length; i++) {
+      if (els[i].type === 'hidden') continue;
+      if (labelFor(els[i]).indexOf(want) === 0) return els[i];
+    }
+    return null;
+  }
+
+  function fire(el) {
+    var kinds = ['input', 'change', 'blur'];
+    for (var i = 0; i < kinds.length; i++) {
+      try { el.dispatchEvent(new Event(kinds[i], { bubbles: true })); } catch (e) { }
+    }
+    if (window.jQuery) { try { window.jQuery(el).trigger('change'); } catch (e) { } }
+  }
+
+  // Kendo widgets keep their own state; writing el.value alone leaves the
+  // rendered span showing the old choice and the postback sending it too.
+  function setText(el, wanted) {
+    if (!el) return false;
+    var w = widget(el);
+    if (w && typeof w.value === 'function') {
+      var ds = (w.dataSource && typeof w.dataSource.data === 'function') ? (w.dataSource.data() || []) : [];
+      var tf = (w.options && w.options.dataTextField) || '';
+      var vf = (w.options && w.options.dataValueField) || '';
+      for (var i = 0; i < ds.length; i++) {
+        var it = ds[i];
+        var t = tf && it[tf] != null ? String(it[tf]) : (typeof it === 'string' ? it : norm(it.Text || it.text || it.Name || it.name || ''));
+        if (low(t) !== low(wanted)) continue;
+        var v = vf && it[vf] != null ? it[vf] : t;
+        try { w.value(v); } catch (e) { }
+        if (typeof w.trigger === 'function') { try { w.trigger('change'); } catch (e) { } }
+        fire(el);
+        return true;
+      }
+      if (!ds.length) {
+        try { w.value(wanted); } catch (e) { }
+        if (typeof w.trigger === 'function') { try { w.trigger('change'); } catch (e) { } }
+        fire(el);
+        return true;
+      }
+      return false;
+    }
+    if (el.tagName === 'SELECT') {
+      for (var j = 0; j < el.options.length; j++) {
+        if (low(el.options[j].textContent) === low(wanted)) {
+          el.selectedIndex = j;
+          fire(el);
+          return true;
+        }
+      }
+      return false;
+    }
+    el.value = wanted;
+    fire(el);
+    return true;
+  }
+
+  var course = find('course');
+  var start = find('start date') || find('start');
+  var end = find('end date') || find('end');
+
+  var okC = setText(course, req.course);
+  var okS = setText(start, req.from);
+  var okE = setText(end, req.to);
+
+  var clicked = false;
+  var btns = document.querySelectorAll('button, a, input[type=submit]');
+  for (var b = 0; b < btns.length && !clicked; b++) {
+    var t = low(btns[b].textContent) || low(btns[b].value);
+    if (t !== 'search') continue;
+    try { btns[b].click(); clicked = true; } catch (e) { }
+  }
+
+  window.__attAt = Date.now();
+  return JSON.stringify({
+    ok: okC && clicked,
+    diag: 'c=' + okC + ' s=' + okS + ' e=' + okE + ' click=' + clicked
+  });
+})()
+"""#
+
+    /// The results grid, once it has settled.
+    ///
+    /// Not ok until the row count matches the pager total, because a grid
+    /// halfway through rendering looks exactly like a finished short one.
+    /// The page size is pushed to 200 first, so one read is the whole course.
+    static let attGrid = #"""
+(function () {
+  function norm(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
+  function low(s) { return norm(s).toLowerCase(); }
+
+  function iso(v) {
+    var m = norm(v).match(/(\d{2})-(\d{2})-(\d{4})/);
+    if (m) return m[3] + '-' + m[2] + '-' + m[1];
+    m = norm(v).match(/(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return m[1] + '-' + m[2] + '-' + m[3];
+    return null;
+  }
+
+  // The grid is paged at ten. Ask for the biggest page the pager offers
+  // before reading anything, so one pass is the whole course.
+  var grew = false;
+  if (window.jQuery) {
+    try {
+      var grids = window.jQuery('[data-role=grid]');
+      grids.each(function () {
+        var g = window.jQuery(this).data('kendoGrid');
+        if (!g || !g.dataSource) return;
+        if (g.dataSource.pageSize && g.dataSource.pageSize() < 200) {
+          g.dataSource.pageSize(200);
+          grew = true;
+        }
+      });
+    } catch (e) { }
+  }
+
+  var rows = [];
+  var tables = document.querySelectorAll('table');
+  for (var t = 0; t < tables.length; t++) {
+    var heads = tables[t].querySelectorAll('th');
+    var idx = { date: -1, time: -1, status: -1 };
+    for (var h = 0; h < heads.length; h++) {
+      var ht = low(heads[h].textContent);
+      if (idx.date < 0 && ht.indexOf('session date') === 0) idx.date = h;
+      else if (idx.time < 0 && ht.indexOf('session time') === 0) idx.time = h;
+      else if (idx.status < 0 && ht === 'attendance') idx.status = h;
+    }
+    if (idx.date < 0 || idx.status < 0) continue;
+
+    var trs = tables[t].querySelectorAll('tr');
+    for (var r = 0; r < trs.length; r++) {
+      var tds = trs[r].querySelectorAll('td');
+      if (!tds.length || tds.length <= idx.status) continue;
+      var d = iso(tds[idx.date].textContent);
+      if (!d) continue;
+      var st = low(tds[idx.status].textContent);
+      if (st.indexOf('present') < 0 && st.indexOf('absent') < 0) continue;
+      rows.push({
+        date: d,
+        time: idx.time >= 0 ? norm(tds[idx.time].textContent) : '',
+        present: st.indexOf('present') >= 0
+      });
+    }
+    if (rows.length) break;
+  }
+
+  // "1 - 7 of 7 items" is the only honest statement of completeness on the
+  // page; without it a half-rendered grid reads as a finished one.
+  var total = -1;
+  var info = document.querySelectorAll('.k-pager-info, .k-pager-sizes, span');
+  for (var p = 0; p < info.length; p++) {
+    var m = norm(info[p].textContent).match(/^\d+\s*-\s*\d+\s+of\s+(\d+)\s+items$/i);
+    if (m) { total = +m[1]; break; }
+  }
+
+  return JSON.stringify({
+    ok: rows.length > 0 && !grew && (total < 0 || rows.length >= total),
+    rows: rows,
+    diag: 'rows=' + rows.length + ' total=' + total + (grew ? ' resized' : '')
+  });
+})()
+"""#
+
     /// Cheap check for whether the router has landed on the dashboard yet.
     static let route = "location.pathname"
 }

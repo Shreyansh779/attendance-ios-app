@@ -11,6 +11,22 @@ struct Holiday: Codable, Hashable {
     let to: String
 }
 
+/// One class, as the portal's own register recorded it.
+///
+/// The dashboard only ever gives totals - 14 of 21 - which cannot answer
+/// "which ones did I miss" or "how did this week go". The attendance search
+/// page has the register itself, one row per session, and this is a row of it.
+struct DaySession: Codable, Hashable {
+    /// The app's own subject key, not the dropdown's wording, so this joins
+    /// straight onto `AttRow`.
+    let subject: String
+    /// ISO yyyy-MM-dd.
+    let date: String
+    /// As printed: "17:00 - 17:55".
+    let time: String
+    let present: Bool
+}
+
 /// What the portal said on one day.
 ///
 /// The app was entirely point-in-time: it knew you were at 72.6% but not that
@@ -55,6 +71,9 @@ struct Snapshot: Codable {
     /// them, and counting those as "remaining" makes recovery look easier than
     /// it is — which is the wrong direction to be wrong in.
     var holidays: [Holiday] = []
+    /// Every session the register has, across every subject. Read last, on a
+    /// separate page, and empty until that read has succeeded once.
+    var daywise: [DaySession] = []
     /// The student's photo as a `data:image/...;base64,` URI, read off the
     /// dashboard header. Stored rather than re-fetched: the portal serves it
     /// inline, so there is no URL to load later.
@@ -74,6 +93,7 @@ struct Snapshot: Codable {
         termEnd = try? c.decodeIfPresent(String.self, forKey: .termEnd)
         history = (try? c.decode([Stamp].self, forKey: .history)) ?? []
         holidays = (try? c.decode([Holiday].self, forKey: .holidays)) ?? []
+        daywise = (try? c.decode([DaySession].self, forKey: .daywise)) ?? []
         photo = try? c.decodeIfPresent(String.self, forKey: .photo)
     }
 
@@ -82,7 +102,8 @@ struct Snapshot: Codable {
         student: String?, week: [String: [Session]] = [:],
         marks: [String: Mark] = [:], weekDiag: String? = nil,
         termEnd: String? = nil, history: [Stamp] = [],
-        holidays: [Holiday] = [], photo: String? = nil
+        holidays: [Holiday] = [], daywise: [DaySession] = [],
+        photo: String? = nil
     ) {
         self.savedAt = savedAt
         self.rows = rows
@@ -94,6 +115,7 @@ struct Snapshot: Codable {
         self.termEnd = termEnd
         self.history = history
         self.holidays = holidays
+        self.daywise = daywise
         self.photo = photo
     }
 
@@ -144,6 +166,19 @@ struct Snapshot: Codable {
         // earning their bytes.
         if out.count > 120 { out.removeFirst(out.count - 120) }
         return out
+    }
+
+    /// Monday to Sunday around `now`, as ISO days.
+    ///
+    /// Not `Calendar.dateInterval(of: .weekOfYear)`: that honours the locale's
+    /// first weekday, which here is Sunday, and a week that starts on Sunday
+    /// puts the weekend at both ends of the timetable.
+    static func week(of now: Date) -> (from: String, to: String) {
+        let cal = Calendar.current
+        let back = (cal.component(.weekday, from: now) + 5) % 7
+        let mon = cal.date(byAdding: .day, value: -back, to: now) ?? now
+        let sun = cal.date(byAdding: .day, value: 6, to: mon) ?? now
+        return (isoDay.string(from: mon), isoDay.string(from: sun))
     }
 
     var ageHours: Double { Date().timeIntervalSince(savedAt) / 3600 }

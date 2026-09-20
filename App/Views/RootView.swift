@@ -212,7 +212,9 @@ struct RootView: View {
                     AttendanceView(
                         summary: summary,
                         terms: terms,
-                        history: snapshot?.history ?? []
+                        history: snapshot?.history ?? [],
+                        daywise: snapshot?.daywise ?? [],
+                        now: tick
                     )
                 }
             }
@@ -432,6 +434,7 @@ struct RootView: View {
                 termEnd: r.termEnd ?? snapshot?.termEnd,
                 history: Snapshot.extend(snapshot?.history ?? [], with: r.rows, on: Date()),
                 holidays: r.holidays.isEmpty ? (snapshot?.holidays ?? []) : r.holidays,
+                daywise: r.daywise.isEmpty ? (snapshot?.daywise ?? []) : r.daywise,
                 photo: r.photo ?? snapshot?.photo
             )
             Store.save(snap)

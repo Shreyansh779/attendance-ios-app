@@ -46,8 +46,12 @@
             Snapshot.isoDay.string(from: cal.date(byAdding: .day, value: offset, to: now) ?? now)
         }
 
-        private static func at(_ minutes: Int, from now: Date) -> String {
-            clock.string(from: now.addingTimeInterval(TimeInterval(minutes * 60)))
+        /// Whole hours either side of this one, so a screenshot shows "11:00"
+        /// rather than whatever minute the runner happened to be on.
+        private static func at(_ hours: Int, _ minute: Int, from now: Date) -> String {
+            let top = cal.date(bySetting: .minute, value: 0, of: now) ?? now
+            let t = cal.date(byAdding: .hour, value: hours, to: top) ?? now
+            return clock.string(from: cal.date(bySetting: .minute, value: minute, of: t) ?? t)
         }
 
         /// Six subjects: one comfortably clear, two behind, one that gates the
@@ -67,23 +71,23 @@
             let today = [
                 Session(
                     subject: "Object Oriented Analysis and Design",
-                    start: at(-190, from: now), end: at(-135, from: now),
+                    start: at(-3, 0, from: now), end: at(-3, 55, from: now),
                     room: "11214", online: false, mode: "class", date: day(0, from: now)
                 ),
                 Session(
                     subject: "Formal Languages and Automata Theory",
-                    start: at(-20, from: now), end: at(35, from: now),
+                    start: at(0, 0, from: now), end: at(0, 55, from: now),
                     room: "11213", online: false, mode: "class", date: day(0, from: now)
                 ),
                 Session(
                     subject: "Web Analytics",
-                    start: at(75, from: now), end: at(130, from: now),
+                    start: at(2, 0, from: now), end: at(2, 55, from: now),
                     room: nil, online: true, mode: "virtual", date: day(0, from: now),
                     link: "https://teams.microsoft.com/l/meetup-join/demo"
                 ),
                 Session(
                     subject: "Research Methodology in CS",
-                    start: at(200, from: now), end: at(255, from: now),
+                    start: at(4, 0, from: now), end: at(4, 55, from: now),
                     room: "11207", online: false, mode: "class", date: day(0, from: now)
                 ),
             ]
@@ -140,7 +144,7 @@
                 week: week,
                 marks: [
                     // Already ticked, so the answered state is on screen too.
-                    "\(day(0, from: now))|\(at(-190, from: now))|Object Oriented Analysis and Design":
+                    "\(day(0, from: now))|\(at(-3, 0, from: now))|Object Oriented Analysis and Design":
                         Mark(subject: "Object Oriented Analysis and Design", attended: true, total: 20)
                 ],
                 weekDiag: nil,

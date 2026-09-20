@@ -62,7 +62,10 @@ struct RootView: View {
     /// Today, because `Demo` does not exist in them.
     private static var firstRoute: Route {
         #if DEBUG
-            if Demo.isOn, let r = Route(rawValue: Demo.tab) { return r }
+            if Demo.isOn {
+                if Demo.tab == "subject" { return .attendance }
+                if let r = Route(rawValue: Demo.tab) { return r }
+            }
         #endif
         return .today
     }
@@ -340,7 +343,7 @@ struct RootView: View {
                 // The pill bar floats over the content, so the content has
                 // to be told to end above it.
                 .safeAreaInset(edge: .bottom) {
-                    Color.clear.frame(height: 58)
+                    Color.clear.frame(height: 66)
                 }
                 .safeAreaInset(edge: .top) {
                     if let msg = portal.status ?? staleNote {
@@ -508,17 +511,21 @@ private struct PillBar: View {
 
     var body: some View {
         SlideBar(items: Route.allCases, selection: $route) { r, on in
-            HStack(spacing: 6) {
+            HStack(spacing: 5) {
                 Image(systemName: r.symbol)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 13.5, weight: .semibold))
                 if on {
                     Text(r.title)
-                        .r(13.5, .semibold)
+                        .r(13, .semibold)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.75)
+                        // "Attendance" is wider than a third of the bar at any
+                        // sensible size, so it is allowed to shrink rather than
+                        // to spill over the edge of its own thumb.
+                        .minimumScaleFactor(0.65)
                 }
             }
             .foregroundStyle(on ? Color.onInk : Color.ink3)
+            .padding(.horizontal, 8)
             .padding(.vertical, 11)
             .accessibilityLabel(r.title)
             .accessibilityAddTraits(on ? [.isSelected] : [])

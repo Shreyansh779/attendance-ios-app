@@ -180,7 +180,50 @@
                         due: iso(22, from: now), kind: "assign", url: ""
                     ),
                 ],
-                lmsDiag: nil
+                lmsDiag: nil,
+                courses: [
+                    LmsCourse(
+                        id: 1, name: "Ethical Hacking & Penetration Testing",
+                        url: "https://lms.upes.ac.in/course/view.php?id=1",
+                        items: [
+                            LmsItem(
+                                title: "Web Fundamentals - TryHackMe", kind: "URL",
+                                url: "https://lms.upes.ac.in/mod/url/view.php?id=1",
+                                group: "Rahul Kumar"
+                            ),
+                            LmsItem(
+                                title: "Class Test 1", kind: "Assignment",
+                                url: "https://lms.upes.ac.in/mod/assign/view.php?id=2",
+                                group: "Richa Kumari"
+                            ),
+                            // A long one, because a course page is full of them
+                            // and a row that only ever gets short titles proves
+                            // nothing about how it wraps.
+                            LmsItem(
+                                title: "Unit_1 and Unit_2_half_and_Course_Plan",
+                                kind: "Folder",
+                                url: "https://lms.upes.ac.in/mod/folder/view.php?id=3",
+                                group: "Unit-1"
+                            ),
+                        ]
+                    ),
+                    LmsCourse(
+                        id: 2, name: "Research Methodology in CS",
+                        url: "https://lms.upes.ac.in/course/view.php?id=2",
+                        items: [
+                            LmsItem(
+                                title: "QUIZ UNIT 1 & 3", kind: "Quiz",
+                                url: "https://lms.upes.ac.in/mod/quiz/view.php?id=4",
+                                group: "Dr. Ashutosh Sharma"
+                            )
+                        ]
+                    ),
+                    // Half this semester's courses have nothing in them at all.
+                    LmsCourse(
+                        id: 3, name: "Web Analytics",
+                        url: "https://lms.upes.ac.in/course/view.php?id=3", items: []
+                    ),
+                ]
             )
         }
 

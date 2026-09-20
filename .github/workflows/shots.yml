@@ -100,7 +100,8 @@ jobs:
             shoot "$MODE-2-timetable"  -tab timetable
             shoot "$MODE-3-attendance" -tab attendance
             shoot "$MODE-4-subject"    -tab subject
-            shoot "$MODE-5-settings"   -tab today -sheet settings
+            shoot "$MODE-5-lms"        -tab lms
+            shoot "$MODE-6-settings"   -tab today -sheet settings
           done
           ls -la shots
 

@@ -397,6 +397,58 @@ check('lmsDue keeps only real deadlines and tidies the course name', () => {
   truthy(/\.\d{3}Z$/.test(out.items[0].due), 'due is not fractional-second ISO: ' + out.items[0].due);
 });
 
+check('lmsCourses keeps only what this student may open', () => {
+  // One course, six teachers. Section 0 is this student's; the rest belong to
+  // other batches and Moodle marks their modules not visible to this user.
+  const state = {
+    course: { sectionlist: ['10', '11', '12'] },
+    section: [
+      { id: '10', title: 'Rahul Kumar', visible: true, cmlist: ['1', '2', '9'] },
+      { id: '11', title: 'Dr. Someone Else (B10-B12)', visible: true, cmlist: ['3'] },
+      { id: '12', title: 'Unit-1', visible: true, cmlist: ['4'] },
+    ],
+    cm: [
+      { id: '1', name: 'Class Test 1', modname: 'Assignment', uservisible: true, url: 'https://lms/a' },
+      { id: '2', name: 'QUIZ UNIT 1 &amp; 3', modname: 'Quiz', uservisible: true, url: 'https://lms/q' },
+      // The container for section 12. Counting it would list Unit-1 twice.
+      { id: '9', name: 'Unit-1', modname: 'Subsection', uservisible: true, url: 'https://lms/s' },
+      { id: '3', name: 'Someone else\'s handout', modname: 'File', uservisible: false, url: 'https://lms/x' },
+      { id: '4', name: 'Lecture-1', modname: 'File', uservisible: true, url: 'https://lms/f' },
+    ],
+  };
+  const courses = [{ id: 101886, fullname: 'Ethical Hacking &amp; Penetration Testing_Sem5' }];
+  const win = { M: { cfg: { sesskey: 'sk1' } } };
+  let asked = 0;
+  const fetch = (url, opt) => {
+    asked++;
+    const calls = JSON.parse(opt.body);
+    if (calls[0].methodname.indexOf('timeline_classification') > -1) {
+      // "all" would be every course of the whole degree, not this semester.
+      eq(calls[0].args.classification, 'inprogress', 'wrong classification');
+      return sync({ json: () => sync([{ error: false, data: { courses } }]) });
+    }
+    eq(calls.length, courses.length, 'the state calls were not batched');
+    return sync({
+      json: () => sync(calls.map((c, i) => ({ index: i, error: false, data: JSON.stringify(state) }))),
+    });
+  };
+  const call = () => JSON.parse(
+    new Function('window', 'M', 'fetch', 'return (' + blobs.lmsCourses + ')')(win, win.M, fetch)
+  );
+
+  call();
+  const out = call();
+  truthy(out.done && out.ok, 'never finished: ' + out.diag);
+  eq(out.courses.length, 1, 'wrong course count');
+  const c = out.courses[0];
+  eq(c.name, 'Ethical Hacking & Penetration Testing', 'course name not tidied');
+  eq(c.items.map((i) => i.title), ['Class Test 1', 'QUIZ UNIT 1 & 3', 'Lecture-1'], 'wrong items');
+  eq(c.items[2].group, 'Unit-1', 'section title lost');
+  // Two requests total however many courses there are: the list, then one
+  // batch of state calls.
+  eq(asked, 2, 'more requests than the list plus one batch');
+});
+
 check('lmsKey finds the session by shape and spends only one key', () => {
   const store = {
     a9x: JSON.stringify({ Identity: { AccessToken: 'tok' } }),

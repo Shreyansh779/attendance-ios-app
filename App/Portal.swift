@@ -38,6 +38,9 @@ final class Portal: NSObject, ObservableObject {
     )!
 
     @Published var showingLogin = false
+    /// Whether one LMS link is being shown in its own cover, over the live
+    /// webview - which is the only place the Moodle session exists.
+    @Published var showingVisit = false
     /// Once the dashboard is reached the login sheet closes and the webview is
     /// re-parented off-screen, so reading continues without holding the UI.
     @Published var hostingHidden = false
@@ -122,6 +125,8 @@ final class Portal: NSObject, ObservableObject {
         let deadlines: [Deadline]
         /// What the LMS read did, for when it produced nothing.
         let lmsDiag: String?
+        /// This semester's courses and their material. Same visit, same page.
+        let courses: [LmsCourse]
     }
 
     // MARK: - Entry point
@@ -145,6 +150,15 @@ final class Portal: NSObject, ObservableObject {
         // appear at all, and putting a login form in front of somebody who is
         // already signed in is what made every first refresh fail.
         showingLogin = false
+        showingVisit = false
+        // Hosted from the first instant, not from the moment the dashboard is
+        // reached. A WKWebView that is not in a window gets its timers
+        // throttled to nothing, so the page it was told to load can sit half
+        // finished - and the only reason it used to be in the window this
+        // early was that the login cover was holding it. Now that the cover is
+        // held back, this has to do it: full size, under an opaque backdrop,
+        // so the portal renders as if on screen and is never seen.
+        hostingHidden = true
         webView.load(URLRequest(url: Portal.dashboardURL))
         startPolling()
     }
@@ -154,9 +168,20 @@ final class Portal: NSObject, ObservableObject {
         pollTask = nil
         registerTask?.cancel()
         registerTask = nil
+        visitTask?.cancel()
+        visitTask = nil
+        showingVisit = false
         showingLogin = false
         hostingHidden = false
         busy = false
+    }
+
+    /// Close the link cover without touching a read that may be running.
+    func endVisit() {
+        visitTask?.cancel()
+        visitTask = nil
+        showingVisit = false
+        status = nil
     }
 
     // MARK: - Polling
@@ -257,7 +282,7 @@ final class Portal: NSObject, ObservableObject {
                             rows: rows, sessions: sessions, student: self.student,
                             week: [:], weekDiag: nil, termEnd: nil,
                             holidays: [], daywise: [], attDiag: nil, photo: photo,
-                            deadlines: [], lmsDiag: nil
+                            deadlines: [], lmsDiag: nil, courses: []
                         )
                     )
 
@@ -277,7 +302,7 @@ final class Portal: NSObject, ObservableObject {
                             week: week.days, weekDiag: week.diag,
                             termEnd: week.whole ? week.days.keys.max() : nil,
                             holidays: [], daywise: [], attDiag: nil, photo: photo,
-                            deadlines: [], lmsDiag: nil
+                            deadlines: [], lmsDiag: nil, courses: []
                         )
                     )
 
@@ -329,6 +354,7 @@ final class Portal: NSObject, ObservableObject {
     private var attDiag: String?
     private var deadlines: [Deadline] = []
     private var lmsDiag: String?
+    private var courses: [LmsCourse] = []
 
     // MARK: - The register
 
@@ -456,19 +482,9 @@ final class Portal: NSObject, ObservableObject {
     /// document; then the webview follows it to Moodle, which answers the rest
     /// from its own AJAX endpoint.
     private func fetchDeadlines() async -> [Deadline] {
-        var note: [String] = []
-        var target: URL?
-        for _ in 0..<16 {
-            if Task.isCancelled { return [] }
-            try? await Task.sleep(nanoseconds: 400_000_000)
-            guard let k = await decode(KeyPayload.self, Scrapers.lmsKey) else { continue }
-            note = [k.diag]
-            guard k.done else { continue }
-            if k.ok { target = URL(string: k.url) }
-            break
-        }
+        let (target, note) = await askForKey(seconds: 8)
         guard let target else {
-            lmsDiag = stamped(["no key for the lms"] + note)
+            lmsDiag = stamped(["no key for the lms", note])
             return []
         }
 
@@ -480,14 +496,140 @@ final class Portal: NSObject, ObservableObject {
             guard let p = await decode(DuePayload.self, Scrapers.lmsDue) else { continue }
             lastDue = p.diag
             guard p.done else { continue }
-            note.append(p.diag)
-            lmsDiag = stamped(note)
+            lmsDiag = stamped([note, p.diag])
             guard p.ok else { return [] }
             return p.items.sorted { $0.due < $1.due }
         }
 
-        lmsDiag = stamped(["no answer from the lms"] + note + [lastDue])
+        lmsDiag = stamped(["no answer from the lms", note, lastDue])
         return []
+    }
+
+    /// Ask the portal for a Moodle login URL. Good for exactly one use.
+    ///
+    /// Must be called while a portal page is the live document - the token it
+    /// needs lives in that origin's localStorage.
+    private func askForKey(seconds: Double) async -> (URL?, String) {
+        var note = "no reply from the portal"
+        for _ in 0..<Int(seconds / 0.4) {
+            if Task.isCancelled { return (nil, "cancelled") }
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard let k = await decode(KeyPayload.self, Scrapers.lmsKey) else { continue }
+            note = k.diag
+            guard k.done else { continue }
+            return (k.ok ? URL(string: k.url) : nil, k.diag)
+        }
+        return (nil, note)
+    }
+
+    /// Wait for the webview's path to satisfy `match`.
+    private func waitForRoute(
+        _ seconds: Double, _ match: @escaping (String) -> Bool
+    ) async -> Bool {
+        for _ in 0..<Int(seconds / 0.4) {
+            if Task.isCancelled { return false }
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            let path = (((try? await eval(Scrapers.route)) ?? nil) as? String) ?? ""
+            if match(path) { return true }
+        }
+        return false
+    }
+
+    private struct CoursePayload: Decodable {
+        let done: Bool
+        let ok: Bool
+        let courses: [LmsCourse]
+        let diag: String
+    }
+
+    /// This semester's courses and their material, off the page fetchDeadlines
+    /// is already sitting on. No second login, no second navigation.
+    private func fetchCourses() async -> [LmsCourse] {
+        var last = "no reply from the page"
+        for _ in 0..<30 {
+            if Task.isCancelled { return [] }
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard let p = await decode(CoursePayload.self, Scrapers.lmsCourses) else { continue }
+            last = p.diag
+            guard p.done else { continue }
+            lmsDiag = stamped([lmsDiag ?? "", p.diag].filter { !$0.isEmpty })
+            return p.ok ? p.courses : []
+        }
+        lmsDiag = stamped(["no course list from the lms", last])
+        return []
+    }
+
+    // MARK: - Opening one link
+
+    private var visitTask: Task<Void, Never>?
+
+    /// Open one LMS link, signing in on the way if that is what it takes.
+    ///
+    /// The link only works inside this webview, because this webview is the
+    /// only place the Moodle session lives - a link handed to Safari lands on
+    /// a login form Moodle will not let anyone past. So the cover shows this
+    /// webview, and if the session has lapsed it is rebuilt underneath: a
+    /// fresh key from the portal, or, when the portal itself has signed out,
+    /// the portal's own login page followed by the link.
+    func visit(_ url: URL) {
+        // A read in flight is driving this same webview, so it has to stop
+        // rather than fight over where the page goes.
+        registerTask?.cancel()
+        visitTask?.cancel()
+        showingVisit = true
+        status = nil
+        hostingHidden = false
+        webView.load(URLRequest(url: url))
+
+        visitTask = Task { [weak self] in
+            guard let self else { return }
+
+            // Moodle's session normally outlives the last refresh, so the link
+            // is tried first and the rest only happens when it bounces.
+            let bounced = await self.waitForRoute(8) { $0.contains("/login/index.php") }
+            if Task.isCancelled { return }
+            guard bounced else {
+                self.status = nil
+                return
+            }
+
+            self.status = "Signing you in to the LMS."
+            self.webView.load(URLRequest(url: Portal.dashboardURL))
+            var (key, note) = await self.askForKey(seconds: 8)
+            if Task.isCancelled { return }
+
+            if key == nil {
+                // The portal has signed out too, so there is a person in the
+                // loop. The cover is already showing this webview, so the
+                // login page simply appears in it.
+                self.status = "Log in and solve the captcha — this opens straight after."
+                let inAgain = await self.waitForRoute(300) {
+                    $0.contains(Portal.dashboardMarker)
+                }
+                if Task.isCancelled { return }
+                guard inAgain else {
+                    self.status = "Gave up waiting for the portal."
+                    return
+                }
+                self.status = "Signing you in to the LMS."
+                (key, note) = await self.askForKey(seconds: 10)
+                if Task.isCancelled { return }
+            }
+
+            guard let key else {
+                self.status = "Could not sign in to the LMS — \(note)"
+                return
+            }
+
+            // The key lands on Moodle's own home page, so the link is a second
+            // hop. wantsurl is not relied on: one extra load is cheaper than a
+            // parameter this portal's Moodle may or may not honour.
+            self.webView.load(URLRequest(url: key))
+            _ = await self.waitForRoute(12) { !$0.contains("/auth/userkey/") }
+            if Task.isCancelled { return }
+            self.status = nil
+            self.webView.load(URLRequest(url: url))
+        }
     }
 
     private struct HolidayPayload: Decodable {
@@ -710,7 +852,6 @@ final class Portal: NSObject, ObservableObject {
         pollTask?.cancel()
         pollTask = nil
         showingLogin = false
-        hostingHidden = false
         busy = false
         status = nil
         let reading = Reading(
@@ -722,7 +863,8 @@ final class Portal: NSObject, ObservableObject {
             attDiag: attDiag,
             photo: photo,
             deadlines: deadlines,
-            lmsDiag: lmsDiag
+            lmsDiag: lmsDiag,
+            courses: courses
         )
         last = reading
         onDone?(reading)
@@ -749,11 +891,15 @@ final class Portal: NSObject, ObservableObject {
             // The LMS is a different site, so this is the last thing done -
             // getting there means spending a one-shot key and leaving the
             // portal's origin behind.
-            self.status = "Checking the LMS for anything due."
+            self.status = "Checking the LMS."
             let due = await self.fetchDeadlines()
             if Task.isCancelled { return }
             self.deadlines = due
+            // Same Moodle page, so this costs a request rather than a login.
+            self.courses = await self.fetchCourses()
+            if Task.isCancelled { return }
             self.status = nil
+            self.hostingHidden = false
             guard let base = self.last else { return }
             self.onDone?(
                 Reading(
@@ -764,7 +910,8 @@ final class Portal: NSObject, ObservableObject {
                     attDiag: self.attDiag,
                     photo: base.photo,
                     deadlines: due,
-                    lmsDiag: self.lmsDiag
+                    lmsDiag: self.lmsDiag,
+                    courses: self.courses
                 )
             )
         }

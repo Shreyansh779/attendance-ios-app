@@ -39,6 +39,30 @@ struct DaySession: Codable, Hashable {
 /// for. `due` stays the string the LMS gave: a Snapshot is decoded with a
 /// plain JSONDecoder, and a Date in here would need a date strategy nothing
 /// else in the cache uses.
+/// One thing a teacher put in a course.
+struct LmsItem: Codable, Hashable {
+    let title: String
+    /// What Moodle calls it: File, Assignment, Quiz, URL, Folder, Page, Forum.
+    let kind: String
+    let url: String
+    /// The section it sits in. Most courses name their sections after the
+    /// teacher who owns them, so this is usually a person.
+    let group: String
+}
+
+/// One course this semester, with whatever you are allowed to open in it.
+///
+/// A course is taught by several teachers to several batches, each with their
+/// own section, and Moodle marks the sections that are not yours as not
+/// visible to you. Filtering on that is what makes this your material rather
+/// than the whole department's.
+struct LmsCourse: Codable, Hashable {
+    let id: Int
+    let name: String
+    let url: String
+    let items: [LmsItem]
+}
+
 struct Deadline: Codable, Hashable {
     let title: String
     let course: String
@@ -112,6 +136,9 @@ struct Snapshot: Codable {
     var deadlines: [Deadline] = []
     /// What the LMS read actually did, kept for the same reason as attDiag.
     var lmsDiag: String?
+    /// This semester's courses and their material. Read in the same visit as
+    /// the deadlines, off the same Moodle page.
+    var courses: [LmsCourse] = []
 
     /// Decoded leniently: a cache written before week and marks existed should
     /// still load rather than being thrown away.
@@ -132,6 +159,7 @@ struct Snapshot: Codable {
         photo = try? c.decodeIfPresent(String.self, forKey: .photo)
         deadlines = (try? c.decode([Deadline].self, forKey: .deadlines)) ?? []
         lmsDiag = try? c.decodeIfPresent(String.self, forKey: .lmsDiag)
+        courses = (try? c.decode([LmsCourse].self, forKey: .courses)) ?? []
     }
 
     init(
@@ -141,7 +169,8 @@ struct Snapshot: Codable {
         termEnd: String? = nil, history: [Stamp] = [],
         holidays: [Holiday] = [], daywise: [DaySession] = [],
         attDiag: String? = nil, photo: String? = nil,
-        deadlines: [Deadline] = [], lmsDiag: String? = nil
+        deadlines: [Deadline] = [], lmsDiag: String? = nil,
+        courses: [LmsCourse] = []
     ) {
         self.savedAt = savedAt
         self.rows = rows
@@ -158,6 +187,7 @@ struct Snapshot: Codable {
         self.photo = photo
         self.deadlines = deadlines
         self.lmsDiag = lmsDiag
+        self.courses = courses
     }
 
     static var isoDay: DateFormatter {

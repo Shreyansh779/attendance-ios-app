@@ -392,6 +392,14 @@ private struct DayStrip: View {
                 )
             }
         }
+        // One shelf, not four floating chips. The strip is pinned over the
+        // content now, and four separate pieces of glass let whatever is
+        // behind it read straight through the gaps between them.
+        .padding(5)
+        .glassy(
+            RoundedRectangle(cornerRadius: 26, style: .continuous),
+            tint: .well, material: .ultraThinMaterial
+        )
         // Pinning a class is a selection, not a commit.
         .sensoryFeedback(.selection, trigger: picked)
     }

@@ -52,11 +52,40 @@ struct RootView: View {
     @StateObject private var portal = Portal()
 
     @State private var snapshot: Snapshot? = Store.load()
-    @State private var route: Route = .today
+    @State private var route: Route = RootView.firstRoute
     @State private var tick = Date()
     @State private var picked: String?
     @State private var didAutoOpen = false
-    @State private var showingSettings = false
+    @State private var showingSettings = RootView.opensSettings
+
+    /// Where a screenshot run wants to land. Release builds always start on
+    /// Today, because `Demo` does not exist in them.
+    private static var firstRoute: Route {
+        #if DEBUG
+            if Demo.isOn, let r = Route(rawValue: Demo.tab) { return r }
+        #endif
+        return .today
+    }
+
+    private static var opensSettings: Bool {
+        #if DEBUG
+            return Demo.isOn && Demo.showsSettings
+        #endif
+        #if !DEBUG
+            return false
+        #endif
+    }
+
+    /// A screenshot of the subject screen needs the subject screen on top, and
+    /// nothing else in the app can put it there without a tap.
+    private static var showsSubject: Bool {
+        #if DEBUG
+            return Demo.isOn && Demo.tab == "subject"
+        #endif
+        #if !DEBUG
+            return false
+        #endif
+    }
 
     /// Motion is gentler, never absent, when the system asks for less of it.
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -164,6 +193,11 @@ struct RootView: View {
         .onAppear {
             guard !didAutoOpen else { return }
             didAutoOpen = true
+            #if DEBUG
+                // The authorisation prompt is a system alert over whatever the
+                // screenshot was meant to be of.
+                if Demo.isOn { return }
+            #endif
             // A re-signed sideload is a reinstall, and a reinstall clears the
             // pending queue - so rebuild it every launch, not only on refresh.
             rescheduleReminders()
@@ -210,19 +244,34 @@ struct RootView: View {
             }
 
             pane(.attendance) {
-                screen(title: Route.attendance.title) {
-                    AttendanceView(
-                        summary: summary,
-                        terms: terms,
-                        history: snapshot?.history ?? [],
-                        daywise: snapshot?.daywise ?? [],
-                        now: tick
-                    )
+                screen(title: RootView.showsSubject ? "Subject" : Route.attendance.title) {
+                    subjectOrList
                 }
             }
         }
         .tint(Color.ink)
         .animation(Motion.ui.reduced(reduceMotion), value: route)
+    }
+
+    @ViewBuilder
+    private var subjectOrList: some View {
+        if RootView.showsSubject, let row = summary.subjects.first {
+            SubjectView(
+                row: row,
+                term: terms[row.key],
+                blocker: summary.blocker,
+                history: snapshot?.history ?? [],
+                daywise: (snapshot?.daywise ?? []).filter { $0.subject == row.key }
+            )
+        } else {
+            AttendanceView(
+                summary: summary,
+                terms: terms,
+                history: snapshot?.history ?? [],
+                daywise: snapshot?.daywise ?? [],
+                now: tick
+            )
+        }
     }
 
     /// One screen of the three, cross-fading rather than cutting.

@@ -376,6 +376,13 @@ final class Portal: NSObject, ObservableObject {
     /// binds the popup to the component, not to the element. Alt+Down goes
     /// through the key handler instead.
     private func openCourseList() async -> (options: [String], diag: String) {
+        // It may already be open: the pass that discovered the course list
+        // leaves the popup up, and tapping the host again would close it -
+        // which is exactly what happened to the first subject in the loop.
+        if let already = await decode(ListPayload.self, Scrapers.attList), already.ok {
+            return (already.courses, "already open " + already.diag)
+        }
+
         var diag = "open:"
         for attempt in 0..<2 {
             if Task.isCancelled { return ([], diag + " cancelled") }

@@ -345,17 +345,25 @@ struct RootView: View {
                 .safeAreaInset(edge: .bottom) {
                     Color.clear.frame(height: 66)
                 }
-                .safeAreaInset(edge: .top) {
+                // At the bottom, over the content, rather than pinned under
+                // the navigation bar. As a top inset it sat between the large
+                // title and the screen and did not move when either did -
+                // the same complaint the timetable's date stepper drew. Down
+                // here it is a passing notice about a background job, which is
+                // what it is, and it collides with nothing.
+                .overlay(alignment: .bottom) {
                     if let msg = portal.status ?? staleNote {
                         Text(msg)
-                            .r(14.5, .medium)
+                            .p(14)
                             .foregroundStyle(Color.warnInk)
                             .fixedSize(horizontal: false, vertical: true)
-                            .padding(EdgeInsets(top: 15, leading: 18, bottom: 15, trailing: 18))
+                            .padding(EdgeInsets(top: 13, leading: 18, bottom: 13, trailing: 18))
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .glassEffect(.regular, in: .rect(cornerRadius: 22))
                             .padding(.horizontal, 20)
-                            .padding(.bottom, 8)
+                            // Clear of the tab bar, which floats over the same
+                            // corner of the screen.
+                            .padding(.bottom, 70)
                             .transition(.soft)
                     }
                 }

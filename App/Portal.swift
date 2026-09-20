@@ -201,12 +201,39 @@ final class Portal: NSObject, ObservableObject {
 
                 // Two identical reads in a row means the cards have settled.
                 if !rows.isEmpty && stableReads >= 2 {
+                    // Hand over what is already known before going after the
+                    // rest. The timetable, the calendar and the profile are
+                    // three more page loads, and there is no reason to sit on
+                    // a complete set of attendance rows for ten seconds while
+                    // they happen. Every field this cannot fill yet is left
+                    // empty, and the merge in RootView keeps whatever the last
+                    // read established - so a partial can only ever add.
+                    self.onDone?(
+                        Reading(
+                            rows: rows, sessions: sessions, student: self.student,
+                            week: [:], weekDiag: nil, termEnd: nil,
+                            holidays: [], photo: photo
+                        )
+                    )
+
                     // Timetable first, while the app instance the dashboard
                     // bootstrapped is still alive - the weekly scrape soft-routes
                     // within it, and the profile page below is a hard load that
                     // would throw that state away.
                     self.status = "Reading this week's timetable."
                     let week = await self.fetchWeek()
+
+                    // And again, so the timetable is on screen before the
+                    // calendar and the profile - two page loads nobody is
+                    // waiting on - have even started.
+                    self.onDone?(
+                        Reading(
+                            rows: rows, sessions: sessions, student: self.student,
+                            week: week.days, weekDiag: week.diag,
+                            termEnd: week.whole ? week.days.keys.max() : nil,
+                            holidays: [], photo: photo
+                        )
+                    )
 
                     // Both of these are hard loads, so they come after the
                     // timetable, which soft-routes inside the app instance the
@@ -451,6 +478,8 @@ final class Portal: NSObject, ObservableObject {
         return WeekResult(diag: [apiDiag, lastDiag, spy].compactMap { $0 }.joined(separator: " || "))
     }
 
+    /// The last word. Everything it carries has already been handed over once
+    /// as a partial, except the timetable, the calendar and the name.
     private func finish(
         rows: [AttRow], sessions: [Session],
         week: WeekResult, photo: String?

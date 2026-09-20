@@ -20,7 +20,7 @@ settings:
     # Bumped by hand when a release adds something; the build number below
     # is the CI run, passed in on the xcodebuild line, so two builds of the
     # same version are still told apart. Settings shows both.
-    MARKETING_VERSION: "1.1"
+    MARKETING_VERSION: "2.0"
     CURRENT_PROJECT_VERSION: "1"
     SWIFT_VERSION: "5.9"
     TARGETED_DEVICE_FAMILY: "1,2"

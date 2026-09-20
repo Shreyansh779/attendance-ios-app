@@ -157,30 +157,33 @@ struct AttendanceView: View {
                         .foregroundStyle(attended == sessions.count ? Color.mintHi : Color.ink2)
                 }
 
-                VStack(spacing: 9) {
-                    ForEach(sessions, id: \.self) { s in
-                        HStack(spacing: 11) {
-                            Circle()
-                                .fill(s.present ? Color.mintHi : Color.coral)
-                                .frame(width: 7, height: 7)
-                            Text(dayLabel(s.date))
+                // One row per day, not one per class. Fifteen lines of
+                // truncated subject names is a wall, and the question this
+                // card answers - how is the week going - is answered by the
+                // shape of the bars rather than by reading any of them.
+                VStack(spacing: 11) {
+                    ForEach(days, id: \.day) { d in
+                        HStack(spacing: 12) {
+                            Text(dayLabel(d.day))
                                 .r(13, .semibold)
                                 .foregroundStyle(Color.ink2)
-                                .frame(width: 46, alignment: .leading)
-                            Text(s.subject)
-                                .r(14, .medium)
-                                .foregroundStyle(Color.ink)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                            Spacer(minLength: 6)
-                            Text(startOf(s.time))
+                                .frame(width: 38, alignment: .leading)
+                            HStack(spacing: 5) {
+                                ForEach(Array(d.items.enumerated()), id: \.offset) { _, s in
+                                    Capsule()
+                                        .fill(s.present ? Color.mintHi : Color.coral)
+                                        .frame(height: 7)
+                                }
+                            }
+                            .frame(maxWidth: .infinity)
+                            Text("\(d.items.filter(\.present).count)/\(d.items.count)")
                                 .r(12.5, .medium)
                                 .foregroundStyle(Color.ink3)
                                 .fixedSize()
                         }
                         .accessibilityElement(children: .combine)
                         .accessibilityLabel(
-                            "\(s.subject), \(dayLabel(s.date)), \(s.present ? "present" : "absent")"
+                            "\(dayLabel(d.day)), \(d.items.filter(\.present).count) of \(d.items.count) attended"
                         )
                     }
                 }
@@ -188,14 +191,15 @@ struct AttendanceView: View {
             .slab(.sur, radius: 26, pad: EdgeInsets(top: 18, leading: 20, bottom: 18, trailing: 20))
         }
 
+        private var days: [(day: String, items: [DaySession])] {
+            Dictionary(grouping: sessions, by: \.date)
+                .sorted { $0.key < $1.key }
+                .map { (day: $0.key, items: $0.value.sorted { $0.time < $1.time }) }
+        }
+
         private func dayLabel(_ iso: String) -> String {
             guard let d = Snapshot.isoDay.date(from: iso) else { return iso }
             return d.formatted(.dateTime.weekday(.abbreviated))
-        }
-
-        /// "17:00 - 17:55" is two facts and one of them is enough here.
-        private func startOf(_ time: String) -> String {
-            String(time.split(separator: "-").first ?? "").trimmingCharacters(in: .whitespaces)
         }
     }
 

@@ -28,10 +28,29 @@ struct TodayView: View {
     }
 
     var body: some View {
+        // A scroll view, and not for the scrolling: a navigation bar insets
+        // whatever scroll view it finds below it, and lays a plain stack out
+        // from the top of the safe area instead - straight through the large
+        // title. This screen was the only one still doing that, which is why
+        // the status tag sat in the descenders of the student's name.
+        ScrollView(showsIndicators: false) {
+            content
+        }
         // The strip lives outside the hero branch on purpose. It used to be
         // inside it, so the moment the last class ended `hero` went nil, the
         // strip disappeared, and the day became unmarkable - at exactly the
-        // point you would sit down to mark it.
+        // point you would sit down to mark it. Pinned, because it is how you
+        // move between classes rather than something to read.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !day.isEmpty {
+                DayStrip(day: day, picked: $picked, heroID: hero?.id, marks: marks, today: today)
+                    .padding(.top, 10)
+            }
+        }
+        .animation(Motion.ui.reduced(reduceMotion), value: hero?.id)
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let h = hero {
                 Tag(state: tagState(h), virtual: h.mode == "virtual")
@@ -52,6 +71,8 @@ struct TodayView: View {
                 Text(h.subject)
                     .p(20)
                     .foregroundStyle(Color.ink2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, 20)
 
                 if h.online, let raw = h.link, let url = URL(string: raw) {
@@ -106,14 +127,9 @@ struct TodayView: View {
                 .padding(.top, 12)
             }
 
-            Spacer(minLength: 18)
-
-            if !day.isEmpty {
-                DayStrip(day: day, picked: $picked, heroID: hero?.id, marks: marks, today: today)
-            }
         }
-        .padding(.bottom, 20)
-        .animation(Motion.ui.reduced(reduceMotion), value: hero?.id)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.bottom, 12)
     }
 
     /// How the day ended, including how much of it is still unticked - the

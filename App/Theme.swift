@@ -292,23 +292,27 @@ struct SlideBar<T: Hashable, Content: View>: View {
     private var slot: CGFloat { items.isEmpty ? 0 : width / CGFloat(items.count) }
 
     var body: some View {
-        ZStack(alignment: .leading) {
+        // The thumb goes behind the row rather than beside it in a ZStack.
+        // A Capsule given only a width fills whatever height it is offered,
+        // and inside a ZStack that is the whole screen - which is exactly
+        // what it did. As a background it can only be as tall as the row.
+        HStack(spacing: 0) {
+            ForEach(items, id: \.self) { item in
+                content(item, item == selection)
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        withAnimation(Motion.ui.reduced(reduceMotion)) { selection = item }
+                    }
+            }
+        }
+        .background(alignment: .leading) {
             if width > 0 {
                 Capsule()
                     .fill(thumb)
                     .frame(width: slot)
                     .offset(x: CGFloat(index) * slot + carry)
                     .shadow(color: Color.shade, radius: 7, y: 2)
-            }
-            HStack(spacing: 0) {
-                ForEach(items, id: \.self) { item in
-                    content(item, item == selection)
-                        .frame(maxWidth: .infinity)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            withAnimation(Motion.ui.reduced(reduceMotion)) { selection = item }
-                        }
-                }
             }
         }
         .background {

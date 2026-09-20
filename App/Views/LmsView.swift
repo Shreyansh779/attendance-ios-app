@@ -2,10 +2,12 @@ import SwiftUI
 
 /// This semester's courses, and what your own teachers have put in them.
 ///
-/// A course on this Moodle is taught by several teachers to several batches,
-/// each with a section named after the teacher, and the sections that are not
-/// yours are marked invisible to you. The scraper filters on that, so what
-/// arrives here is already only your material — this screen just lays it out.
+/// A course on this Moodle is taught by twenty teachers to twenty batches,
+/// one top-level section each, with folders inside. The scraper keeps the
+/// sections belonging to the teachers your timetable says take your classes,
+/// plus the ones a course shares with everybody — so what arrives here is
+/// already only your material, and this screen just lays it out: teacher,
+/// then folder, then the things you can open.
 struct LmsView: View {
     let courses: [LmsCourse]
     /// Opens the link inside the app's own webview, which is the only place
@@ -105,14 +107,23 @@ private struct CourseView: View {
     let course: LmsCourse
     let onOpen: (String) -> Void
 
-    private struct Chunk: Identifiable {
-        /// The section's own title, which is unique within a course.
+    /// A folder inside a teacher's section, or the loose items that sit
+    /// directly under one — which is what an empty name means.
+    private struct Folder: Identifiable {
         let id: String
+        let name: String
         let items: [LmsItem]
     }
 
+    private struct Chunk: Identifiable {
+        /// The section's own title, which is unique within a course.
+        let id: String
+        let folders: [Folder]
+    }
+
     /// Sections in the order the scraper found them, which is the order the
-    /// course page shows — first come the teachers, then the units.
+    /// course page shows, and inside each the loose items first and then the
+    /// folders — same as the course page again.
     private var groups: [Chunk] {
         var order: [String] = []
         var byGroup: [String: [LmsItem]] = [:]
@@ -120,14 +131,30 @@ private struct CourseView: View {
             if byGroup[i.group] == nil { order.append(i.group) }
             byGroup[i.group, default: []].append(i)
         }
-        return order.map { Chunk(id: $0, items: byGroup[$0] ?? []) }
+        return order.map { group in
+            let items = byGroup[group] ?? []
+            var folderOrder: [String] = []
+            var byFolder: [String: [LmsItem]] = [:]
+            for i in items {
+                if byFolder[i.folder] == nil { folderOrder.append(i.folder) }
+                byFolder[i.folder, default: []].append(i)
+            }
+            // Loose first, whatever order they arrived in.
+            folderOrder.sort { a, b in a.isEmpty && !b.isEmpty }
+            return Chunk(
+                id: group,
+                folders: folderOrder.map {
+                    Folder(id: group + "|" + $0, name: $0, items: byFolder[$0] ?? [])
+                }
+            )
+        }
     }
 
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 20) {
                 ForEach(groups) { group in
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 16) {
                         Text(group.id)
                             .r(12.5, .semibold)
                             .textCase(.uppercase)
@@ -135,15 +162,33 @@ private struct CourseView: View {
                             .foregroundStyle(Color.ink3)
                             .fixedSize(horizontal: false, vertical: true)
 
-                        VStack(alignment: .leading, spacing: 13) {
-                            ForEach(group.items, id: \.self) { item in
-                                Button {
-                                    onOpen(item.url)
-                                } label: {
-                                    Row(item: item)
+                        ForEach(group.folders) { folder in
+                            VStack(alignment: .leading, spacing: 11) {
+                                if !folder.name.isEmpty {
+                                    HStack(spacing: 7) {
+                                        Image(systemName: "folder")
+                                            .font(.system(size: 11.5, weight: .semibold))
+                                        Text(folder.name)
+                                            .r(13, .semibold)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                            .multilineTextAlignment(.leading)
+                                    }
+                                    .foregroundStyle(Color.ink2)
                                 }
-                                .buttonStyle(.plain)
+
+                                VStack(alignment: .leading, spacing: 13) {
+                                    ForEach(folder.items, id: \.self) { item in
+                                        Button {
+                                            onOpen(item.url)
+                                        } label: {
+                                            Row(item: item)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                                .padding(.leading, folder.name.isEmpty ? 0 : 6)
                             }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)

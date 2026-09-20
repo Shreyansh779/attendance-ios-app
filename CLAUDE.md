@@ -80,13 +80,24 @@ The IPA ships **unsigned** by design; a sideloader re-signs it. Pushing to
   could ever have worked: the date inputs are `readonly`, so only the calendar
   popup can set them, and the results grid is two tables with the headers in
   one and the rows in the other. The endpoint takes every course at once.
-  `lmsKey`/`lmsDue` get coursework, which the portal does not hold at all: its
-  "LMS" tile posts to `/sso/user/oauth2/access-lms` for a **one-shot** Moodle
-  login URL, the webview follows it, and Moodle's own AJAX endpoint answers
-  `core_calendar_get_action_events_by_timesort`. The key is spent on use, so
-  `lmsKey` is written to ask exactly once however often it is polled. Only
-  `assign` and `quiz` are kept — that feed also nags about every file ever
-  uploaded to a course.
+  `lmsKey`/`lmsDue`/`lmsCourses` get coursework, which the portal does not
+  hold at all: its "LMS" tile posts to `/sso/user/oauth2/access-lms` for a
+  **one-shot** Moodle login URL, the webview follows it, and Moodle answers
+  the rest from its own AJAX endpoint. The key is spent on use, so `lmsKey`
+  asks exactly once however often it is polled. `lmsDue` keeps only `assign`
+  and `quiz` — that feed also nags about every file ever uploaded to a
+  course. `lmsCourses` reads `core_courseformat_get_state`
+  (`core_course_get_contents` is switched off here, and the state carries
+  more anyway). A course there is one **top-level section per teacher**, each
+  holding **subsections as folders**; `parentsectionid` is the link, and a
+  `Subsection` module is only a pointer to a section that arrives on its own,
+  so counting it lists everything twice. `uservisible` hides most of the
+  other nineteen teachers' material but **not all of it**, so sections are
+  matched by name against the teachers the *timetable* says take your classes
+  — handed over on `window.__mine`, because the timetable is on the other
+  origin. A section matching nobody is kept only when it does not look like a
+  person's name, which is what keeps "General" and
+  "PEMC(Batches - CCSF (4,5,6,7,8,9)". Courses are filtered to `_Sem5`.
   Anything async parks its answer on a `window` global and is polled, because
   `evaluateJavaScript` cannot wait for a promise.
 - `Models.swift` — `Budget` (can I skip?) and `Term` (can I still recover?).

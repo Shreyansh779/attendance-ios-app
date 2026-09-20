@@ -45,9 +45,13 @@ struct LmsItem: Codable, Hashable {
     /// What Moodle calls it: File, Assignment, Quiz, URL, Folder, Page, Forum.
     let kind: String
     let url: String
-    /// The section it sits in. Most courses name their sections after the
-    /// teacher who owns them, so this is usually a person.
+    /// The top-level section it sits under. These are named after the
+    /// teacher who owns them, except for the handful a course shares with
+    /// every batch.
     let group: String
+    /// The folder inside that section, empty when the item is loose. Moodle
+    /// calls these subsections; a course page draws them as folders.
+    let folder: String
 }
 
 /// One course this semester, with whatever you are allowed to open in it.
@@ -139,6 +143,10 @@ struct Snapshot: Codable {
     /// This semester's courses and their material. Read in the same visit as
     /// the deadlines, off the same Moodle page.
     var courses: [LmsCourse] = []
+    /// Subject name to the teachers who actually take your classes, out of the
+    /// timetable feed. Nothing else in the portal says which of a course's
+    /// twenty teachers is yours.
+    var faculty: [String: [String]] = [:]
 
     /// Decoded leniently: a cache written before week and marks existed should
     /// still load rather than being thrown away.
@@ -160,6 +168,7 @@ struct Snapshot: Codable {
         deadlines = (try? c.decode([Deadline].self, forKey: .deadlines)) ?? []
         lmsDiag = try? c.decodeIfPresent(String.self, forKey: .lmsDiag)
         courses = (try? c.decode([LmsCourse].self, forKey: .courses)) ?? []
+        faculty = (try? c.decode([String: [String]].self, forKey: .faculty)) ?? [:]
     }
 
     init(
@@ -170,7 +179,7 @@ struct Snapshot: Codable {
         holidays: [Holiday] = [], daywise: [DaySession] = [],
         attDiag: String? = nil, photo: String? = nil,
         deadlines: [Deadline] = [], lmsDiag: String? = nil,
-        courses: [LmsCourse] = []
+        courses: [LmsCourse] = [], faculty: [String: [String]] = [:]
     ) {
         self.savedAt = savedAt
         self.rows = rows
@@ -188,6 +197,7 @@ struct Snapshot: Codable {
         self.deadlines = deadlines
         self.lmsDiag = lmsDiag
         self.courses = courses
+        self.faculty = faculty
     }
 
     static var isoDay: DateFormatter {
@@ -281,5 +291,13 @@ enum Store {
         if let data = try? JSONEncoder().encode(s) {
             UserDefaults.standard.set(data, forKey: key)
         }
+    }
+
+    /// Throw away everything read from the portal. The hand-marked classes go
+    /// with it, because they are part of the same record and keeping them
+    /// against a cache that no longer exists would move numbers that have
+    /// nothing behind them.
+    static func clear() {
+        UserDefaults.standard.removeObject(forKey: key)
     }
 }

@@ -84,14 +84,6 @@ struct TimetableView: View {
 
     var body: some View {
         content
-            // The stepper is chrome, not content. It used to sit in a VStack
-            // above the List, which left the navigation bar with no scroll
-            // view of its own to track: the large title collapsed against the
-            // wrong thing and, halfway through, drew itself *below* the
-            // stepper with a hole where the list should be. As a top safe-area
-            // inset it is pinned, and the List underneath is what the title
-            // watches.
-            .safeAreaInset(edge: .top, spacing: 0) { nav }
             .animation(Motion.ui.reduced(reduceMotion), value: offset)
             // A refresh can drop days off either end; keep the page inside them.
             .onChange(of: bounds.min) { _, lo in offset = Swift.max(offset, lo) }
@@ -103,39 +95,54 @@ struct TimetableView: View {
             }
     }
 
-    /// Always a scroll view at the root, never a stack wrapping one - that was
-    /// the whole of the bug.
+    /// A scroll view at the root, with the stepper as its first row.
+    ///
+    /// The stepper was pinned as a top safe-area inset, which put it above the
+    /// large title: scrolling then slid "Timetable" down underneath the date,
+    /// which is backwards. A navigation bar wants the scroll view to own
+    /// everything below it, so the stepper scrolls away like anything else.
     @ViewBuilder
     private var content: some View {
         if let h = holidayToday {
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(h.name)
-                        .d(23, .bold)
-                        .kerning(-0.3)
-                    Text(h.type.isEmpty ? "No classes" : h.type)
-                        .r(14, .medium)
-                        .foregroundStyle(Color.ink3)
+                VStack(alignment: .leading, spacing: 14) {
+                    nav
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(h.name)
+                            .d(23, .bold)
+                            .kerning(-0.3)
+                        Text(h.type.isEmpty ? "No classes" : h.type)
+                            .r(14, .medium)
+                            .foregroundStyle(Color.ink3)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .slab(.sur, radius: 28, pad: EdgeInsets(top: 24, leading: 22, bottom: 24, trailing: 22))
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .slab(.sur, radius: 28, pad: EdgeInsets(top: 24, leading: 22, bottom: 24, trailing: 22))
             }
         } else if list.isEmpty {
             ScrollView(showsIndicators: false) {
-                Text(
-                    offset < 0 && week[selectedKey] == nil
-                        ? "Nothing cached for this day. Days are stored as you refresh."
-                        : "No classes this day."
-                )
-                .p(16)
-                .foregroundStyle(Color.ink2)
-                .slab(.sur, radius: 28, pad: EdgeInsets(top: 26, leading: 24, bottom: 26, trailing: 24))
+                VStack(alignment: .leading, spacing: 14) {
+                    nav
+                    Text(
+                        offset < 0 && week[selectedKey] == nil
+                            ? "Nothing cached for this day. Days are stored as you refresh."
+                            : "No classes this day."
+                    )
+                    .p(16)
+                    .foregroundStyle(Color.ink2)
+                    .slab(.sur, radius: 28, pad: EdgeInsets(top: 26, leading: 24, bottom: 26, trailing: 24))
+                }
             }
         } else {
                 // A real List, so rows get swipe actions - which is the native
                 // answer to "how do I tick off a class I already attended"
                 // rather than a custom control invented for the purpose.
                 List {
+                    nav
+                        .listRowInsets(EdgeInsets(top: 2, leading: 0, bottom: 12, trailing: 0))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+
                     ForEach(list) { k in
                         Row(
                             k: k, nowMin: nowMin,
@@ -178,27 +185,46 @@ struct TimetableView: View {
         }
     }
 
-    /// One capsule of glass: back a day, which day, forward a day, and a way
-    /// out to any day at all. The list scrolls underneath it, which is the
-    /// only reason it can be pinned without a slab of solid colour behind it.
+    /// One capsule of glass: back a day, which day, forward a day - and, when
+    /// you have wandered off, one tap back to today. The date itself opens the
+    /// picker, since it is the biggest target on the row and already names
+    /// exactly what tapping it would change.
     private var nav: some View {
         HStack(spacing: 4) {
             arrow("chevron.left", enabled: offset > bounds.min) { offset -= 1 }
 
-            Text(selectedKey == today ? "Today · \(dateLabel)" : dateLabel)
-                .r(16, .semibold)
-                .foregroundStyle(selectedKey == today ? Color.ink : Color.ink2)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .frame(maxWidth: .infinity)
+            Button { picking = true } label: {
+                Text(selectedKey == today ? "Today · \(dateLabel)" : dateLabel)
+                    .r(16, .semibold)
+                    .foregroundStyle(selectedKey == today ? Color.ink : Color.ink2)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.pressable)
+            .accessibilityLabel("Pick a date")
 
-            arrow("calendar", enabled: true) { picking = true }
+            if offset != 0 {
+                Button {
+                    withAnimation(Motion.ui.reduced(reduceMotion)) { offset = 0 }
+                } label: {
+                    Text("Today")
+                        .r(13, .semibold)
+                        .foregroundStyle(Color.ink)
+                        .padding(.horizontal, 11)
+                        .frame(height: 34)
+                        .glassy(Capsule(), soft: false)
+                }
+                .buttonStyle(.pressable)
+                .transition(.soft)
+            }
+
             arrow("chevron.right", enabled: offset < bounds.max) { offset += 1 }
         }
         .padding(.horizontal, 5)
         .padding(.vertical, 5)
-        .glassy(Capsule(), material: .ultraThinMaterial)
-        .padding(.bottom, 12)
+        .glassy(Capsule(), tint: .well, material: .ultraThinMaterial)
     }
 
     private func arrow(_ system: String, enabled: Bool, _ act: @escaping () -> Void) -> some View {
@@ -215,11 +241,7 @@ struct TimetableView: View {
     }
 
     private func label(for system: String) -> String {
-        switch system {
-        case "calendar": return "Pick a date"
-        case "chevron.left": return "Previous day"
-        default: return "Next day"
-        }
+        system == "chevron.left" ? "Previous day" : "Next day"
     }
 
     private var dateLabel: String {
@@ -344,8 +366,13 @@ private struct DayPicker: View {
                 .navigationTitle("Go to a day")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Today") { date = Date(); commit() }
+                            .foregroundStyle(Color.ink)
+                    }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Done") { commit() }
+                            .foregroundStyle(Color.ink)
                     }
                 }
         }

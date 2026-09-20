@@ -103,6 +103,8 @@ final class Portal: NSObject, ObservableObject {
         /// The register, one row per session. Empty when the search page did
         /// not cooperate, which leaves whatever was read last in place.
         let daywise: [DaySession]
+        /// What that search did, for when it produced nothing.
+        let attDiag: String?
         /// `data:image/...;base64,` URI from the dashboard header, if present.
         let photo: String?
     }
@@ -218,7 +220,7 @@ final class Portal: NSObject, ObservableObject {
                         Reading(
                             rows: rows, sessions: sessions, student: self.student,
                             week: [:], weekDiag: nil, termEnd: nil,
-                            holidays: [], daywise: [], photo: photo
+                            holidays: [], daywise: [], attDiag: nil, photo: photo
                         )
                     )
 
@@ -237,7 +239,7 @@ final class Portal: NSObject, ObservableObject {
                             rows: rows, sessions: sessions, student: self.student,
                             week: week.days, weekDiag: week.diag,
                             termEnd: week.whole ? week.days.keys.max() : nil,
-                            holidays: [], daywise: [], photo: photo
+                            holidays: [], daywise: [], attDiag: nil, photo: photo
                         )
                     )
 
@@ -281,6 +283,7 @@ final class Portal: NSObject, ObservableObject {
     private var student: String?
     private var holidays: [Holiday] = []
     private var daywise: [DaySession] = []
+    private var attDiag: String?
 
     // MARK: - The register
 
@@ -334,26 +337,44 @@ final class Portal: NSObject, ObservableObject {
         webView.load(URLRequest(url: Portal.attendanceURL))
 
         var fields: FieldsPayload?
+        var note: [String] = []
         for _ in 0..<25 {
             if Task.isCancelled { return [] }
             try? await Task.sleep(nanoseconds: 500_000_000)
             guard let raw = ((try? await eval(Scrapers.attFields)) ?? nil) as? String,
-                let data = raw.data(using: .utf8),
-                let p = try? JSONDecoder().decode(FieldsPayload.self, from: data),
-                p.ok, !p.courses.isEmpty
+                let data = raw.data(using: .utf8)
             else { continue }
+            guard let p = try? JSONDecoder().decode(FieldsPayload.self, from: data) else {
+                note = ["undecodable: " + raw.prefix(200)]
+                continue
+            }
+            note = [p.diag + " courses=" + String(p.courses.count)]
+            guard p.ok, !p.courses.isEmpty else { continue }
             fields = p
             break
         }
-        guard let f = fields else { return [] }
+        guard let f = fields else {
+            attDiag = (["form not usable"] + note).joined(separator: "\n")
+            return []
+        }
 
         var wanted: [(option: String, key: String)] = []
+        var unmatched: [String] = []
         for option in f.courses {
-            guard let row = matchSubject(option, in: rows), row.total > 0 else { continue }
+            guard let row = matchSubject(option, in: rows), row.total > 0 else {
+                unmatched.append(option)
+                continue
+            }
             if wanted.contains(where: { $0.key == row.key }) { continue }
             wanted.append((option, row.key))
         }
-        guard !wanted.isEmpty else { return [] }
+        if !unmatched.isEmpty {
+            note.append("no attendance row for: " + unmatched.prefix(6).joined(separator: ", "))
+        }
+        guard !wanted.isEmpty else {
+            attDiag = (["no course matched a subject"] + note).joined(separator: "\n")
+            return []
+        }
 
         var out: [DaySession] = []
         for (i, w) in wanted.enumerated() {
@@ -368,14 +389,16 @@ final class Portal: NSObject, ObservableObject {
             _ = try? await eval("window.__attReq = \(js); true")
             _ = try? await eval(Scrapers.attRun)
 
+            var last = "no grid"
             for _ in 0..<20 {
                 if Task.isCancelled { break }
                 try? await Task.sleep(nanoseconds: 400_000_000)
                 guard let raw = ((try? await eval(Scrapers.attGrid)) ?? nil) as? String,
                     let data = raw.data(using: .utf8),
-                    let g = try? JSONDecoder().decode(GridPayload.self, from: data),
-                    g.ok
+                    let g = try? JSONDecoder().decode(GridPayload.self, from: data)
                 else { continue }
+                last = g.diag
+                guard g.ok else { continue }
                 out.append(
                     contentsOf: g.rows.map {
                         DaySession(subject: w.key, date: $0.date, time: $0.time, present: $0.present)
@@ -383,7 +406,9 @@ final class Portal: NSObject, ObservableObject {
                 )
                 break
             }
+            note.append(w.key.prefix(22) + ": " + last)
         }
+        attDiag = out.isEmpty ? note.joined(separator: "\n") : nil
         return out
     }
 
@@ -617,6 +642,7 @@ final class Portal: NSObject, ObservableObject {
                 termEnd: week.whole ? week.days.keys.max() : nil,
                 holidays: holidays,
                 daywise: daywise,
+                attDiag: attDiag,
                 photo: photo
             )
         )

@@ -55,6 +55,10 @@ extension Color {
         UIColor(0xF0917A).withAlphaComponent(0.15), UIColor(0xB8402A).withAlphaComponent(0.10)
     )
     static let track = adaptive(UIColor(white: 1, alpha: 0.13), UIColor(white: 0, alpha: 0.09))
+    /// The groove a thumb slides in. Deliberately darker than any other
+    /// surface: the thumb is ink, which in the dark scheme is nearly white,
+    /// and a white thumb on pale glass is two whites arguing.
+    static let well = adaptive(UIColor(white: 0, alpha: 0.40), UIColor(white: 0, alpha: 0.075))
 
     /// The one pixel of light along a glass edge, and the shadow that lifts it
     /// off the ground. Without both, a material reads as a grey rectangle.
@@ -259,6 +263,88 @@ enum Display {
         let base = UIFont.systemFont(ofSize: size, weight: weight)
         guard let descriptor = base.fontDescriptor.withDesign(.serif) else { return base }
         return UIFont(descriptor: descriptor, size: size)
+    }
+}
+
+// MARK: - Sliding selector
+
+/// A row of equal slots with one filled thumb that follows your finger.
+///
+/// Tapping moves it and dragging carries it, with the selection changing as it
+/// passes underneath. Equal slots are what make the second half possible:
+/// a thumb that resizes itself per item has no position to interpolate
+/// between, so it can only ever cut from one place to the next.
+struct SlideBar<T: Hashable, Content: View>: View {
+    let items: [T]
+    @Binding var selection: T
+    var thumb: Color = .ink
+    @ViewBuilder let content: (T, Bool) -> Content
+
+    @State private var width: CGFloat = 0
+    /// How far the thumb currently sits from its settled slot. Non-zero only
+    /// while a finger is on it.
+    @State private var carry: CGFloat = 0
+    @State private var origin = 0
+    @State private var dragging = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var index: Int { items.firstIndex(of: selection) ?? 0 }
+    private var slot: CGFloat { items.isEmpty ? 0 : width / CGFloat(items.count) }
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            if width > 0 {
+                Capsule()
+                    .fill(thumb)
+                    .frame(width: slot)
+                    .offset(x: CGFloat(index) * slot + carry)
+                    .shadow(color: Color.shade, radius: 7, y: 2)
+            }
+            HStack(spacing: 0) {
+                ForEach(items, id: \.self) { item in
+                    content(item, item == selection)
+                        .frame(maxWidth: .infinity)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            withAnimation(Motion.ui.reduced(reduceMotion)) { selection = item }
+                        }
+                }
+            }
+        }
+        .background {
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { width = geo.size.width }
+                    .onChange(of: geo.size.width) { _, w in width = w }
+            }
+        }
+        .gesture(drag)
+        .sensoryFeedback(.selection, trigger: selection)
+    }
+
+    private var drag: some Gesture {
+        DragGesture(minimumDistance: 6)
+            .onChanged { v in
+                guard slot > 0 else { return }
+                if !dragging {
+                    dragging = true
+                    origin = index
+                }
+                let raw = CGFloat(origin) * slot + v.translation.width
+                let limit = CGFloat(items.count - 1) * slot
+                let x = Swift.min(Swift.max(raw, 0), limit)
+                let hit = items[Swift.min(Swift.max(Int((x / slot).rounded()), 0), items.count - 1)]
+                if hit != selection {
+                    withAnimation(Motion.ui.reduced(reduceMotion)) { selection = hit }
+                }
+                // Measured from wherever the selection just landed, so the
+                // thumb stays under the finger instead of jumping to the slot.
+                carry = x - CGFloat(items.firstIndex(of: hit) ?? 0) * slot
+            }
+            .onEnded { _ in
+                dragging = false
+                withAnimation(Motion.ui.reduced(reduceMotion)) { carry = 0 }
+            }
     }
 }
 

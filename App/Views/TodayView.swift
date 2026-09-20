@@ -218,23 +218,28 @@ private struct Tomorrow: View {
                 .kerning(0.6)
                 .foregroundStyle(Color.ink3)
 
-            if let first = day.first {
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text(hhmm(first.s0))
-                        .d(34, .bold)
-                        .kerning(-0.8)
-                    Text(ampm(first.s0))
-                        .r(15, .semibold)
-                        .foregroundStyle(Color.ink3)
+            // All of them. Announcing "5 classes" and then showing one was a
+            // promise the card did not keep.
+            VStack(alignment: .leading, spacing: 13) {
+                ForEach(day) { k in
+                    HStack(alignment: .firstTextBaseline, spacing: 11) {
+                        Text(hhmm(k.s0))
+                            .r(15, .bold)
+                            .kerning(-0.2)
+                            .frame(width: 46, alignment: .leading)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(k.subject)
+                                .r(15.5, .semibold)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text(k.online ? "Online classroom" : "Room \(k.room ?? "not listed")")
+                                .r(13, .medium)
+                                .foregroundStyle(Color.ink3)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .accessibilityElement(children: .combine)
                 }
-                Text(first.subject)
-                    .r(17, .semibold)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(first.online ? "Online classroom" : "Room \(first.room ?? "not listed")")
-                    .r(14, .medium)
-                    .foregroundStyle(Color.ink3)
             }
-
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .slab(.sur, radius: 28, pad: EdgeInsets(top: 20, leading: 22, bottom: 20, trailing: 22))

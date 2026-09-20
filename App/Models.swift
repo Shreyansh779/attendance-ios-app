@@ -392,11 +392,17 @@ func shortDate(_ iso: String) -> String {
 }
 
 /// One line describing where a subject stands against the rest of the term.
+/// The one thing worth saying about a term: when this subject is done
+/// worrying about.
+///
+/// It used to carry "· 27 left" as well, on every row. The count of remaining
+/// classes is not a fact anyone acts on - it is the raw material the clear
+/// date is made of, printed next to the answer it was used to compute.
 func termLine(_ b: Budget, _ tm: Term) -> String {
     if tm.remaining == 0 { return "no classes left" }
-    if !tm.reachable { return "can't reach \(THRESHOLD)% · only \(tm.remaining) left" }
-    if let c = tm.clears { return "clears \(shortDate(c)) · \(tm.remaining) left" }
-    return "\(tm.skippable) of \(tm.remaining) left can be missed"
+    if !tm.reachable { return "can't reach \(THRESHOLD)%" }
+    if let c = tm.clears { return "clears \(shortDate(c))" }
+    return "already above \(THRESHOLD)%"
 }
 
 struct Summary {

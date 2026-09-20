@@ -185,6 +185,8 @@ struct RootView: View {
                 weekDiag: snapshot?.weekDiag,
                 registerRows: snapshot?.daywise.count ?? 0,
                 attDiag: snapshot?.attDiag,
+                dueCount: snapshot?.deadlines.count ?? 0,
+                lmsDiag: snapshot?.lmsDiag,
                 age: snapshot?.ageText,
                 onSettingsChanged: rescheduleReminders
             )
@@ -222,6 +224,7 @@ struct RootView: View {
                         picked: $picked,
                         marks: snapshot?.marks ?? [:],
                         today: today,
+                        due: snapshot?.deadlines ?? [],
                         onMark: mark
                     )
                 }
@@ -498,7 +501,9 @@ struct RootView: View {
                 holidays: r.holidays.isEmpty ? (snapshot?.holidays ?? []) : r.holidays,
                 daywise: r.daywise.isEmpty ? (snapshot?.daywise ?? []) : r.daywise,
                 attDiag: r.attDiag ?? snapshot?.attDiag,
-                photo: r.photo ?? snapshot?.photo
+                photo: r.photo ?? snapshot?.photo,
+                deadlines: r.deadlines.isEmpty ? (snapshot?.deadlines ?? []) : r.deadlines,
+                lmsDiag: r.lmsDiag ?? snapshot?.lmsDiag
             )
             Store.save(snap)
             snapshot = snap

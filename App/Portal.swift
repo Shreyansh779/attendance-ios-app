@@ -12,8 +12,18 @@ import WebKit
 @MainActor
 final class Portal: NSObject, ObservableObject {
 
-    static let loginURL = URL(string: "https://myupes-beta.upes.ac.in/")!
     static let dashboardMarker = "/connectportal/user/student/home/dashboard"
+    /// Where a refresh starts.
+    ///
+    /// Not the site root. With a live session the root redirects to
+    /// /oneportal/app/auth/login and parks there for good - it will not carry
+    /// you back into the portal on its own, so every refresh began by asking
+    /// for a password that was not needed. This URL resumes the session
+    /// silently, and only bounces to the login page when there is genuinely
+    /// nobody signed in.
+    static let dashboardURL = URL(
+        string: "https://myupes-beta.upes.ac.in/connectportal/user/student/home/dashboard"
+    )!
     static let weekURL = URL(
         string: "https://myupes-beta.upes.ac.in/connectportal/user/student/curriculum-scheduling"
     )!
@@ -107,6 +117,11 @@ final class Portal: NSObject, ObservableObject {
         let attDiag: String?
         /// `data:image/...;base64,` URI from the dashboard header, if present.
         let photo: String?
+        /// Coursework the LMS is waiting on. Empty when that read did not run
+        /// or did not work, which leaves whatever was read last in place.
+        let deadlines: [Deadline]
+        /// What the LMS read did, for when it produced nothing.
+        let lmsDiag: String?
     }
 
     // MARK: - Entry point
@@ -124,10 +139,13 @@ final class Portal: NSObject, ObservableObject {
         self.onDone = onDone
         self.student = knownStudent
         self.holidays = knownHolidays
-        status = "Log in and solve the captcha. Wait for the dashboard to appear."
+        status = "Opening the portal."
         busy = true
-        showingLogin = true
-        webView.load(URLRequest(url: Portal.loginURL))
+        // Held back deliberately: with a session still good this never has to
+        // appear at all, and putting a login form in front of somebody who is
+        // already signed in is what made every first refresh fail.
+        showingLogin = false
+        webView.load(URLRequest(url: Portal.dashboardURL))
         startPolling()
     }
 
@@ -164,6 +182,8 @@ final class Portal: NSObject, ObservableObject {
             var lastSignature = ""
             var stableReads = 0
             var sawDashboard = false
+            var sawLogin = false
+            var nudgedBack = false
             var toldStillLoggingIn = false
             var dashboardSeenAt: Date?
             var photo: String?
@@ -175,9 +195,22 @@ final class Portal: NSObject, ObservableObject {
 
                 let path = (((try? await self.eval(Scrapers.route)) ?? nil) as? String) ?? ""
                 guard path.contains(Portal.dashboardMarker) else {
-                    if !toldStillLoggingIn && !sawDashboard {
-                        toldStillLoggingIn = true
-                        self.status = "Still on the login page. Solve the captcha and wait for the dashboard."
+                    if path.contains("auth/login") {
+                        // Genuinely signed out, so now the sheet is worth
+                        // showing.
+                        sawLogin = true
+                        nudgedBack = false
+                        if !self.showingLogin { self.showingLogin = true }
+                        if !toldStillLoggingIn {
+                            toldStillLoggingIn = true
+                            self.status = "Log in and solve the captcha. Wait for the dashboard to appear."
+                        }
+                    } else if sawLogin && !nudgedBack {
+                        // Signing in lands on whatever the portal feels like,
+                        // which is not always the dashboard. Ask for it once.
+                        nudgedBack = true
+                        self.status = "Signed in. Opening your dashboard."
+                        self.webView.load(URLRequest(url: Portal.dashboardURL))
                     }
                     continue
                 }
@@ -223,7 +256,8 @@ final class Portal: NSObject, ObservableObject {
                         Reading(
                             rows: rows, sessions: sessions, student: self.student,
                             week: [:], weekDiag: nil, termEnd: nil,
-                            holidays: [], daywise: [], attDiag: nil, photo: photo
+                            holidays: [], daywise: [], attDiag: nil, photo: photo,
+                            deadlines: [], lmsDiag: nil
                         )
                     )
 
@@ -242,7 +276,8 @@ final class Portal: NSObject, ObservableObject {
                             rows: rows, sessions: sessions, student: self.student,
                             week: week.days, weekDiag: week.diag,
                             termEnd: week.whole ? week.days.keys.max() : nil,
-                            holidays: [], daywise: [], attDiag: nil, photo: photo
+                            holidays: [], daywise: [], attDiag: nil, photo: photo,
+                            deadlines: [], lmsDiag: nil
                         )
                     )
 
@@ -292,6 +327,8 @@ final class Portal: NSObject, ObservableObject {
     private var holidays: [Holiday] = []
     private var daywise: [DaySession] = []
     private var attDiag: String?
+    private var deadlines: [Deadline] = []
+    private var lmsDiag: String?
 
     // MARK: - The register
 
@@ -397,6 +434,61 @@ final class Portal: NSObject, ObservableObject {
         return []
     }
 
+
+    private struct KeyPayload: Decodable {
+        let done: Bool
+        let ok: Bool
+        let url: String
+        let diag: String
+    }
+
+    private struct DuePayload: Decodable {
+        let done: Bool
+        let ok: Bool
+        let items: [Deadline]
+        let diag: String
+    }
+
+    /// Everything the LMS is waiting on.
+    ///
+    /// Two origins, so two halves. The key is issued by the portal and is good
+    /// for one use, so it is asked for while the portal is still the live
+    /// document; then the webview follows it to Moodle, which answers the rest
+    /// from its own AJAX endpoint.
+    private func fetchDeadlines() async -> [Deadline] {
+        var note: [String] = []
+        var target: URL?
+        for _ in 0..<16 {
+            if Task.isCancelled { return [] }
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard let k = await decode(KeyPayload.self, Scrapers.lmsKey) else { continue }
+            note = [k.diag]
+            guard k.done else { continue }
+            if k.ok { target = URL(string: k.url) }
+            break
+        }
+        guard let target else {
+            lmsDiag = stamped(["no key for the lms"] + note)
+            return []
+        }
+
+        webView.load(URLRequest(url: target))
+        var lastDue = "no reply from the page"
+        for _ in 0..<30 {
+            if Task.isCancelled { return [] }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard let p = await decode(DuePayload.self, Scrapers.lmsDue) else { continue }
+            lastDue = p.diag
+            guard p.done else { continue }
+            note.append(p.diag)
+            lmsDiag = stamped(note)
+            guard p.ok else { return [] }
+            return p.items.sorted { $0.due < $1.due }
+        }
+
+        lmsDiag = stamped(["no answer from the lms"] + note + [lastDue])
+        return []
+    }
 
     private struct HolidayPayload: Decodable {
         let ok: Bool
@@ -628,7 +720,9 @@ final class Portal: NSObject, ObservableObject {
             holidays: holidays,
             daywise: daywise,
             attDiag: attDiag,
-            photo: photo
+            photo: photo,
+            deadlines: deadlines,
+            lmsDiag: lmsDiag
         )
         last = reading
         onDone?(reading)
@@ -650,8 +744,16 @@ final class Portal: NSObject, ObservableObject {
             guard let self else { return }
             let found = await self.fetchDaywise(rows: rows)
             if Task.isCancelled { return }
-            self.status = nil
             self.daywise = found
+
+            // The LMS is a different site, so this is the last thing done -
+            // getting there means spending a one-shot key and leaving the
+            // portal's origin behind.
+            self.status = "Checking the LMS for anything due."
+            let due = await self.fetchDeadlines()
+            if Task.isCancelled { return }
+            self.deadlines = due
+            self.status = nil
             guard let base = self.last else { return }
             self.onDone?(
                 Reading(
@@ -660,7 +762,9 @@ final class Portal: NSObject, ObservableObject {
                     holidays: base.holidays,
                     daywise: found,
                     attDiag: self.attDiag,
-                    photo: base.photo
+                    photo: base.photo,
+                    deadlines: due,
+                    lmsDiag: self.lmsDiag
                 )
             )
         }

@@ -32,6 +32,31 @@ struct DaySession: Codable, Hashable {
 /// The app was entirely point-in-time: it knew you were at 72.6% but not that
 /// you were at 70% a fortnight ago. Direction is the thing that tells you
 /// whether a nine-class run is working, and the portal never reports it.
+/// One thing the LMS wants handed in.
+///
+/// The portal knows nothing about coursework - it only counts attendance - so
+/// this comes from Moodle, which the portal will hand out a one-shot login key
+/// for. `due` stays the string the LMS gave: a Snapshot is decoded with a
+/// plain JSONDecoder, and a Date in here would need a date strategy nothing
+/// else in the cache uses.
+struct Deadline: Codable, Hashable {
+    let title: String
+    let course: String
+    /// ISO 8601, UTC, as Moodle writes it.
+    let due: String
+    /// "assign" or "quiz".
+    let kind: String
+    let url: String
+
+    var date: Date? { Deadline.iso.date(from: due) }
+
+    private static let iso: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+}
+
 struct Stamp: Codable, Hashable {
     /// ISO yyyy-MM-dd. One stamp per day; a second read the same day replaces
     /// the first rather than adding a point.
@@ -81,6 +106,12 @@ struct Snapshot: Codable {
     /// dashboard header. Stored rather than re-fetched: the portal serves it
     /// inline, so there is no URL to load later.
     var photo: String?
+    /// Coursework the LMS is waiting on, soonest first. Read last of all,
+    /// on a different site, so it stays empty until that read has worked
+    /// once.
+    var deadlines: [Deadline] = []
+    /// What the LMS read actually did, kept for the same reason as attDiag.
+    var lmsDiag: String?
 
     /// Decoded leniently: a cache written before week and marks existed should
     /// still load rather than being thrown away.
@@ -99,6 +130,8 @@ struct Snapshot: Codable {
         daywise = (try? c.decode([DaySession].self, forKey: .daywise)) ?? []
         attDiag = try? c.decodeIfPresent(String.self, forKey: .attDiag)
         photo = try? c.decodeIfPresent(String.self, forKey: .photo)
+        deadlines = (try? c.decode([Deadline].self, forKey: .deadlines)) ?? []
+        lmsDiag = try? c.decodeIfPresent(String.self, forKey: .lmsDiag)
     }
 
     init(
@@ -107,7 +140,8 @@ struct Snapshot: Codable {
         marks: [String: Mark] = [:], weekDiag: String? = nil,
         termEnd: String? = nil, history: [Stamp] = [],
         holidays: [Holiday] = [], daywise: [DaySession] = [],
-        attDiag: String? = nil, photo: String? = nil
+        attDiag: String? = nil, photo: String? = nil,
+        deadlines: [Deadline] = [], lmsDiag: String? = nil
     ) {
         self.savedAt = savedAt
         self.rows = rows
@@ -122,6 +156,8 @@ struct Snapshot: Codable {
         self.daywise = daywise
         self.attDiag = attDiag
         self.photo = photo
+        self.deadlines = deadlines
+        self.lmsDiag = lmsDiag
     }
 
     static var isoDay: DateFormatter {

@@ -342,6 +342,90 @@ check('scraped term feeds the maths and every session is counted once', () => {
   eq(counted, scraped.length, 'every scraped session counted exactly once');
 });
 
+// --- the LMS pair ---------------------------------------------------------
+// Both blobs hang their work off fetch().then(), and check() is synchronous.
+// A thenable that resolves in place runs the whole chain before the call
+// returns, which is cheaper than making the whole runner async for two tests.
+const sync = (v) => ({
+  then: (f) => { const r = f(v); return r && typeof r.then === 'function' ? r : sync(r); },
+  catch: () => sync(v),
+});
+
+check('lmsDue keeps only real deadlines and tidies the course name', () => {
+  // Shaped like the live reply: two things genuinely due, and a "should be
+  // completed" nag on an uploaded file, which is not a deadline.
+  const events = [
+    {
+      name: 'Lecture-1 should be completed', modulename: 'resource', timesort: 1786000000,
+      url: 'https://lms/mod/resource/view.php?id=1',
+      course: { fullname: 'Ethical Hacking &amp; Penetration Testing_Sem5' },
+    },
+    {
+      name: 'PBL_Submission 1 is due', modulename: 'assign', timesort: 1790000000,
+      url: 'https://lms/mod/assign/view.php?id=2',
+      course: { fullname: 'Ethical Hacking &amp; Penetration Testing_Sem5' },
+    },
+    {
+      name: 'Quiz 2 closes', modulename: 'quiz', timesort: 1791000000,
+      url: 'https://lms/mod/quiz/view.php?id=3',
+      course: { fullname: 'Web Analytics_Sem12' },
+    },
+  ];
+  const win = { M: { cfg: { sesskey: 'abc123' } } };
+  const fetch = (url, opt) => {
+    truthy(url.includes('sesskey=abc123'), 'sesskey not sent');
+    const body = JSON.parse(opt.body);
+    eq(body[0].methodname, 'core_calendar_get_action_events_by_timesort', 'wrong ws method');
+    // limitnum, not limit. "limit" is accepted by the signature check and
+    // then rejected as "Invalid parameter value detected" - which is a whole
+    // build spent on a typo.
+    truthy('limitnum' in body[0].args, 'limitnum missing from the args');
+    return sync({ json: () => sync([{ error: false, data: { events } }]) });
+  };
+  const call = () => JSON.parse(
+    new Function('window', 'M', 'fetch', 'return (' + blobs.lmsDue + ')')(win, win.M, fetch)
+  );
+
+  call();
+  const out = call();
+  truthy(out.done && out.ok, 'never finished: ' + out.diag);
+  eq(out.items.length, 2, 'the resource nag was not dropped');
+  eq(out.items[0].course, 'Ethical Hacking & Penetration Testing', 'course name not tidied');
+  eq(out.items[1].course, 'Web Analytics', 'the _Sem suffix survived');
+  // Swift parses this with .withFractionalSeconds; without them the date
+  // decodes to nil and the card quietly shows a dash.
+  truthy(/\.\d{3}Z$/.test(out.items[0].due), 'due is not fractional-second ISO: ' + out.items[0].due);
+});
+
+check('lmsKey finds the session by shape and spends only one key', () => {
+  const store = {
+    a9x: JSON.stringify({ Identity: { AccessToken: 'tok' } }),
+    rzp_device_id: '1.not-json-at-all',
+    b2y: JSON.stringify({ StudentId: 'uniq-1', FirstName: 'X' }),
+  };
+  const keys = Object.keys(store);
+  let calls = 0;
+  const win = {};
+  const localStorage = { length: keys.length, key: (i) => keys[i], getItem: (k) => store[k] };
+  const fetch = (url, opt) => {
+    calls++;
+    truthy(url.includes('uniqueId=uniq-1'), 'student id not in the url');
+    eq(opt.headers.Authorization, 'Bearer tok', 'token not sent');
+    return sync({ status: 200, json: () => sync({ redirectUrl: 'https://lms/auth/userkey/login.php?key=k' }) });
+  };
+  const call = () => JSON.parse(
+    new Function('window', 'localStorage', 'fetch', 'return (' + blobs.lmsKey + ')')(win, localStorage, fetch)
+  );
+
+  call();
+  const out = call();
+  truthy(out.done && out.ok, 'no key: ' + out.diag);
+  truthy(out.url.includes('login.php?key=k'), 'wrong url: ' + out.url);
+  call();
+  // Each key is good for exactly one login, so a re-poll must not burn one.
+  eq(calls, 1, 'the key was requested more than once');
+});
+
 /* ---------------------------------------------------------------------
    The holiday grid. Dates arrive DD-MM-YYYY with a weekday chip beside them,
    and a row can span days - so both the ordering and the range matter.

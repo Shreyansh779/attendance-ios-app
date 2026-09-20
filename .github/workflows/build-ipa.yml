@@ -47,6 +47,7 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             ONLY_ACTIVE_ARCH=NO \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
             2>&1 | tee build.log | grep -Ev '^\s*(export|cd |/usr/bin|builtin-)' | tail -60
 
       - name: Show errors
@@ -73,6 +74,7 @@ jobs:
           }
           /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist"
           /usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist"
+          echo "VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Info.plist")" >> "$GITHUB_ENV"
           mkdir -p out/Payload
           cp -R "$APP" out/Payload/
           cd out && zip -qry Today.ipa Payload && rm -rf Payload
@@ -87,7 +89,7 @@ jobs:
         run: |
           TAG="build-${{ github.run_number }}"
           gh release create "$TAG" out/Today.ipa \
-            --title "Today $TAG" \
+            --title "Today $VERSION ($TAG)" \
             --notes "Unsigned IPA. Download Today.ipa and sideload it." \
             --latest
           echo "### Download Today.ipa from the release: $TAG" >> "$GITHUB_STEP_SUMMARY"

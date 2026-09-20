@@ -1236,6 +1236,141 @@ enum Scrapers {
 })()
 """#
 
+    /// Ask the portal for a key to the LMS.
+    ///
+    /// Coursework does not exist on the portal at all: the nav's "LMS" tile
+    /// posts to /sso/user/oauth2/access-lms and gets back a one-shot Moodle
+    /// login URL. So this asks for the same URL and hands it back for the
+    /// webview to load - there is no way to reach Moodle signed in without
+    /// spending one of these keys.
+    ///
+    /// Parked on window.__lmsk because evaluateJavaScript cannot wait for a
+    /// promise, and re-entrant because the caller polls it.
+    static let lmsKey = #"""
+(function () {
+  if (window.__lmsk) return JSON.stringify(window.__lmsk);
+
+  // Same shape-scan as the register: both storage keys are obfuscated and
+  // neither looks stable, so the value is what gets recognised.
+  function scan(pick) {
+    for (var i = 0; i < localStorage.length; i++) {
+      var v = localStorage.getItem(localStorage.key(i));
+      if (!v || v.charAt(0) !== '{') continue;
+      try { var hit = pick(JSON.parse(v)); if (hit) return hit; } catch (e) { }
+    }
+    return null;
+  }
+  var token = scan(function (o) { return o && o.Identity && o.Identity.AccessToken; });
+  var student = scan(function (o) { return o && o.StudentId; });
+  // Deliberately not parked. The caller stops polling the moment it sees
+  // done, so answering "no session" from a document that has not booted yet
+  // would end the read on a page that was about to work.
+  if (!token || !student) {
+    return JSON.stringify({ done: false, ok: false, url: '', diag: 'no session yet' });
+  }
+
+  var st = { done: false, ok: false, url: '', diag: 'started' };
+  window.__lmsk = st;
+
+  fetch('https://myupes-beta.upes.ac.in/sso/user/oauth2/access-lms?uniqueId=' + student, {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + token,
+      'x-applicationname': 'connectportal',
+      // A constant out of the portal's own public bundle, not a secret of
+      // this account's - the page sends it on every call.
+      'x-appsecret': 'ku7GUMtyT8er51rTfTc7HC',
+      'x-requestfrom': 'web',
+      'x-studentUniqueId': student,
+      'Content-Type': 'application/json'
+    },
+    body: '{}'
+  }).then(function (r) {
+    return r.json().then(function (j) {
+      st.url = j && j.redirectUrl ? j.redirectUrl : '';
+      st.ok = !!st.url;
+      st.diag = st.ok ? 'key issued' : 'no redirectUrl, http ' + r.status;
+      st.done = true;
+    });
+  }).catch(function (e) {
+    st.done = true;
+    st.diag = 'lms key threw ' + e;
+  });
+
+  return JSON.stringify(st);
+})()
+"""#
+
+    /// Everything the LMS is waiting on, once the key above has been spent.
+    ///
+    /// Moodle is a Moodle, so there is no scraping to do: the page's own AJAX
+    /// endpoint answers the question the calendar block asks, and sesskey is
+    /// sitting in M.cfg. Only assignments and quizzes are kept - the same feed
+    /// carries "Lecture-1 should be completed" nags for every file anyone ever
+    /// uploaded, and none of those are a deadline.
+    static let lmsDue = #"""
+(function () {
+  if (window.__lmsd) return JSON.stringify(window.__lmsd);
+
+  // Getting here is a redirect chain - the key URL, then Moodle's own landing
+  // page - and the documents in the middle have no sesskey. Parking a failure
+  // on one of those would answer the caller before the real page existed, so
+  // nothing is parked until there is something to ask.
+  var sk = (window.M && M.cfg && M.cfg.sesskey) || '';
+  if (!sk) {
+    return JSON.stringify({ done: false, ok: false, items: [], diag: 'waiting for the lms' });
+  }
+
+  var st = { done: false, ok: false, items: [], diag: 'started' };
+  window.__lmsd = st;
+
+  // A fortnight back as well as forward: something already overdue is the
+  // thing you most want to be told about.
+  var from = Math.floor(Date.now() / 1000) - 86400 * 14;
+  fetch('/lib/ajax/service.php?sesskey=' + sk, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify([{
+      index: 0,
+      methodname: 'core_calendar_get_action_events_by_timesort',
+      args: { timesortfrom: from, limitnum: 50 }
+    }])
+  }).then(function (r) { return r.json(); }).then(function (j) {
+    var d = j && j[0];
+    if (!d || d.error) {
+      st.done = true;
+      st.diag = 'lms said ' + (d && d.exception ? d.exception.message : 'nothing');
+      return;
+    }
+    var ev = (d.data && d.data.events) || [];
+    var out = [];
+    for (var i = 0; i < ev.length; i++) {
+      var e = ev[i];
+      if (e.modulename !== 'assign' && e.modulename !== 'quiz') continue;
+      var course = (e.course && e.course.fullname) || '';
+      out.push({
+        title: e.name || '',
+        // The LMS names every course of this term "<name>_Sem5", and the
+        // ampersands come through HTML-escaped.
+        course: course.replace(/&amp;/g, '&').replace(/_Sem\d+$/, ''),
+        due: new Date(e.timesort * 1000).toISOString(),
+        kind: e.modulename,
+        url: e.url || ''
+      });
+    }
+    st.items = out;
+    st.ok = true;
+    st.done = true;
+    st.diag = ev.length + ' events, ' + out.length + ' with a deadline';
+  }).catch(function (e) {
+    st.done = true;
+    st.diag = 'lms threw ' + e;
+  });
+
+  return JSON.stringify(st);
+})()
+"""#
+
     /// Cheap check for whether the router has landed on the dashboard yet.
     static let route = "location.pathname"
 }

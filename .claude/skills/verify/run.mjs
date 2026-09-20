@@ -397,6 +397,31 @@ check('lmsDue keeps only real deadlines and tidies the course name', () => {
   truthy(/\.\d{3}Z$/.test(out.items[0].due), 'due is not fractional-second ISO: ' + out.items[0].due);
 });
 
+check('a read that found nothing clears what the last one left', () => {
+  // The merge in RootView, transcribed. An empty list used to mean both "this
+  // did not run" and "there is nothing", so a correct empty answer could
+  // never replace a stale one - which is how another teacher's assignments
+  // stayed on the Today screen after the filter had already removed them.
+  const merge = (fresh, cached) => fresh ?? cached ?? [];
+  eq(merge(null, ['old']), ['old'], 'a read that did not run should keep the cache');
+  eq(merge([], ['old']), [], 'a read that found nothing should clear the cache');
+  eq(merge(['new'], ['old']), ['new'], 'a read that found something should replace the cache');
+
+  const src = read('App/Views/RootView.swift');
+  truthy(
+    src.includes('deadlines: r.deadlines ?? snapshot?.deadlines ?? []'),
+    'the deadlines merge has drifted back to an isEmpty check'
+  );
+  truthy(
+    src.includes('courses: r.courses ?? snapshot?.courses ?? []'),
+    'the courses merge has drifted back to an isEmpty check'
+  );
+  // And the optionality it depends on is still there.
+  const portal = read('App/Portal.swift');
+  truthy(portal.includes('let deadlines: [Deadline]?'), 'Reading.deadlines is not optional any more');
+  truthy(portal.includes('let courses: [LmsCourse]?'), 'Reading.courses is not optional any more');
+});
+
 check('a deadline of another teacher does not survive the course list', () => {
   const due = [
     { title: 'Class Test 1 is due', course: 'Ethical Hacking', due: '', kind: 'assign',

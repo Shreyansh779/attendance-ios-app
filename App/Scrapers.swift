@@ -654,6 +654,12 @@ enum Scrapers {
   // only five remain. Past dates still go, they answer nothing.
   var now = new Date();
   var todayIso = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
+  // The payload is the whole term, and it used to be cut off at today - which
+  // is why every past day in the app was blank. Sixty days back is the whole
+  // of a semester so far without carrying a second term around in
+  // UserDefaults.
+  var back = new Date(now.getTime() - 60 * 864e5);
+  var backIso = back.getFullYear() + '-' + pad(back.getMonth() + 1) + '-' + pad(back.getDate());
 
   var VIRTUAL = /virtual|online|teams|zoom|webex|meet/i;
 
@@ -767,7 +773,7 @@ enum Scrapers {
     var g = direct(arr[i]);
     if (!g) { g = loose(arr[i]); if (g) usedLoose++; }
     if (!g) { skipped.shape++; continue; }
-    if (g.date < todayIso) { skipped.range++; continue; }
+    if (g.date < backIso) { skipped.range++; continue; }
     out.push(g);
   }
 

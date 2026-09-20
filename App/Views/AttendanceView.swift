@@ -5,8 +5,6 @@ struct AttendanceView: View {
     let summary: Summary
     /// Keyed by `AttRow.key`. Empty when the whole term is not known.
     let terms: [String: Term]
-    /// Last day of the timetable, when known.
-    let termEnd: String?
     /// Oldest first. Empty until the portal has been read on two separate days.
     let history: [Stamp]
 
@@ -66,87 +64,134 @@ struct AttendanceView: View {
         return (usable.map(\.pct), delta, label)
     }
 
+    /// Two numbers and a direction. Everything else that used to live here -
+    /// the raw 105-of-144, the term end date - was arithmetic the screen had
+    /// already done for you, printed again underneath.
     private var header: some View {
         let o = summary.overall
-        return VStack(alignment: .leading, spacing: 4) {
-            Text(o.state == .short ? "+\(o.value) to attend" : "\(o.value) to spare")
-                .contentTransition(.numericText())
-                .d(29, .bold)
-                .kerning(-0.5)
-            Text("\(summary.attended) of \(summary.total) attended, \(String(format: "%.1f", o.pct))% overall")
-                .r(14.5, .medium)
-                .foregroundStyle(Color.ink3)
-            if let t = trend {
-                HStack(spacing: 10) {
-                    Spark(values: t.series, tint: t.delta >= 0 ? Color.mintHi : Color.coral)
-                        .frame(width: 58, height: 16)
-                    Text(t.label)
-                        .r(13, .medium)
-                        .foregroundStyle(t.delta >= 0 ? Color.mintHi : Color.coral)
+        return HStack(alignment: .firstTextBaseline, spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(o.state == .short ? "+\(o.value) to attend" : "\(o.value) to spare")
+                    .contentTransition(.numericText())
+                    .d(29, .bold)
+                    .kerning(-0.5)
+                if let t = trend {
+                    HStack(spacing: 9) {
+                        Spark(values: t.series, tint: t.delta >= 0 ? Color.mintHi : Color.coral)
+                            .frame(width: 52, height: 14)
+                        Text(t.label)
+                            .r(13, .medium)
+                            .foregroundStyle(t.delta >= 0 ? Color.mintHi : Color.coral)
+                    }
                 }
-                .padding(.top, 2)
             }
-            if let end = termEnd {
-                Text("classes run to \(shortDate(end))")
-                    .r(13, .medium)
-                    .foregroundStyle(Color.ink4)
-            }
+            Spacer(minLength: 0)
+            Text("\(String(format: "%.1f", o.pct))%")
+                .r(15, .semibold)
+                .foregroundStyle(Color.ink2)
+                .padding(.horizontal, 13)
+                .padding(.vertical, 7)
+                .glassy(Capsule(), soft: false)
+                .fixedSize()
         }
     }
 
+    /// The subject in the way, as a shape rather than as a paragraph.
+    ///
+    /// This card used to be four sentences of prose - the subject name, the
+    /// count, the clear date and the run of dates, each spelled out in full.
+    /// Nobody reads four sentences on a screen they open to check one number.
+    /// It is now a label, a number, a bar and a row of dates: the same facts,
+    /// none of them in a sentence.
     private struct Callout: View {
         let worst: AttRow
         let term: Term?
 
-        /// The first `need` dates, spelled out. Capped, because a fourteen-date
-        /// run is a wall of text rather than a plan.
-        private func plan(_ tm: Term, need: Int) -> String {
-            let take = Array(tm.dates.prefix(need))
-            guard !take.isEmpty else { return "" }
-            let shown = take.prefix(6).map(shortDate).joined(separator: " · ")
-            return take.count > 6
-                ? "Starting \(shown) — and \(take.count - 6) more"
-                : "That is \(shown)"
-        }
-
         var body: some View {
             let b = worst.budget
-            VStack(alignment: .leading, spacing: 10) {
-                Text("+\(b.value)")
-                    .d(40, .bold)
-                    .kerning(-1.0)
+            VStack(alignment: .leading, spacing: 13) {
+                Text(worst.key)
+                    .r(12.5, .semibold)
+                    .textCase(.uppercase)
+                    .kerning(0.6)
                     .foregroundStyle(Color.coral)
-                Text(
-                    "\(worst.key) is the one holding you back. It needs \(b.value) \(b.value == 1 ? "class" : "classes") in a row to clear \(THRESHOLD)%."
-                )
-                .r(14.5, .medium)
-                .foregroundStyle(Color.ink2)
-                .fixedSize(horizontal: false, vertical: true)
-
-                // The bit the percentage alone cannot tell you: whether there
-                // are even enough classes left to do it in.
-                if let tm = term {
-                    Text(
-                        tm.reachable
-                            ? (tm.clears.map {
-                                "Attend every one from here and it clears on \(shortDate($0)), with \(tm.remaining) scheduled."
-                            } ?? "")
-                            : "Only \(tm.remaining) \(tm.remaining == 1 ? "class is" : "classes are") left, so \(THRESHOLD)% is no longer reachable."
-                    )
-                    .r(13.5, .medium)
-                    .foregroundStyle(tm.reachable ? Color.ink2 : Color.coral)
                     .fixedSize(horizontal: false, vertical: true)
 
-                    // "Nine in a row" is a number. These are the nine days.
-                    if tm.reachable, b.state == .short, b.value >= 1 {
-                        Text(plan(tm, need: b.value))
-                            .r(13, .medium)
-                            .foregroundStyle(Color.ink3)
-                            .fixedSize(horizontal: false, vertical: true)
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text("+\(b.value)")
+                        .d(40, .bold)
+                        .kerning(-1.0)
+                        .foregroundStyle(Color.coral)
+                    Text("in a row to clear \(THRESHOLD)%")
+                        .r(14.5, .medium)
+                        .foregroundStyle(Color.ink2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                HStack(spacing: 12) {
+                    Meter(pct: b.pct, tint: Color.coral)
+                    Text("\(Int(b.pct.rounded()))% · \(worst.attended)/\(worst.total)")
+                        .r(13.5, .semibold)
+                        .foregroundStyle(Color.ink2)
+                        .fixedSize()
+                }
+
+                if let tm = term {
+                    if tm.reachable {
+                        // The dates you have to turn up to, picked out of the
+                        // ones that follow. A date you can look at is a plan in
+                        // a way that "seven in a row" never is.
+                        if b.state == .short, b.value >= 1, !tm.dates.isEmpty {
+                            Chips(dates: tm.dates, need: b.value)
+                        }
+                        if let c = tm.clears {
+                            Label("Clears \(shortDate(c))", systemImage: "checkmark.circle")
+                                .r(13, .semibold)
+                                .foregroundStyle(Color.ink3)
+                        }
+                    } else {
+                        Label(
+                            "\(THRESHOLD)% is out of reach - only \(tm.remaining) left",
+                            systemImage: "exclamationmark.triangle"
+                        )
+                        .r(13, .semibold)
+                        .foregroundStyle(Color.coral)
+                        .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
             .slab(.surLow, radius: 28, pad: EdgeInsets(top: 20, leading: 22, bottom: 20, trailing: 22))
+        }
+
+        /// The next few dates, the required ones filled in.
+        private struct Chips: View {
+            let dates: [String]
+            let need: Int
+
+            var body: some View {
+                let shown = Array(dates.prefix(Swift.min(Swift.max(need, 1), 7)))
+                HStack(spacing: 5) {
+                    ForEach(Array(shown.enumerated()), id: \.offset) { i, d in
+                        Text(shortDate(d))
+                            .r(11.5, .semibold)
+                            .foregroundStyle(i < need ? Color.onInk : Color.ink3)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 5)
+                            .background(
+                                i < need ? Color.ink : Color.clear,
+                                in: Capsule()
+                            )
+                    }
+                    if dates.count > shown.count, need > shown.count {
+                        Text("+\(need - shown.count)")
+                            .r(11.5, .semibold)
+                            .foregroundStyle(Color.ink3)
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
         }
     }
 
@@ -164,13 +209,13 @@ struct AttendanceView: View {
             VStack(alignment: .leading, spacing: 13) {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     Text(row.key)
-                        .r(16, .semibold)
+                        .p(16, .semibold)
                         .foregroundStyle(idle ? Color.ink4 : Color.ink)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 8)
                     Text(idle ? "—" : (low ? "+\(b.value)" : "\(b.value)"))
                         .contentTransition(.numericText())
-                        .d(idle ? 16 : (low ? 18 : 24), .bold)
+                        .r(idle ? 16 : (low ? 18 : 23), .bold)
                         .kerning(-0.4)
                         .foregroundStyle(idle ? Color.ink4 : tint)
                         .fixedSize()

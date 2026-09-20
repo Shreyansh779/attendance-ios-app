@@ -237,8 +237,19 @@ extension View {
     }
 
     /// Display: headlines, and the numbers that are the whole point of a screen.
+    ///
+    /// New York is rationed deliberately. It earns a screen title and the one
+    /// number that screen exists to show - nothing else. Setting small numbers
+    /// in it too made the app look like two apps.
     func d(_ size: CGFloat, _ weight: Font.Weight = .bold) -> some View {
         modifier(ScaledFont(size: size, weight: weight, design: .serif))
+    }
+
+    /// A paragraph. Anything that wraps to a second line needs the leading
+    /// opened up; SwiftUI's default is set for single-line labels and reads as
+    /// a wall at four lines.
+    func p(_ size: CGFloat = 15, _ weight: Font.Weight = .regular) -> some View {
+        r(size, weight).lineSpacing(size * 0.26)
     }
 }
 

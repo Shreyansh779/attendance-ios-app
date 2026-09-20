@@ -167,8 +167,8 @@ struct RootView: View {
     // MARK: - Tabs
 
     private var tabs: some View {
-        TabView(selection: $route) {
-            Tab(Route.today.title, systemImage: Route.today.symbol, value: Route.today) {
+        ZStack {
+            pane(.today) {
                 screen(title: snapshot?.student ?? "Today", leadingAvatar: true) {
                     TodayView(
                         day: day,
@@ -184,7 +184,7 @@ struct RootView: View {
                 }
             }
 
-            Tab(Route.timetable.title, systemImage: Route.timetable.symbol, value: Route.timetable) {
+            pane(.timetable) {
                 screen(title: Route.timetable.title) {
                     TimetableView(
                         day: day,
@@ -203,20 +203,33 @@ struct RootView: View {
                 }
             }
 
-            Tab(Route.attendance.title, systemImage: Route.attendance.symbol, value: Route.attendance) {
+            pane(.attendance) {
                 screen(title: Route.attendance.title) {
                     AttendanceView(
                         summary: summary,
                         terms: terms,
-                        // Tied to the same guard, so the header cannot announce
-                        // a term end the rows below have gone quiet about.
-                        termEnd: terms.isEmpty ? nil : snapshot?.termEnd,
                         history: snapshot?.history ?? []
                     )
                 }
             }
         }
         .tint(Color.ink)
+        .animation(Motion.ui.reduced(reduceMotion), value: route)
+    }
+
+    /// One screen of the three, cross-fading rather than cutting.
+    ///
+    /// This was a TabView. Once the tab bar became a custom one the only thing
+    /// TabView still contributed was an instant, animation-free swap - which
+    /// reads as a dropped frame rather than as a change of screen. Keeping all
+    /// three mounted also means paging the timetable survives a trip to
+    /// Attendance and back.
+    @ViewBuilder
+    private func pane<Content: View>(_ r: Route, @ViewBuilder content: () -> Content) -> some View {
+        content()
+            .opacity(route == r ? 1 : 0)
+            .allowsHitTesting(route == r)
+            .accessibilityHidden(route != r)
     }
 
     /// One screen's chrome: a real navigation bar, the refresh control, and the
@@ -288,9 +301,6 @@ struct RootView: View {
                 }
                 .animation(Motion.ui.reduced(reduceMotion), value: portal.status)
         }
-        // The system bar is replaced, not restyled: a floating capsule with a
-        // margin on every side is not a shape UITabBar can be talked into.
-        .toolbar(.hidden, for: .tabBar)
     }
 
     private var emptyState: some View {
@@ -417,6 +427,25 @@ private struct PillBar: View {
     @Binding var route: Route
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var slot
+    @State private var width: CGFloat = 0
+
+    /// Slide a thumb along the bar and the screens follow it.
+    ///
+    /// The thirds are nominal - the selected chip is wider than the other two
+    /// because it carries its label - but for a gesture that is settling on
+    /// one of three targets, nominal is close enough, and it means the drag
+    /// needs no geometry from the chips themselves.
+    private var drag: some Gesture {
+        DragGesture(minimumDistance: 10)
+            .onChanged { v in
+                guard width > 0 else { return }
+                let all = Route.allCases
+                let i = Int(v.location.x / (width / CGFloat(all.count)))
+                let hit = all[Swift.min(Swift.max(i, 0), all.count - 1)]
+                guard hit != route else { return }
+                withAnimation(Motion.ui.reduced(reduceMotion)) { route = hit }
+            }
+    }
 
     var body: some View {
         HStack(spacing: 2) {
@@ -451,6 +480,13 @@ private struct PillBar: View {
         }
         .padding(5)
         .glassy(Capsule(), tint: .sur, material: .ultraThinMaterial)
+        .background {
+            GeometryReader { geo in
+                Color.clear.onAppear { width = geo.size.width }
+            }
+        }
+        .contentShape(Capsule())
+        .gesture(drag)
         .padding(.horizontal, 26)
         .padding(.bottom, 6)
     }

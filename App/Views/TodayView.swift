@@ -50,9 +50,8 @@ struct TodayView: View {
                     .accessibilityLabel(h.online ? "Online class" : "Room \(h.room ?? "not listed")")
 
                 Text(h.subject)
-                    .r(20, .regular)
+                    .p(20)
                     .foregroundStyle(Color.ink2)
-                    .lineSpacing(2)
                     .padding(.top, 20)
 
                 if h.online, let raw = h.link, let url = URL(string: raw) {
@@ -213,7 +212,7 @@ private struct Tomorrow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Tomorrow")
+            Text(day.count == 1 ? "Tomorrow · 1 class" : "Tomorrow · \(day.count) classes")
                 .r(12.5, .semibold)
                 .textCase(.uppercase)
                 .kerning(0.6)
@@ -236,9 +235,6 @@ private struct Tomorrow: View {
                     .foregroundStyle(Color.ink3)
             }
 
-            Text(day.count == 1 ? "1 class" : "\(day.count) classes")
-                .r(13.5, .medium)
-                .foregroundStyle(Color.ink4)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .slab(.sur, radius: 28, pad: EdgeInsets(top: 20, leading: 22, bottom: 20, trailing: 22))
@@ -345,7 +341,7 @@ private struct DayStrip: View {
                                 .frame(width: 5, height: 5)
                         }
                         Text(hhmm(k.s0))
-                            .d(14, .bold)
+                            .r(14, .bold)
                             .kerning(-0.2)
                     }
                     .foregroundStyle(k.live ? Color.mintHi : (k.past ? Color.ink4 : Color.ink))

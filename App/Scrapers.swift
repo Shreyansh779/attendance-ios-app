@@ -1266,10 +1266,9 @@ enum Scrapers {
     }
   }
 
-  // One tap on the host, and only the host. Kendo for Angular toggles the
+  // One tap on the host, and only the host: Kendo for Angular toggles the
   // popup on the component's own click handler, so tapping the button inside
-  // it and then the host itself opens the list and immediately closes it
-  // again - which is exactly what the first attempt did.
+  // it and then the host opens the list and closes it again.
   function tap(el) {
     var kinds = ['pointerdown', 'mousedown', 'mouseup', 'click'];
     for (var i = 0; i < kinds.length; i++) {
@@ -1281,23 +1280,35 @@ enum Scrapers {
     }
   }
 
-  function setDate(name, value) {
-    var f = labelled(name);
-    if (!f || !value) return false;
-    var input = f.ctrl.tagName === 'INPUT' ? f.ctrl : f.ctrl.querySelector('input');
-    if (!input) return false;
-    // The native setter, because Angular wraps the property and a plain
-    // assignment never reaches the form model.
-    try {
-      var desc = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value');
-      if (desc && desc.set) { desc.set.call(input, value); } else { input.value = value; }
-    } catch (e) { input.value = value; }
-    fire(input);
-    return true;
+  // Typed, not assigned. A Kendo date input is masked and formats as you go;
+  // writing .value leaves the component's own model on yesterday's value and
+  // the form posts empty. execCommand('insertText') produces the same
+  // beforeinput/input pair a keyboard does, which every framework listens to.
+  function type(input, value) {
+    try { input.focus(); } catch (e) { }
+    try { input.setSelectionRange(0, String(input.value || '').length); } catch (e) { }
+    var done = false;
+    try { done = document.execCommand('insertText', false, value); } catch (e) { }
+    if (!done || !input.value) {
+      try {
+        var d = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value');
+        if (d && d.set) { d.set.call(input, value); } else { input.value = value; }
+      } catch (e2) { input.value = value; }
+      fire(input);
+    }
+    try { input.blur(); } catch (e) { }
+    return norm(input.value);
   }
 
-  var okFrom = setDate('start date', req.from);
-  var okTo = setDate('end date', req.to);
+  function setDate(name, value) {
+    var f = labelled(name);
+    if (!f || !value) return 'nofield';
+    var input = f.ctrl.tagName === 'INPUT' ? f.ctrl : f.ctrl.querySelector('input');
+    if (!input) return 'noinput';
+    return type(input, value);
+  }
+
+  var got = setDate('start date', req.from) + '/' + setDate('end date', req.to);
 
   var f = labelled('course');
   if (!f) return JSON.stringify({ ok: false, diag: 'no course field' });
@@ -1306,10 +1317,7 @@ enum Scrapers {
   tap(f.ctrl);
 
   var pops = document.querySelectorAll('kendo-popup,.k-animation-container,.k-popup').length;
-  return JSON.stringify({
-    ok: true,
-    diag: 'dates=' + okFrom + '/' + okTo + ' tapped=' + f.ctrl.tagName.toLowerCase() + ' pops=' + pops
-  });
+  return JSON.stringify({ ok: true, diag: 'dates=' + got + ' pops=' + pops });
 })()
 """#
 
@@ -1487,73 +1495,76 @@ enum Scrapers {
   function low(s) { return norm(s).toLowerCase(); }
 
   function iso(v) {
-    var m = norm(v).match(/(\d{2})-(\d{2})-(\d{4})/);
+    var m = norm(v).match(/\b(\d{2})-(\d{2})-(\d{4})\b/);
     if (m) return m[3] + '-' + m[2] + '-' + m[1];
-    m = norm(v).match(/(\d{4})-(\d{2})-(\d{2})/);
+    m = norm(v).match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
     if (m) return m[1] + '-' + m[2] + '-' + m[3];
     return null;
   }
 
-  // The grid is paged at ten. Ask for the biggest page the pager offers
-  // before reading anything, so one pass is the whole course.
+  // Ask the pager for everything before reading anything, so one pass is the
+  // whole course rather than the first ten of it.
   var grew = false;
   if (window.jQuery) {
     try {
-      var grids = window.jQuery('[data-role=grid]');
-      grids.each(function () {
+      window.jQuery('[data-role=grid]').each(function () {
         var g = window.jQuery(this).data('kendoGrid');
-        if (!g || !g.dataSource) return;
-        if (g.dataSource.pageSize && g.dataSource.pageSize() < 200) {
-          g.dataSource.pageSize(200);
-          grew = true;
-        }
+        if (!g || !g.dataSource || !g.dataSource.pageSize) return;
+        if (g.dataSource.pageSize() < 200) { g.dataSource.pageSize(200); grew = true; }
       });
     } catch (e) { }
   }
 
+  // Shape, not structure. Kendo splits a grid into a header table and a body
+  // table, so the body has no <th> to line up columns against and the first
+  // version of this - which matched headers and then read rows from the same
+  // table - found nothing at all. A row with a date in one cell and the word
+  // Present or Absent in another is the register, wherever it is drawn.
   var rows = [];
-  var tables = document.querySelectorAll('table');
-  for (var t = 0; t < tables.length; t++) {
-    var heads = tables[t].querySelectorAll('th');
-    var idx = { date: -1, time: -1, status: -1 };
-    for (var h = 0; h < heads.length; h++) {
-      var ht = low(heads[h].textContent);
-      if (idx.date < 0 && ht.indexOf('session date') === 0) idx.date = h;
-      else if (idx.time < 0 && ht.indexOf('session time') === 0) idx.time = h;
-      else if (idx.status < 0 && ht === 'attendance') idx.status = h;
-    }
-    if (idx.date < 0 || idx.status < 0) continue;
+  var trs = document.querySelectorAll('tr');
+  for (var r = 0; r < trs.length; r++) {
+    var tds = trs[r].querySelectorAll('td');
+    if (tds.length < 2) continue;
 
-    var trs = tables[t].querySelectorAll('tr');
-    for (var r = 0; r < trs.length; r++) {
-      var tds = trs[r].querySelectorAll('td');
-      if (!tds.length || tds.length <= idx.status) continue;
-      var d = iso(tds[idx.date].textContent);
-      if (!d) continue;
-      var st = low(tds[idx.status].textContent);
-      if (st.indexOf('present') < 0 && st.indexOf('absent') < 0) continue;
-      rows.push({
-        date: d,
-        time: idx.time >= 0 ? norm(tds[idx.time].textContent) : '',
-        present: st.indexOf('present') >= 0
-      });
+    var date = null, time = '', status = null;
+    for (var c = 0; c < tds.length; c++) {
+      var t = norm(tds[c].textContent);
+      if (!t) continue;
+      if (!date) { var d = iso(t); if (d) { date = d; continue; } }
+      if (!time) {
+        var tm = t.match(/\b\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}\b/);
+        if (tm) { time = tm[0]; continue; }
+      }
+      if (status === null) {
+        var l = low(t);
+        if (l === 'present' || l === 'absent') { status = (l === 'present'); }
+      }
     }
-    if (rows.length) break;
+    if (date === null || status === null) continue;
+    rows.push({ date: date, time: time, present: status });
   }
 
   // "1 - 7 of 7 items" is the only honest statement of completeness on the
-  // page; without it a half-rendered grid reads as a finished one.
+  // page; without it a half-rendered grid reads as a finished short one.
   var total = -1;
-  var info = document.querySelectorAll('.k-pager-info, .k-pager-sizes, span');
+  var info = document.querySelectorAll('.k-pager-info,.k-pager-sizes,kendo-pager-info,span,div');
   for (var p = 0; p < info.length; p++) {
     var m = norm(info[p].textContent).match(/^\d+\s*-\s*\d+\s+of\s+(\d+)\s+items$/i);
     if (m) { total = +m[1]; break; }
   }
 
+  var seen = {}, uniq = [];
+  for (var u = 0; u < rows.length; u++) {
+    var k = rows[u].date + '|' + rows[u].time;
+    if (seen[k]) continue;
+    seen[k] = 1;
+    uniq.push(rows[u]);
+  }
+
   return JSON.stringify({
-    ok: rows.length > 0 && !grew && (total < 0 || rows.length >= total),
-    rows: rows,
-    diag: 'rows=' + rows.length + ' total=' + total + (grew ? ' resized' : '')
+    ok: uniq.length > 0 && !grew && (total < 0 || uniq.length >= total),
+    rows: uniq,
+    diag: 'rows=' + uniq.length + ' total=' + total + ' trs=' + trs.length + (grew ? ' resized' : '')
   });
 })()
 """#

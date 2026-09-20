@@ -36,17 +36,6 @@ struct TodayView: View {
         ScrollView(showsIndicators: false) {
             content
         }
-        // The strip lives outside the hero branch on purpose. It used to be
-        // inside it, so the moment the last class ended `hero` went nil, the
-        // strip disappeared, and the day became unmarkable - at exactly the
-        // point you would sit down to mark it. Pinned, because it is how you
-        // move between classes rather than something to read.
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if !day.isEmpty {
-                DayStrip(day: day, picked: $picked, heroID: hero?.id, marks: marks, today: today)
-                    .padding(.top, 10)
-            }
-        }
         .animation(Motion.ui.reduced(reduceMotion), value: hero?.id)
     }
 
@@ -64,16 +53,16 @@ struct TodayView: View {
                     .kerning(h.online ? -1.0 : -2.4)
                     .lineLimit(1)
                     .minimumScaleFactor(0.55)
-                    .padding(.top, 20)
+                    .padding(.top, 12)
                     // Otherwise VoiceOver reads "11213" with no idea what it is.
                     .accessibilityLabel(h.online ? "Online class" : "Room \(h.room ?? "not listed")")
 
                 Text(h.subject)
-                    .p(20)
+                    .p(19)
                     .foregroundStyle(Color.ink2)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 20)
+                    .padding(.top, 14)
 
                 if h.online, let raw = h.link, let url = URL(string: raw) {
                     Button {
@@ -98,7 +87,7 @@ struct TodayView: View {
                     .padding(.top, 9)
 
                 OwnSlack(att: h.att, term: h.att.flatMap { terms[$0.key] }, blocker: blocker)
-                    .padding(.top, 22)
+                    .padding(.top, 18)
 
                 // Answering here is what keeps you off the portal: one tap
                 // updates every number without a refresh.
@@ -127,6 +116,18 @@ struct TodayView: View {
                 .padding(.top, 12)
             }
 
+            // The strip lives outside the hero branch on purpose. It used to
+            // be inside it, so the moment the last class ended `hero` went
+            // nil, the strip disappeared and the day became unmarkable - at
+            // exactly the point you would sit down to mark it.
+            //
+            // In the scroll rather than pinned over it: this app's glass is
+            // transparent enough on a black ground that a floating shelf just
+            // looked like two cards overlapping by mistake.
+            if !day.isEmpty {
+                DayStrip(day: day, picked: $picked, heroID: hero?.id, marks: marks, today: today)
+                    .padding(.top, 18)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.bottom, 12)
@@ -392,14 +393,6 @@ private struct DayStrip: View {
                 )
             }
         }
-        // One shelf, not four floating chips. The strip is pinned over the
-        // content now, and four separate pieces of glass let whatever is
-        // behind it read straight through the gaps between them.
-        .padding(5)
-        .glassy(
-            RoundedRectangle(cornerRadius: 26, style: .continuous),
-            tint: .well, material: .ultraThinMaterial
-        )
         // Pinning a class is a selection, not a commit.
         .sensoryFeedback(.selection, trigger: picked)
     }

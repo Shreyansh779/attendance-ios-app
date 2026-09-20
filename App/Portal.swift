@@ -325,31 +325,59 @@ final class Portal: NSObject, ObservableObject {
         return (dmy.string(from: start), dmy.string(from: now))
     }
 
+    private struct StepPayload: Decodable {
+        let ok: Bool
+        let diag: String
+    }
+
+    private struct ListPayload: Decodable {
+        let ok: Bool
+        let courses: [String]
+        let diag: String
+    }
+
+    private func decode<T: Decodable>(_ type: T.Type, _ blob: String) async -> T? {
+        guard let raw = ((try? await eval(blob)) ?? nil) as? String,
+            let data = raw.data(using: .utf8)
+        else { return nil }
+        return try? JSONDecoder().decode(type, from: data)
+    }
+
+    /// The request the blobs read, set in its own eval so they stay literals
+    /// the syntax gate can parse.
+    private func setRequest(course: String, from: String, to: String) async {
+        let req = ["course": course, "from": from, "to": to]
+        guard let body = try? JSONEncoder().encode(req),
+            let js = String(data: body, encoding: .utf8)
+        else { return }
+        _ = try? await eval("window.__attReq = \(js); true")
+    }
+
     /// One search per subject, because the form takes one course at a time.
+    ///
+    /// The first version of this wrote to the controls directly. It found only
+    /// the two date fields: this portal's three dropdowns are Kendo widgets
+    /// with no form control underneath, so there was nothing to write to. This
+    /// one drives them the way a finger does - open the list, click the row -
+    /// which works whichever Kendo flavour is underneath.
     ///
     /// Only subjects the dashboard already counts are asked for: the dropdown
     /// lists everything the programme offers, and a course with no register
     /// costs a page load to learn nothing. A subject that fails is skipped
-    /// rather than failing the read - a partial register is worth having.
+    /// rather than failing the read.
     private func fetchDaywise(
         rows: [AttRow], from: String, to: String
     ) async -> [DaySession] {
         webView.load(URLRequest(url: Portal.attendanceURL))
 
-        var fields: FieldsPayload?
         var note: [String] = []
+        var fields: FieldsPayload?
         for _ in 0..<25 {
             if Task.isCancelled { return [] }
             try? await Task.sleep(nanoseconds: 500_000_000)
-            guard let raw = ((try? await eval(Scrapers.attFields)) ?? nil) as? String,
-                let data = raw.data(using: .utf8)
-            else { continue }
-            guard let p = try? JSONDecoder().decode(FieldsPayload.self, from: data) else {
-                note = ["undecodable: " + raw.prefix(200)]
-                continue
-            }
-            note = [p.diag + " courses=" + String(p.courses.count)]
-            guard p.ok, !p.courses.isEmpty else { continue }
+            guard let p = await decode(FieldsPayload.self, Scrapers.attFields) else { continue }
+            note = [p.diag]
+            guard p.ok else { continue }
             fields = p
             break
         }
@@ -358,9 +386,30 @@ final class Portal: NSObject, ObservableObject {
             return []
         }
 
+        await setRequest(course: "", from: from, to: to)
+
+        // A plain <select> hands its options over; a widget has to be opened
+        // and looked at.
+        var courses = f.courses
+        if courses.isEmpty {
+            _ = try? await eval(Scrapers.attOpen)
+            for _ in 0..<8 {
+                if Task.isCancelled { return [] }
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                guard let p = await decode(ListPayload.self, Scrapers.attList), p.ok else { continue }
+                courses = p.courses
+                note.append("list " + p.diag)
+                break
+            }
+        }
+        guard !courses.isEmpty else {
+            attDiag = (["no course list"] + note).joined(separator: "\n")
+            return []
+        }
+
         var wanted: [(option: String, key: String)] = []
         var unmatched: [String] = []
-        for option in f.courses {
+        for option in courses {
             guard let row = matchSubject(option, in: rows), row.total > 0 else {
                 unmatched.append(option)
                 continue
@@ -369,7 +418,7 @@ final class Portal: NSObject, ObservableObject {
             wanted.append((option, row.key))
         }
         if !unmatched.isEmpty {
-            note.append("no attendance row for: " + unmatched.prefix(6).joined(separator: ", "))
+            note.append("no attendance row for: " + unmatched.prefix(5).joined(separator: ", "))
         }
         guard !wanted.isEmpty else {
             attDiag = (["no course matched a subject"] + note).joined(separator: "\n")
@@ -381,22 +430,23 @@ final class Portal: NSObject, ObservableObject {
             if Task.isCancelled { break }
             status = "Reading the register, \(i + 1) of \(wanted.count)."
 
-            let req = ["course": w.option, "from": from, "to": to]
-            guard let body = try? JSONEncoder().encode(req),
-                let js = String(data: body, encoding: .utf8)
-            else { continue }
+            await setRequest(course: w.option, from: from, to: to)
+            _ = try? await eval(Scrapers.attOpen)
+            try? await Task.sleep(nanoseconds: 600_000_000)
 
-            _ = try? await eval("window.__attReq = \(js); true")
-            _ = try? await eval(Scrapers.attRun)
+            let picked = await decode(StepPayload.self, Scrapers.attPick)
+            guard picked?.ok == true else {
+                note.append(w.key.prefix(20) + ": " + (picked?.diag ?? "pick failed"))
+                continue
+            }
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            _ = try? await eval(Scrapers.attSearch)
 
             var last = "no grid"
             for _ in 0..<20 {
                 if Task.isCancelled { break }
                 try? await Task.sleep(nanoseconds: 400_000_000)
-                guard let raw = ((try? await eval(Scrapers.attGrid)) ?? nil) as? String,
-                    let data = raw.data(using: .utf8),
-                    let g = try? JSONDecoder().decode(GridPayload.self, from: data)
-                else { continue }
+                guard let g = await decode(GridPayload.self, Scrapers.attGrid) else { continue }
                 last = g.diag
                 guard g.ok else { continue }
                 out.append(
@@ -406,7 +456,7 @@ final class Portal: NSObject, ObservableObject {
                 )
                 break
             }
-            note.append(w.key.prefix(22) + ": " + last)
+            note.append(w.key.prefix(20) + ": " + last)
         }
         attDiag = out.isEmpty ? note.joined(separator: "\n") : nil
         return out

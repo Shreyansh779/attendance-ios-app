@@ -1113,459 +1113,126 @@ enum Scrapers {
 })()
 """#
 
-    /// What the day-by-day attendance form is made of.
+    /// Ask the portal for the whole register, in one call.
     ///
-    /// The first version of this looked for a <select> or an <input> next to a
-    /// <label>, and found only the two date fields: on this portal the three
-    /// dropdowns are Kendo widgets with no form control underneath at all.
-    /// This one matches on the label text itself, walks up to whatever control
-    /// sits beside it, and reports the ancestor chain when it cannot read the
-    /// options - a scraper that fails silently costs a whole sideload to
-    /// diagnose.
-    static let attFields = #"""
+    /// The search page was driven by hand for four builds: fill three Kendo
+    /// dropdowns, type two read-only date fields, press Search, scrape a grid
+    /// that turned out to be two tables. None of it was ever going to work -
+    /// the date inputs are readonly and only the calendar can set them.
+    ///
+    /// The page is talking to /student-attendance/studentattendancesummary,
+    /// which takes a list of courses and answers with JSON: every session,
+    /// its date, its time and whether you were there. One request, no UI.
+    /// This kicks it off and parks the answer on window.__reg, because
+    /// evaluateJavaScript cannot wait for a promise.
+    static let registerStart = #"""
 (function () {
-  function norm(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
-  function low(s) { return norm(s).toLowerCase(); }
-  function ownText(el) {
-    var s = '', c = el.childNodes;
-    for (var i = 0; i < c.length; i++) { if (c[i].nodeType === 3) s += c[i].nodeValue; }
-    return norm(s);
-  }
-  var CTRL = 'select,input,textarea,kendo-dropdownlist,kendo-combobox,kendo-datepicker,'
-    + '.k-dropdownlist,.k-dropdown,.k-combobox,.k-picker,[role=combobox],[role=listbox]';
+  if (window.__regBusy) return JSON.stringify({ ok: true, diag: 'running' });
 
-  function labelled(name) {
-    var all = document.querySelectorAll('label,span,div,p,strong,b');
-    for (var i = 0; i < all.length; i++) {
-      var t = low(ownText(all[i])).replace(/[*:]+$/, '').trim();
-      if (t !== name) continue;
-      var p = all[i].parentElement, hop = 0;
-      while (p && hop < 5) {
-        var c = p.querySelector(CTRL);
-        if (c) return { label: all[i], ctrl: c, box: p };
-        hop++;
-        p = p.parentElement;
-      }
-      return { label: all[i], ctrl: null, box: all[i].parentElement };
+  // The session, wherever it is kept. Both keys are obfuscated and there is no
+  // reason to believe they are stable, so this looks at the shape of the value
+  // rather than at the name of the key.
+  function scan(pick) {
+    for (var i = 0; i < localStorage.length; i++) {
+      var v = localStorage.getItem(localStorage.key(i));
+      if (!v || v.charAt(0) !== '{') continue;
+      try { var hit = pick(JSON.parse(v)); if (hit) return hit; } catch (e) { }
     }
     return null;
   }
+  var token = scan(function (o) { return o && o.Identity && o.Identity.AccessToken; });
+  var student = scan(function (o) { return o && o.StudentId; });
+  if (!token || !student) return JSON.stringify({ ok: false, diag: 'no session yet' });
 
-  function tagOf(el) {
-    if (!el) return 'none';
-    var cls = String(el.className || '');
-    if (cls.baseVal !== undefined) cls = cls.baseVal;
-    return el.tagName.toLowerCase() + (cls ? '.' + cls.split(' ')[0] : '');
-  }
+  window.__regBusy = 1;
+  window.__reg = null;
 
-  function texts(el) {
-    var out = [];
-    if (!el) return out;
-    if (el.tagName === 'SELECT') {
-      for (var j = 0; j < el.options.length; j++) {
-        var o = norm(el.options[j].textContent);
-        if (o) out.push(o);
-      }
-      return out;
-    }
-    // Kendo for jQuery keeps its list in the widget rather than the DOM.
-    if (window.jQuery) {
-      try {
-        var d = window.jQuery(el).data();
-        for (var k in d) {
-          var w = d[k];
-          if (k.indexOf('kendo') !== 0 || !w || !w.dataSource) continue;
-          var ds = w.dataSource.data ? w.dataSource.data() : [];
-          var tf = (w.options && w.options.dataTextField) || '';
-          for (var i = 0; i < ds.length; i++) {
-            var it = ds[i];
-            var t = tf && it[tf] != null ? String(it[tf])
-              : (typeof it === 'string' ? it : norm(it.Text || it.text || it.Name || it.name || ''));
-            if (t) out.push(norm(t));
-          }
-          if (out.length) return out;
-        }
-      } catch (e) { }
-    }
-    return out;
-  }
+  // x-appsecret is a constant in the portal's own bundle, not a credential of
+  // yours; the gateway rejects the call without it.
+  var H = {
+    'Content-Type': 'application/json', 'Accept': 'application/json, text/plain, */*',
+    'Authorization': 'Bearer ' + token, 'x-applicationname': 'connectportal',
+    'x-appsecret': 'ku7GUMtyT8er51rTfTc7HC', 'x-requestfrom': 'web', 'x-studentUniqueId': student
+  };
 
-  var names = ['program', 'term', 'course', 'start date', 'end date'];
-  var seen = [];
-  for (var n = 0; n < names.length; n++) {
-    var f = labelled(names[n]);
-    seen.push(names[n].replace(' date', '') + '=' + (f ? tagOf(f.ctrl) : 'nolabel'));
-  }
-
-  // When the course control is not something this can read options out of,
-  // the ancestor chain is the only thing that says what it actually is.
-  var chain = '';
-  var cf = labelled('course');
-  if (cf) {
-    var p = cf.label, hops = [];
-    for (var h = 0; h < 4 && p; h++) { hops.push(tagOf(p)); p = p.parentElement; }
-    chain = ' chain=' + hops.join('<');
-  }
-
-  var hasSearch = false;
-  var btns = document.querySelectorAll('button,a,input[type=submit],span');
-  for (var b = 0; b < btns.length; b++) {
-    if (low(btns[b].textContent) === 'search' || low(btns[b].value) === 'search') { hasSearch = true; break; }
-  }
-
-  var courses = cf ? texts(cf.ctrl) : [];
-  return JSON.stringify({
-    ok: !!(cf && cf.ctrl),
-    courses: courses,
-    hasSearch: hasSearch,
-    diag: seen.join(' ') + ' search=' + hasSearch + chain
-  });
-})()
-"""#
-
-    /// Set both dates and open the course dropdown.
-    ///
-    /// Reads `window.__attReq` = { course, from, to }, which Swift sets in a
-    /// separate eval so this stays a literal the syntax gate can parse.
-    /// Dates go in through the native value setter, because Angular and React
-    /// both wrap that property and a plain assignment is invisible to them.
-    static let attOpen = #"""
-(function () {
-  var req = window.__attReq || {};
-
-  function norm(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
-  function low(s) { return norm(s).toLowerCase(); }
-  function ownText(el) {
-    var s = '', c = el.childNodes;
-    for (var i = 0; i < c.length; i++) { if (c[i].nodeType === 3) s += c[i].nodeValue; }
-    return norm(s);
-  }
-  var CTRL = 'select,input,textarea,kendo-dropdownlist,kendo-combobox,kendo-datepicker,'
-    + '.k-dropdownlist,.k-dropdown,.k-combobox,.k-picker,[role=combobox],[role=listbox]';
-
-  function labelled(name) {
-    var all = document.querySelectorAll('label,span,div,p,strong,b');
-    for (var i = 0; i < all.length; i++) {
-      var t = low(ownText(all[i])).replace(/[*:]+$/, '').trim();
-      if (t !== name) continue;
-      var p = all[i].parentElement, hop = 0;
-      while (p && hop < 5) {
-        var c = p.querySelector(CTRL);
-        if (c) return { label: all[i], ctrl: c, box: p };
-        hop++;
-        p = p.parentElement;
-      }
-    }
-    return null;
-  }
-
-  function fire(el) {
-    var kinds = ['input', 'change', 'blur'];
-    for (var i = 0; i < kinds.length; i++) {
-      try { el.dispatchEvent(new Event(kinds[i], { bubbles: true })); } catch (e) { }
-    }
-  }
-
-  // One tap on the host, and only the host: Kendo for Angular toggles the
-  // popup on the component's own click handler, so tapping the button inside
-  // it and then the host opens the list and closes it again.
-  function tap(el) {
-    var kinds = ['pointerdown', 'mousedown', 'mouseup', 'click'];
-    for (var i = 0; i < kinds.length; i++) {
-      try {
-        el.dispatchEvent(new MouseEvent(kinds[i], { bubbles: true, cancelable: true, view: window }));
-      } catch (e) {
-        try { el.dispatchEvent(new Event(kinds[i], { bubbles: true })); } catch (e2) { }
-      }
-    }
-  }
-
-  // Typed, not assigned. A Kendo date input is masked and formats as you go;
-  // writing .value leaves the component's own model on yesterday's value and
-  // the form posts empty. execCommand('insertText') produces the same
-  // beforeinput/input pair a keyboard does, which every framework listens to.
-  function type(input, value) {
-    try { input.focus(); } catch (e) { }
-    try { input.setSelectionRange(0, String(input.value || '').length); } catch (e) { }
-    var done = false;
-    try { done = document.execCommand('insertText', false, value); } catch (e) { }
-    if (!done || !input.value) {
-      try {
-        var d = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value');
-        if (d && d.set) { d.set.call(input, value); } else { input.value = value; }
-      } catch (e2) { input.value = value; }
-      fire(input);
-    }
-    try { input.blur(); } catch (e) { }
-    return norm(input.value);
-  }
-
-  function setDate(name, value) {
-    var f = labelled(name);
-    if (!f || !value) return 'nofield';
-    var input = f.ctrl.tagName === 'INPUT' ? f.ctrl : f.ctrl.querySelector('input');
-    if (!input) return 'noinput';
-    return type(input, value);
-  }
-
-  var got = setDate('start date', req.from) + '/' + setDate('end date', req.to);
-
-  var f = labelled('course');
-  if (!f) return JSON.stringify({ ok: false, diag: 'no course field' });
-
-  try { f.ctrl.focus(); } catch (e) { }
-  tap(f.ctrl);
-
-  var pops = document.querySelectorAll('kendo-popup,.k-animation-container,.k-popup').length;
-  return JSON.stringify({ ok: true, diag: 'dates=' + got + ' pops=' + pops });
-})()
-"""#
-
-    /// The keyboard route into the same dropdown.
-    ///
-    /// A synthetic click goes through the pointer stack, and whatever is
-    /// listening may not be there. Every Kendo dropdown also opens on Alt+Down
-    /// and on Down, which goes through the component's own key handler
-    /// instead - a second, independent way in.
-    static let attKeys = #"""
-(function () {
-  function norm(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
-  function low(s) { return norm(s).toLowerCase(); }
-  function ownText(el) {
-    var s = '', c = el.childNodes;
-    for (var i = 0; i < c.length; i++) { if (c[i].nodeType === 3) s += c[i].nodeValue; }
-    return norm(s);
-  }
-  var CTRL = 'select,input,textarea,kendo-dropdownlist,kendo-combobox,kendo-datepicker,'
-    + '.k-dropdownlist,.k-dropdown,.k-combobox,.k-picker,[role=combobox],[role=listbox]';
-
-  function labelled(name) {
-    var all = document.querySelectorAll('label,span,div,p,strong,b');
-    for (var i = 0; i < all.length; i++) {
-      var t = low(ownText(all[i])).replace(/[*:]+$/, '').trim();
-      if (t !== name) continue;
-      var p = all[i].parentElement, hop = 0;
-      while (p && hop < 5) {
-        var c = p.querySelector(CTRL);
-        if (c) return { label: all[i], ctrl: c, box: p };
-        hop++;
-        p = p.parentElement;
-      }
-    }
-    return null;
-  }
-
-  // The keyboard route, for when a synthetic click does not reach whatever is
-  // listening. Every Kendo dropdown opens on Alt+Down and on Down, and this
-  // path goes through the component's own key handler rather than through the
-  // pointer stack.
-  function press(el, key, alt) {
-    var init = { key: key, code: key, bubbles: true, cancelable: true, altKey: !!alt };
-    var kinds = ['keydown', 'keyup'];
-    for (var i = 0; i < kinds.length; i++) {
-      try { el.dispatchEvent(new KeyboardEvent(kinds[i], init)); } catch (e) { }
-    }
-  }
-
-  var f = labelled('course');
-  if (!f) return JSON.stringify({ ok: false, diag: 'no course field' });
-
-  var target = f.ctrl.querySelector('[role=combobox],input,.k-input-inner') || f.ctrl;
-  try { target.focus(); } catch (e) { }
-  try { f.ctrl.focus(); } catch (e) { }
-  press(target, 'ArrowDown', true);
-  press(target, 'ArrowDown', false);
-
-  var pops = document.querySelectorAll('kendo-popup,.k-animation-container,.k-popup').length;
-  return JSON.stringify({ ok: true, diag: 'keys sent, pops=' + pops });
-})()
-"""#
-
-    /// The options currently on screen.
-    ///
-    /// A closed popup is still in the DOM, so visibility is the only thing
-    /// separating this dropdown from every other one on the page.
-    static let attList = #"""
-(function () {
-  function norm(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
-
-  var SEL = '[role=option],.k-list-item,li.k-item,li.k-list-item,kendo-list li,.k-popup li,.k-list li';
-  var nodes = document.querySelectorAll(SEL);
-
-  var vis = [], all = [], seen = {};
-  for (var i = 0; i < nodes.length; i++) {
-    var el = nodes[i];
-    var t = norm(el.textContent);
-    if (!t) continue;
-    all.push(t);
-    // A closed popup is still in the DOM, so visibility is the only thing
-    // separating this dropdown's list from every other one on the page.
-    if (!el.offsetParent && !el.offsetHeight) continue;
-    if (seen[t]) continue;
-    seen[t] = 1;
-    vis.push(t);
-  }
-
-  var pops = document.querySelectorAll('kendo-popup,.k-animation-container,.k-popup').length;
-  var out = vis;
-  // If nothing measures as visible but the page has exactly one list in it,
-  // that list is the answer - some popups are positioned off-screen until the
-  // animation lands, and offsetParent is null for the whole of it.
-  if (!out.length && all.length && pops === 1) {
-    var uniq = {};
-    out = all.filter(function (t) { if (uniq[t]) { return false; } uniq[t] = 1; return true; });
-  }
-
-  return JSON.stringify({
-    ok: out.length > 0,
-    courses: out,
-    diag: 'nodes=' + nodes.length + ' visible=' + vis.length + ' pops=' + pops
-  });
-})()
-"""#
-
-    /// Click the option named in `window.__attReq.course`.
-    static let attPick = #"""
-(function () {
-  var req = window.__attReq || {};
-  function norm(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
-  function low(s) { return norm(s).toLowerCase(); }
-
-  function tap(el) {
-    var kinds = ['pointerdown', 'mousedown', 'mouseup', 'click'];
-    for (var i = 0; i < kinds.length; i++) {
-      try {
-        el.dispatchEvent(new MouseEvent(kinds[i], { bubbles: true, cancelable: true, view: window }));
-      } catch (e) {
-        try { el.dispatchEvent(new Event(kinds[i], { bubbles: true })); } catch (e2) { }
-      }
-    }
-  }
-
-  var nodes = document.querySelectorAll('[role=option],.k-list-item,li.k-item,li.k-list-item');
-  for (var i = 0; i < nodes.length; i++) {
-    if (low(nodes[i].textContent) !== low(req.course)) continue;
-    tap(nodes[i]);
-    return JSON.stringify({ ok: true, diag: 'picked' });
-  }
-  return JSON.stringify({ ok: false, diag: 'no option matched, of ' + nodes.length });
-})()
-"""#
-
-    /// Press Search.
-    ///
-    /// A real mouse sequence rather than element.click(): both Kendo flavours
-    /// act on mousedown, and a bare click() never produces one.
-    static let attSearch = #"""
-(function () {
-  function norm(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
-  function low(s) { return norm(s).toLowerCase(); }
-
-  function tap(el) {
-    var kinds = ['pointerdown', 'mousedown', 'mouseup', 'click'];
-    for (var i = 0; i < kinds.length; i++) {
-      try {
-        el.dispatchEvent(new MouseEvent(kinds[i], { bubbles: true, cancelable: true, view: window }));
-      } catch (e) {
-        try { el.dispatchEvent(new Event(kinds[i], { bubbles: true })); } catch (e2) { }
-      }
-    }
-  }
-
-  var btns = document.querySelectorAll('button,a,input[type=submit]');
-  for (var b = 0; b < btns.length; b++) {
-    var t = low(btns[b].textContent) || low(btns[b].value);
-    if (t !== 'search') continue;
-    tap(btns[b]);
-    try { btns[b].click(); } catch (e) { }
-    return JSON.stringify({ ok: true, diag: 'searched' });
-  }
-  return JSON.stringify({ ok: false, diag: 'no search button' });
-})()
-"""#
-
-    /// The results grid, once it has settled.
-    ///
-    /// Not ok until the row count matches the pager total, because a grid
-    /// halfway through rendering looks exactly like a finished short one.
-    /// The page size is pushed to 200 first, so one read is the whole course.
-    static let attGrid = #"""
-(function () {
-  function norm(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
-  function low(s) { return norm(s).toLowerCase(); }
-
-  function iso(v) {
-    var m = norm(v).match(/\b(\d{2})-(\d{2})-(\d{4})\b/);
-    if (m) return m[3] + '-' + m[2] + '-' + m[1];
-    m = norm(v).match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
-    if (m) return m[1] + '-' + m[2] + '-' + m[3];
-    return null;
-  }
-
-  // Ask the pager for everything before reading anything, so one pass is the
-  // whole course rather than the first ten of it.
-  var grew = false;
-  if (window.jQuery) {
+  (async function () {
+    var out = { done: true, ok: false, rows: [], diag: '' };
     try {
-      window.jQuery('[data-role=grid]').each(function () {
-        var g = window.jQuery(this).data('kendoGrid');
-        if (!g || !g.dataSource || !g.dataSource.pageSize) return;
-        if (g.dataSource.pageSize() < 200) { g.dataSource.pageSize(200); grew = true; }
+      var dd = await fetch('/apigateway/student-attendance/attendancedropdown', {
+        method: 'POST', headers: H,
+        body: JSON.stringify({ StudentUniqueID: student, IsAttendance: true })
       });
-    } catch (e) { }
-  }
+      if (!dd.ok) { out.diag = 'dropdown ' + dd.status; window.__reg = out; window.__regBusy = 0; return; }
 
-  // Shape, not structure. Kendo splits a grid into a header table and a body
-  // table, so the body has no <th> to line up columns against and the first
-  // version of this - which matched headers and then read rows from the same
-  // table - found nothing at all. A row with a date in one cell and the word
-  // Present or Absent in another is the register, wherever it is drawn.
-  var rows = [];
-  var trs = document.querySelectorAll('tr');
-  for (var r = 0; r < trs.length; r++) {
-    var tds = trs[r].querySelectorAll('td');
-    if (tds.length < 2) continue;
+      var fams = await dd.json();
+      var fam = fams && fams[0];
+      var list = (fam && fam.TermDropdownDetailsList) || [];
+      var term = null;
+      for (var i = 0; i < list.length; i++) { if (list[i].IsCurrentTerm) term = list[i]; }
+      if (!term) term = list[list.length - 1];
+      if (!term) { out.diag = 'no term in dropdown'; window.__reg = out; window.__regBusy = 0; return; }
 
-    var date = null, time = '', status = null;
-    for (var c = 0; c < tds.length; c++) {
-      var t = norm(tds[c].textContent);
-      if (!t) continue;
-      if (!date) { var d = iso(t); if (d) { date = d; continue; } }
-      if (!time) {
-        var tm = t.match(/\b\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}\b/);
-        if (tm) { time = tm[0]; continue; }
+      var now = new Date();
+      var pad = function (n) { return n < 10 ? '0' + n : '' + n; };
+      // Every course in one call. The page asks for one at a time because it
+      // has one dropdown; the endpoint takes a list.
+      var body = {
+        StudentUniqueID: student,
+        CourseFamilyId: fam.CourseFamilyId,
+        TermCodeId: term.TermCodeId,
+        CourseList: (term.ModuleDropdownDetailsList || []).map(function (m) {
+          return { ID: m.ModuleId, Name: m.ModuleName };
+        }),
+        StartDate: String(term.TermStartDate).slice(0, 10),
+        EndDate: now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate()),
+        TermStartDate: String(term.TermStartDate).slice(0, 10),
+        TermEndDate: String(term.TermEndDate).slice(0, 10)
+      };
+
+      var r = await fetch('/apigateway/student-attendance/studentattendancesummary', {
+        method: 'POST', headers: H, body: JSON.stringify(body)
+      });
+      if (!r.ok) { out.diag = 'summary ' + r.status; window.__reg = out; window.__regBusy = 0; return; }
+
+      var j = await r.json();
+      var info = j.AttendanceInfo || [];
+      for (var c = 0; c < info.length; c++) {
+        var det = info[c].AttendanceDetails || [];
+        for (var d = 0; d < det.length; d++) {
+          var day = String(det[d].SessionDate || '').slice(0, 10);
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
+          out.rows.push({
+            subject: String(info[c].CourseName || ''),
+            date: day,
+            time: String(det[d].SessionTime || ''),
+            present: String(det[d].AttendanceStatus || '').toUpperCase().indexOf('PRESENT') === 0
+          });
+        }
       }
-      if (status === null) {
-        var l = low(t);
-        if (l === 'present' || l === 'absent') { status = (l === 'present'); }
-      }
+      out.ok = out.rows.length > 0;
+      out.diag = 'term=' + term.TermCode + ' courses=' + info.length + ' rows=' + out.rows.length;
+    } catch (e) {
+      out.diag = 'threw ' + String(e).slice(0, 90);
     }
-    if (date === null || status === null) continue;
-    rows.push({ date: date, time: time, present: status });
-  }
+    window.__reg = out;
+    window.__regBusy = 0;
+  })();
 
-  // "1 - 7 of 7 items" is the only honest statement of completeness on the
-  // page; without it a half-rendered grid reads as a finished short one.
-  var total = -1;
-  var info = document.querySelectorAll('.k-pager-info,.k-pager-sizes,kendo-pager-info,span,div');
-  for (var p = 0; p < info.length; p++) {
-    var m = norm(info[p].textContent).match(/^\d+\s*-\s*\d+\s+of\s+(\d+)\s+items$/i);
-    if (m) { total = +m[1]; break; }
-  }
+  return JSON.stringify({ ok: true, diag: 'started' });
+})()
+"""#
 
-  var seen = {}, uniq = [];
-  for (var u = 0; u < rows.length; u++) {
-    var k = rows[u].date + '|' + rows[u].time;
-    if (seen[k]) continue;
-    seen[k] = 1;
-    uniq.push(rows[u]);
+    /// Collect what registerStart parked, once it has landed.
+    static let registerRead = #"""
+(function () {
+  var r = window.__reg;
+  if (!r) {
+    return JSON.stringify({
+      done: false, ok: false, rows: [],
+      diag: window.__regBusy ? 'running' : 'not started'
+    });
   }
-
-  return JSON.stringify({
-    ok: uniq.length > 0 && !grew && (total < 0 || uniq.length >= total),
-    rows: uniq,
-    diag: 'rows=' + uniq.length + ' total=' + total + ' trs=' + trs.length + (grew ? ' resized' : '')
-  });
+  return JSON.stringify(r);
 })()
 """#
 

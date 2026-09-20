@@ -272,9 +272,7 @@ final class Portal: NSObject, ObservableObject {
                     // portal that would not cooperate with it held `busy` and
                     // the status banner hostage - a read that had in fact
                     // succeeded looked like one that had hung.
-                    self.startRegister(
-                        rows: rows, span: Portal.registerSpan(week.days.keys.min())
-                    )
+                    self.startRegister(rows: rows)
                     return
                 }
             }
@@ -297,29 +295,12 @@ final class Portal: NSObject, ObservableObject {
 
     // MARK: - The register
 
-    private struct FieldsPayload: Decodable {
-        let ok: Bool
-        let courses: [String]
-        let hasSearch: Bool
-        let diag: String
-    }
-
-    private struct GridRow: Decodable {
-        let date: String
-        let time: String
-        let present: Bool
-    }
-
-    private struct GridPayload: Decodable {
-        let ok: Bool
-        let rows: [GridRow]
-        let diag: String
-    }
     /// Every diagnostic carries the time it was written: one that is only
     /// written on failure is indistinguishable from one left over from the
     /// run before, which is exactly the confusion it caused.
     private func stamped(_ lines: [String]) -> String {
-        Portal.stamp.string(from: Date()) + String(UnicodeScalar(10)) + lines.joined(separator: String(UnicodeScalar(10)))
+        Portal.stamp.string(from: Date()) + String(UnicodeScalar(10))
+            + lines.joined(separator: String(UnicodeScalar(10)))
     }
 
     /// So a diagnostic says which run it came from.
@@ -330,34 +311,22 @@ final class Portal: NSObject, ObservableObject {
         return f
     }()
 
-
-    /// The form wants dd-MM-yyyy, which is not what anything else here speaks.
-    private static let dmy: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "dd-MM-yyyy"
-        return f
-    }()
-
-    /// The window to ask the register for: from the first day the timetable
-    /// knows about to today. Ninety days back if the timetable is empty, which
-    /// is a whole semester so far and costs nothing extra to ask for.
-    static func registerSpan(_ firstKnownDay: String?) -> (from: String, to: String) {
-        let now = Date()
-        let start = firstKnownDay.flatMap { Snapshot.isoDay.date(from: $0) }
-            ?? Calendar.current.date(byAdding: .day, value: -90, to: now)
-            ?? now
-        return (dmy.string(from: start), dmy.string(from: now))
-    }
-
     private struct StepPayload: Decodable {
         let ok: Bool
         let diag: String
     }
 
-    private struct ListPayload: Decodable {
+    private struct RegisterRow: Decodable {
+        let subject: String
+        let date: String
+        let time: String
+        let present: Bool
+    }
+
+    private struct RegisterPayload: Decodable {
+        let done: Bool
         let ok: Bool
-        let courses: [String]
+        let rows: [RegisterRow]
         let diag: String
     }
 
@@ -368,157 +337,66 @@ final class Portal: NSObject, ObservableObject {
         return try? JSONDecoder().decode(type, from: data)
     }
 
-    /// Open the course dropdown and wait for its list, by pointer and then by
-    /// keyboard.
+    /// The register, in one request.
     ///
-    /// Two independent ways in, because a synthetic click travels the pointer
-    /// stack and whatever is listening may not be on it - Kendo for Angular
-    /// binds the popup to the component, not to the element. Alt+Down goes
-    /// through the key handler instead.
-    private func openCourseList() async -> (options: [String], diag: String) {
-        // It may already be open: the pass that discovered the course list
-        // leaves the popup up, and tapping the host again would close it -
-        // which is exactly what happened to the first subject in the loop.
-        if let already = await decode(ListPayload.self, Scrapers.attList), already.ok {
-            return (already.courses, "already open " + already.diag)
-        }
-
-        var diag = "open:"
-        for attempt in 0..<2 {
-            if Task.isCancelled { return ([], diag + " cancelled") }
-            let step = await decode(StepPayload.self, attempt == 0 ? Scrapers.attOpen : Scrapers.attKeys)
-            diag += " [" + (step?.diag ?? "no reply") + "]"
-            for _ in 0..<6 {
-                if Task.isCancelled { return ([], diag + " cancelled") }
-                try? await Task.sleep(nanoseconds: 400_000_000)
-                guard let p = await decode(ListPayload.self, Scrapers.attList) else { continue }
-                if p.ok { return (p.courses, diag + " " + p.diag) }
-                diag = "open: " + p.diag
-            }
-        }
-        return ([], diag)
-    }
-
-    /// The request the blobs read, set in its own eval so they stay literals
-    /// the syntax gate can parse.
-    private func setRequest(course: String, from: String, to: String) async {
-        let req = ["course": course, "from": from, "to": to]
-        guard let body = try? JSONEncoder().encode(req),
-            let js = String(data: body, encoding: .utf8)
-        else { return }
-        _ = try? await eval("window.__attReq = \(js); true")
-    }
-
-    /// One search per subject, because the form takes one course at a time.
+    /// Four builds went into driving the search form by hand - three Kendo
+    /// dropdowns, two date fields, a Search button, a results grid - and none
+    /// of it could ever have worked: the date inputs are `readonly`, so only
+    /// the calendar popup can set them, and the grid is two tables with the
+    /// headers in one and the rows in the other.
     ///
-    /// The first version of this wrote to the controls directly. It found only
-    /// the two date fields: this portal's three dropdowns are Kendo widgets
-    /// with no form control underneath, so there was nothing to write to. This
-    /// one drives them the way a finger does - open the list, click the row -
-    /// which works whichever Kendo flavour is underneath.
-    ///
-    /// Only subjects the dashboard already counts are asked for: the dropdown
-    /// lists everything the programme offers, and a course with no register
-    /// costs a page load to learn nothing. A subject that fails is skipped
-    /// rather than failing the read.
-    private func fetchDaywise(
-        rows: [AttRow], from: String, to: String
-    ) async -> [DaySession] {
+    /// The page itself is talking to an endpoint that takes a list of courses
+    /// and answers with JSON. So this asks that endpoint the same question,
+    /// for every course at once, and parses the reply. The form is not
+    /// touched at all.
+    private func fetchDaywise(rows: [AttRow]) async -> [DaySession] {
         webView.load(URLRequest(url: Portal.attendanceURL))
 
         var note: [String] = []
-        var fields: FieldsPayload?
-        for _ in 0..<25 {
+        var started = false
+        for _ in 0..<24 {
             if Task.isCancelled { return [] }
             try? await Task.sleep(nanoseconds: 500_000_000)
-            guard let p = await decode(FieldsPayload.self, Scrapers.attFields) else { continue }
-            note = [p.diag]
-            guard p.ok else { continue }
-            fields = p
-            break
+            guard let s = await decode(StepPayload.self, Scrapers.registerStart) else { continue }
+            note = [s.diag]
+            if s.ok { started = true; break }
         }
-        guard let f = fields else {
-            attDiag = stamped(["form not usable"] + note)
+        guard started else {
+            attDiag = stamped(["the page never produced a session"] + note)
             return []
         }
 
-        await setRequest(course: "", from: from, to: to)
-
-        // A plain <select> hands its options over; a widget has to be opened
-        // and looked at.
-        var courses = f.courses
-        if courses.isEmpty {
-            let opened = await openCourseList()
-            courses = opened.options
-            note.append(opened.diag)
-        }
-        guard !courses.isEmpty else {
-            attDiag = stamped(["no course list"] + note)
-            return []
-        }
-
-        var wanted: [(option: String, key: String)] = []
-        var unmatched: [String] = []
-        for option in courses {
-            guard let row = matchSubject(option, in: rows), row.total > 0 else {
-                unmatched.append(option)
-                continue
-            }
-            if wanted.contains(where: { $0.key == row.key }) { continue }
-            wanted.append((option, row.key))
-        }
-        if !unmatched.isEmpty {
-            note.append("no attendance row for: " + unmatched.prefix(5).joined(separator: ", "))
-        }
-        guard !wanted.isEmpty else {
-            attDiag = stamped(["no course matched a subject"] + note)
-            return []
-        }
-
-        var out: [DaySession] = []
-        for (i, w) in wanted.enumerated() {
-            if Task.isCancelled { break }
-            status = "Reading the register, \(i + 1) of \(wanted.count)."
-
-            await setRequest(course: w.option, from: from, to: to)
-            let reopened = await openCourseList()
-            guard !reopened.options.isEmpty else {
-                note.append(w.key.prefix(20) + ": " + reopened.diag)
-                continue
-            }
-
-            let picked = await decode(StepPayload.self, Scrapers.attPick)
-            guard picked?.ok == true else {
-                note.append(w.key.prefix(20) + ": " + (picked?.diag ?? "pick failed"))
-                continue
-            }
+        for _ in 0..<40 {
+            if Task.isCancelled { return [] }
             try? await Task.sleep(nanoseconds: 400_000_000)
-            _ = try? await eval(Scrapers.attSearch)
+            guard let p = await decode(RegisterPayload.self, Scrapers.registerRead), p.done else { continue }
+            note.append(p.diag)
+            guard p.ok else { break }
 
-            var last = "no grid"
-            for _ in 0..<20 {
-                if Task.isCancelled { break }
-                try? await Task.sleep(nanoseconds: 400_000_000)
-                guard let g = await decode(GridPayload.self, Scrapers.attGrid) else { continue }
-                last = g.diag
-                guard g.ok else { continue }
+            // The portal names a course, the dashboard names a subject, and
+            // they are not always the same string.
+            var out: [DaySession] = []
+            var unmatched = Set<String>()
+            for row in p.rows {
+                guard let hit = matchSubject(row.subject, in: rows) else {
+                    unmatched.insert(row.subject)
+                    continue
+                }
                 out.append(
-                    contentsOf: g.rows.map {
-                        DaySession(subject: w.key, date: $0.date, time: $0.time, present: $0.present)
-                    }
+                    DaySession(subject: hit.key, date: row.date, time: row.time, present: row.present)
                 )
-                break
             }
-            note.append(w.key.prefix(20) + ": " + last)
+            if !unmatched.isEmpty {
+                note.append("no subject for: " + unmatched.sorted().prefix(4).joined(separator: ", "))
+            }
+            attDiag = stamped(note)
+            return out
         }
-        // Always written, never cleared on success: a diagnostic that only
-        // shows up on failure is indistinguishable from a stale one, and the
-        // first question asked about this screen was whether it was showing
-        // this run or the one before it. Settings only surfaces it when the
-        // register came back empty anyway.
-        attDiag = stamped(note)
-        return out
+
+        attDiag = stamped(["no answer from the register"] + note)
+        return []
     }
+
 
     private struct HolidayPayload: Decodable {
         let ok: Bool
@@ -766,11 +644,11 @@ final class Portal: NSObject, ObservableObject {
     /// `busy` is already false by the time this runs, so the refresh control
     /// works and nothing waits on it. A second refresh cancels it, because the
     /// read it would be adding to has been replaced.
-    private func startRegister(rows: [AttRow], span: (from: String, to: String)) {
+    private func startRegister(rows: [AttRow]) {
         registerTask?.cancel()
         registerTask = Task { [weak self] in
             guard let self else { return }
-            let found = await self.fetchDaywise(rows: rows, from: span.from, to: span.to)
+            let found = await self.fetchDaywise(rows: rows)
             if Task.isCancelled { return }
             self.status = nil
             self.daywise = found

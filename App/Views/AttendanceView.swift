@@ -71,8 +71,8 @@ struct AttendanceView: View {
         return VStack(alignment: .leading, spacing: 4) {
             Text(o.state == .short ? "+\(o.value) to attend" : "\(o.value) to spare")
                 .contentTransition(.numericText())
-                .r(27, .bold)
-                .kerning(-0.8)
+                .d(29, .bold)
+                .kerning(-0.5)
             Text("\(summary.attended) of \(summary.total) attended, \(String(format: "%.1f", o.pct))% overall")
                 .r(14.5, .medium)
                 .foregroundStyle(Color.ink3)
@@ -113,8 +113,8 @@ struct AttendanceView: View {
             let b = worst.budget
             VStack(alignment: .leading, spacing: 10) {
                 Text("+\(b.value)")
-                    .r(38, .bold)
-                    .kerning(-1.5)
+                    .d(40, .bold)
+                    .kerning(-1.0)
                     .foregroundStyle(Color.coral)
                 Text(
                     "\(worst.key) is the one holding you back. It needs \(b.value) \(b.value == 1 ? "class" : "classes") in a row to clear \(THRESHOLD)%."
@@ -170,8 +170,8 @@ struct AttendanceView: View {
                     Spacer(minLength: 8)
                     Text(idle ? "—" : (low ? "+\(b.value)" : "\(b.value)"))
                         .contentTransition(.numericText())
-                        .r(idle ? 15 : (low ? 16 : 22), .bold)
-                        .kerning(-0.6)
+                        .d(idle ? 16 : (low ? 18 : 24), .bold)
+                        .kerning(-0.4)
                         .foregroundStyle(idle ? Color.ink4 : tint)
                         .fixedSize()
                 }

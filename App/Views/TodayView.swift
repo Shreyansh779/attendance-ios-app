@@ -5,6 +5,7 @@ import SwiftUI
 /// aggregate is not what stops you skipping a particular class.
 struct TodayView: View {
     @Environment(\.openURL) private var openURL
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let day: [Klass]
     let nowMin: Int
@@ -37,8 +38,11 @@ struct TodayView: View {
                     .padding(.top, 12)
 
                 Text(h.online ? "Online" : (h.room ?? "No room"))
-                    .r(h.online ? 52 : 92, .bold)
-                    .kerning(h.online ? -1.6 : -4)
+                    .d(h.online ? 48 : 84, .bold)
+                    // A serif needs far less negative tracking than a rounded
+                    // sans: the serifs themselves do the joining up, and
+                    // pulling them together closes the counters.
+                    .kerning(h.online ? -1.0 : -2.4)
                     .lineLimit(1)
                     .minimumScaleFactor(0.55)
                     .padding(.top, 20)
@@ -46,7 +50,8 @@ struct TodayView: View {
                     .accessibilityLabel(h.online ? "Online class" : "Room \(h.room ?? "not listed")")
 
                 Text(h.subject)
-                    .r(21, .medium)
+                    .r(20, .regular)
+                    .foregroundStyle(Color.ink2)
                     .lineSpacing(2)
                     .padding(.top, 20)
 
@@ -58,10 +63,10 @@ struct TodayView: View {
                             Text("Join the class").r(15.5, .semibold)
                             Text("\u{2197}").r(15, .semibold)
                         }
-                        .foregroundStyle(Color.onAccent)
+                        .foregroundStyle(Color.onInk)
                         .padding(.horizontal, 20)
                         .padding(.vertical, 11)
-                        .background(Color.mintHi, in: Capsule())
+                        .background(Color.ink, in: Capsule())
                     }
                     .buttonStyle(.pressable)
                     .padding(.top, 14)
@@ -109,6 +114,7 @@ struct TodayView: View {
             }
         }
         .padding(.bottom, 20)
+        .animation(Motion.ui.reduced(reduceMotion), value: hero?.id)
     }
 
     /// How the day ended, including how much of it is still unticked - the
@@ -178,7 +184,7 @@ private struct AttendAsk: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.sur, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .glassy(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .animation(Motion.ui.reduced(reduceMotion), value: mark)
     }
 
@@ -194,7 +200,7 @@ private struct AttendAsk: View {
                     .foregroundStyle(tint)
                     .padding(.horizontal, 18)
                     .padding(.vertical, 9)
-                    .background(tint.opacity(0.16), in: Capsule())
+                    .glassy(Capsule(), tint: tint.opacity(0.15), soft: false)
             }
             .buttonStyle(.pressable)
         }
@@ -208,14 +214,16 @@ private struct Tomorrow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Tomorrow")
-                .r(13.5, .semibold)
+                .r(12.5, .semibold)
+                .textCase(.uppercase)
+                .kerning(0.6)
                 .foregroundStyle(Color.ink3)
 
             if let first = day.first {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Text(hhmm(first.s0))
-                        .r(34, .bold)
-                        .kerning(-1.2)
+                        .d(34, .bold)
+                        .kerning(-0.8)
                     Text(ampm(first.s0))
                         .r(15, .semibold)
                         .foregroundStyle(Color.ink3)
@@ -271,8 +279,8 @@ private struct OwnSlack: View {
                 HStack(alignment: .firstTextBaseline, spacing: 14) {
                     Text(b.state == .empty ? "—" : (low ? "+\(b.value)" : "\(b.value)"))
                         .contentTransition(.numericText())
-                        .r(34, .bold)
-                        .kerning(-1.3)
+                        .d(36, .bold)
+                        .kerning(-0.8)
                         .foregroundStyle(tint)
                     Text(caption(b))
                         .r(14.5, .medium)
@@ -337,8 +345,8 @@ private struct DayStrip: View {
                                 .frame(width: 5, height: 5)
                         }
                         Text(hhmm(k.s0))
-                            .r(13.5, .bold)
-                            .kerning(-0.3)
+                            .d(14, .bold)
+                            .kerning(-0.2)
                     }
                     .foregroundStyle(k.live ? Color.mintHi : (k.past ? Color.ink4 : Color.ink))
                     Text(k.online ? "online" : (k.room ?? "—"))
@@ -350,13 +358,14 @@ private struct DayStrip: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 13)
                 .padding(.horizontal, 4)
-                .background(
-                    k.live ? Color.surLive : (k.past ? Color.surDim : Color.sur),
-                    in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .glassy(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous),
+                    tint: k.live ? Color.surLive : (k.past ? Color.surDim : Color.sur),
+                    soft: false
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .strokeBorder(Color.mintHi.opacity(k.id == heroID ? 0.9 : 0), lineWidth: 2)
+                        .strokeBorder(Color.ink.opacity(k.id == heroID ? 0.85 : 0), lineWidth: 1.5)
                 )
                 }
                 .buttonStyle(.pressableCard)

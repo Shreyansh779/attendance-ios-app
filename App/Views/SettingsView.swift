@@ -51,6 +51,9 @@ struct SettingsView: View {
                             + "iOS holds at most 64 at a time, so the queue is topped up on every refresh."
                     )
                 }
+                // Glass instead of the stock grouped fill, so the sections
+                // belong to the same material as every other card.
+                .listRowBackground(GlassBG(shape: Rectangle(), soft: false))
 
                 Section("Data") {
                     if let age {
@@ -58,6 +61,7 @@ struct SettingsView: View {
                     }
                     LabeledContent("Days cached", value: "\(weekDays)")
                 }
+                .listRowBackground(GlassBG(shape: Rectangle(), soft: false))
 
                 // Only worth showing when the weekly scrape came back thin —
                 // otherwise it is noise about a thing that is working.
@@ -74,8 +78,11 @@ struct SettingsView: View {
                     } footer: {
                         Text("The weekly scrape returned little or nothing. This is what the page actually did.")
                     }
+                    .listRowBackground(GlassBG(shape: Rectangle(), soft: false))
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Backdrop())
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

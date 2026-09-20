@@ -522,9 +522,12 @@ struct RootView: View {
                 daywise: r.daywise.isEmpty ? (snapshot?.daywise ?? []) : r.daywise,
                 attDiag: r.attDiag ?? snapshot?.attDiag,
                 photo: r.photo ?? snapshot?.photo,
-                deadlines: r.deadlines.isEmpty ? (snapshot?.deadlines ?? []) : r.deadlines,
+                // ?? rather than isEmpty: a read that legitimately found
+                // nothing has to be able to clear what the last one left, and
+                // an empty list said both that and "this did not run".
+                deadlines: r.deadlines ?? snapshot?.deadlines ?? [],
                 lmsDiag: r.lmsDiag ?? snapshot?.lmsDiag,
-                courses: r.courses.isEmpty ? (snapshot?.courses ?? []) : r.courses,
+                courses: r.courses ?? snapshot?.courses ?? [],
                 faculty: r.faculty.isEmpty ? (snapshot?.faculty ?? [:]) : r.faculty
             )
             Store.save(snap)

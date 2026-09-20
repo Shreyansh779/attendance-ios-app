@@ -122,13 +122,18 @@ final class Portal: NSObject, ObservableObject {
         let attDiag: String?
         /// `data:image/...;base64,` URI from the dashboard header, if present.
         let photo: String?
-        /// Coursework the LMS is waiting on. Empty when that read did not run
-        /// or did not work, which leaves whatever was read last in place.
-        let deadlines: [Deadline]
+        /// Coursework the LMS is waiting on.
+        ///
+        /// nil when the read did not run or did not work, which leaves
+        /// whatever was read last in place. Empty is a real answer - nothing
+        /// of yours is due - and has to replace the last read, which is
+        /// exactly what an `isEmpty` check in the merge could not express.
+        let deadlines: [Deadline]?
         /// What the LMS read did, for when it produced nothing.
         let lmsDiag: String?
         /// This semester's courses and their material. Same visit, same page.
-        let courses: [LmsCourse]
+        /// nil, not empty, when the read did not happen.
+        let courses: [LmsCourse]?
         /// Subject to the teachers who take your classes.
         let faculty: [String: [String]]
     }
@@ -286,7 +291,7 @@ final class Portal: NSObject, ObservableObject {
                             rows: rows, sessions: sessions, student: self.student,
                             week: [:], weekDiag: nil, termEnd: nil,
                             holidays: [], daywise: [], attDiag: nil, photo: photo,
-                            deadlines: [], lmsDiag: nil, courses: [], faculty: [:]
+                            deadlines: nil, lmsDiag: nil, courses: nil, faculty: [:]
                         )
                     )
 
@@ -306,7 +311,7 @@ final class Portal: NSObject, ObservableObject {
                             week: week.days, weekDiag: week.diag,
                             termEnd: week.whole ? week.days.keys.max() : nil,
                             holidays: [], daywise: [], attDiag: nil, photo: photo,
-                            deadlines: [], lmsDiag: nil, courses: [], faculty: week.teachers
+                            deadlines: nil, lmsDiag: nil, courses: nil, faculty: week.teachers
                         )
                     )
 
@@ -356,9 +361,9 @@ final class Portal: NSObject, ObservableObject {
     private var holidays: [Holiday] = []
     private var daywise: [DaySession] = []
     private var attDiag: String?
-    private var deadlines: [Deadline] = []
+    private var deadlines: [Deadline]?
     private var lmsDiag: String?
-    private var courses: [LmsCourse] = []
+    private var courses: [LmsCourse]?
     private var faculty: [String: [String]] = [:]
 
     // MARK: - The register
@@ -486,11 +491,11 @@ final class Portal: NSObject, ObservableObject {
     /// for one use, so it is asked for while the portal is still the live
     /// document; then the webview follows it to Moodle, which answers the rest
     /// from its own AJAX endpoint.
-    private func fetchDeadlines() async -> [Deadline] {
+    private func fetchDeadlines() async -> [Deadline]? {
         let (target, note) = await askForKey(seconds: 8)
         guard let target else {
             lmsDiag = stamped(["no key for the lms", note])
-            return []
+            return nil
         }
 
         webView.load(URLRequest(url: target))
@@ -502,12 +507,12 @@ final class Portal: NSObject, ObservableObject {
             lastDue = p.diag
             guard p.done else { continue }
             lmsDiag = stamped([note, p.diag])
-            guard p.ok else { return [] }
+            guard p.ok else { return nil }
             return p.items.sorted { $0.due < $1.due }
         }
 
         lmsDiag = stamped(["no answer from the lms", note, lastDue])
-        return []
+        return nil
     }
 
     /// Ask the portal for a Moodle login URL. Good for exactly one use.
@@ -551,8 +556,9 @@ final class Portal: NSObject, ObservableObject {
     ///
     /// An empty course list means the scrape failed, not that nothing is
     /// yours, so in that case everything stays.
-    static func mine(_ due: [Deadline], in courses: [LmsCourse]) -> [Deadline] {
-        let known = Set(courses.flatMap { $0.items.map(\.url) })
+    static func mine(_ due: [Deadline]?, in courses: [LmsCourse]?) -> [Deadline]? {
+        guard let due else { return nil }
+        let known = Set((courses ?? []).flatMap { $0.items.map(\.url) })
         guard !known.isEmpty else { return due }
         return due.filter { known.contains($0.url) }
     }
@@ -566,7 +572,7 @@ final class Portal: NSObject, ObservableObject {
 
     /// This semester's courses and their material, off the page fetchDeadlines
     /// is already sitting on. No second login, no second navigation.
-    private func fetchCourses(faculty: [String: [String]]) async -> [LmsCourse] {
+    private func fetchCourses(faculty: [String: [String]]) async -> [LmsCourse]? {
         // Handed over rather than fetched: the timetable is on the portal's
         // origin and this runs on Moodle's, so there is no way for the blob to
         // go and get it. Set on every pass, because the first passes land on
@@ -576,17 +582,17 @@ final class Portal: NSObject, ObservableObject {
 
         var last = "no reply from the page"
         for _ in 0..<30 {
-            if Task.isCancelled { return [] }
+            if Task.isCancelled { return nil }
             try? await Task.sleep(nanoseconds: 400_000_000)
             _ = try? await eval("window.__mine = \(mine); 1")
             guard let p = await decode(CoursePayload.self, Scrapers.lmsCourses) else { continue }
             last = p.diag
             guard p.done else { continue }
             lmsDiag = stamped([lmsDiag ?? "", p.diag].filter { !$0.isEmpty })
-            return p.ok ? p.courses : []
+            return p.ok ? p.courses : nil
         }
         lmsDiag = stamped(["no course list from the lms", last])
-        return []
+        return nil
     }
 
     // MARK: - Opening one link
@@ -931,9 +937,10 @@ final class Portal: NSObject, ObservableObject {
             let all = await self.fetchDeadlines()
             if Task.isCancelled { return }
             // Same Moodle page, so this costs a request rather than a login.
-            self.courses = await self.fetchCourses(faculty: self.faculty)
+            let stocked = await self.fetchCourses(faculty: self.faculty)
             if Task.isCancelled { return }
-            let due = Portal.mine(all, in: self.courses)
+            self.courses = stocked
+            let due = Portal.mine(all, in: stocked)
             self.deadlines = due
             self.status = nil
             self.hostingHidden = false

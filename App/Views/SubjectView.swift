@@ -34,8 +34,8 @@ struct SubjectView: View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 16) {
                 headline
-                if !daywise.isEmpty { register }
                 if let tm = term { schedule(tm) }
+                if !daywise.isEmpty { register }
                 if series.count >= 2 { trend }
             }
             .padding(.horizontal, 20)
@@ -52,6 +52,13 @@ struct SubjectView: View {
     private var headline: some View {
         let b = row.budget
         return VStack(alignment: .leading, spacing: 14) {
+            Text(row.key)
+                .r(12.5, .semibold)
+                .textCase(.uppercase)
+                .kerning(0.6)
+                .foregroundStyle(Color.ink3)
+                .fixedSize(horizontal: false, vertical: true)
+
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(b.state == .empty ? "—" : (b.state == .short ? "+\(b.value)" : "\(b.value)"))
                     .d(42, .bold)

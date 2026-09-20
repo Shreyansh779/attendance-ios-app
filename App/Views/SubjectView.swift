@@ -12,6 +12,9 @@ struct SubjectView: View {
     let term: Term?
     let blocker: AttRow?
     let history: [Stamp]
+    /// This subject's register rows, newest first. Empty until the attendance
+    /// search page has been read.
+    let daywise: [DaySession]
 
     private var tint: Color {
         Color.urgencyTint(urgency(of: row, term: term, blocker: blocker))
@@ -31,6 +34,7 @@ struct SubjectView: View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 16) {
                 headline
+                if !daywise.isEmpty { register }
                 if let tm = term { schedule(tm) }
                 if series.count >= 2 { trend }
             }
@@ -76,6 +80,54 @@ struct SubjectView: View {
         case .short: return "to attend before this clears \(THRESHOLD)%"
         case .safe: return b.value == 0 ? "no room left" : "more you can skip"
         }
+    }
+
+    // MARK: - What actually happened
+
+    /// The register, which is the only place that says *which* classes were
+    /// missed. Newest first, because the recent ones are the ones in dispute.
+    private var register: some View {
+        let shown = Array(daywise.sorted { $0.date > $1.date }.prefix(16))
+        return VStack(alignment: .leading, spacing: 11) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Day by day")
+                    .r(16, .semibold)
+                    .foregroundStyle(Color.ink)
+                Spacer(minLength: 8)
+                Text("\(daywise.filter(\.present).count) of \(daywise.count)")
+                    .r(13, .semibold)
+                    .foregroundStyle(Color.ink3)
+            }
+            VStack(spacing: 9) {
+                ForEach(shown, id: \.self) { s in
+                    HStack(spacing: 11) {
+                        Circle()
+                            .fill(s.present ? Color.mintHi : Color.coral)
+                            .frame(width: 7, height: 7)
+                        Text(shortDate(s.date))
+                            .r(13.5, .medium)
+                            .foregroundStyle(Color.ink2)
+                            .frame(width: 58, alignment: .leading)
+                        Text(s.time)
+                            .r(13, .medium)
+                            .foregroundStyle(Color.ink3)
+                        Spacer(minLength: 6)
+                        Text(s.present ? "Present" : "Absent")
+                            .r(12.5, .semibold)
+                            .foregroundStyle(s.present ? Color.mintHi : Color.coral)
+                            .fixedSize()
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+            }
+            if daywise.count > shown.count {
+                Text("and \(daywise.count - shown.count) earlier")
+                    .r(12.5, .medium)
+                    .foregroundStyle(Color.ink4)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .slab(.sur, radius: 28, pad: EdgeInsets(top: 20, leading: 22, bottom: 20, trailing: 22))
     }
 
     // MARK: - What is left

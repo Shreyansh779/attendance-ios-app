@@ -7,6 +7,9 @@ struct AttendanceView: View {
     let terms: [String: Term]
     /// Oldest first. Empty until the portal has been read on two separate days.
     let history: [Stamp]
+    /// The register. Empty until the attendance search page has been read.
+    let daywise: [DaySession]
+    let now: Date
 
     var body: some View {
         if summary.subjects.isEmpty {
@@ -27,13 +30,18 @@ struct AttendanceView: View {
                         Callout(worst: worst, term: terms[worst.key]).padding(.bottom, 6)
                     }
 
+                    if !thisWeek.isEmpty {
+                        WeekRegister(sessions: thisWeek).padding(.bottom, 6)
+                    }
+
                     ForEach(summary.subjects) { row in
                         NavigationLink {
                             SubjectView(
                                 row: row,
                                 term: terms[row.key],
                                 blocker: summary.blocker,
-                                history: history
+                                history: history,
+                                daywise: daywise.filter { $0.subject == row.key }
                             )
                         } label: {
                             SubjectRow(row: row, term: terms[row.key], blocker: summary.blocker)
@@ -46,6 +54,15 @@ struct AttendanceView: View {
                 .padding(.bottom, 20)
             }
         }
+    }
+
+    /// Monday to Sunday, in order. The register is the only source for this:
+    /// the timetable says a class was scheduled, not whether you were in it.
+    private var thisWeek: [DaySession] {
+        let w = Snapshot.week(of: now)
+        return daywise
+            .filter { $0.date >= w.from && $0.date <= w.to }
+            .sorted { ($0.date, $0.time) < ($1.date, $1.time) }
     }
 
     /// Which way it is going, and by how much, since the first reading kept.
@@ -192,6 +209,72 @@ struct AttendanceView: View {
                     Spacer(minLength: 0)
                 }
             }
+        }
+    }
+
+    /// The week you are actually in, one row per class.
+    ///
+    /// Everything else on this screen is a running total over a whole term,
+    /// which is the right frame for planning and the wrong one for "how is it
+    /// going". A week is short enough to be a fact rather than a projection.
+    private struct WeekRegister: View {
+        let sessions: [DaySession]
+
+        private var attended: Int { sessions.filter(\.present).count }
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("This week")
+                        .r(12.5, .semibold)
+                        .textCase(.uppercase)
+                        .kerning(0.6)
+                        .foregroundStyle(Color.ink3)
+                    Spacer(minLength: 8)
+                    Text("\(attended) of \(sessions.count)")
+                        .r(12.5, .semibold)
+                        .foregroundStyle(attended == sessions.count ? Color.mintHi : Color.ink2)
+                }
+
+                VStack(spacing: 9) {
+                    ForEach(sessions, id: \.self) { s in
+                        HStack(spacing: 11) {
+                            Circle()
+                                .fill(s.present ? Color.mintHi : Color.coral)
+                                .frame(width: 7, height: 7)
+                            Text(dayLabel(s.date))
+                                .r(13, .semibold)
+                                .foregroundStyle(Color.ink2)
+                                .frame(width: 46, alignment: .leading)
+                            Text(s.subject)
+                                .r(14, .medium)
+                                .foregroundStyle(Color.ink)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                            Spacer(minLength: 6)
+                            Text(startOf(s.time))
+                                .r(12.5, .medium)
+                                .foregroundStyle(Color.ink3)
+                                .fixedSize()
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(
+                            "\(s.subject), \(dayLabel(s.date)), \(s.present ? "present" : "absent")"
+                        )
+                    }
+                }
+            }
+            .slab(.sur, radius: 26, pad: EdgeInsets(top: 18, leading: 20, bottom: 18, trailing: 20))
+        }
+
+        private func dayLabel(_ iso: String) -> String {
+            guard let d = Snapshot.isoDay.date(from: iso) else { return iso }
+            return d.formatted(.dateTime.weekday(.abbreviated))
+        }
+
+        /// "17:00 - 17:55" is two facts and one of them is enough here.
+        private func startOf(_ time: String) -> String {
+            String(time.split(separator: "-").first ?? "").trimmingCharacters(in: .whitespaces)
         }
     }
 

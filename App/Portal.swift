@@ -20,6 +20,9 @@ final class Portal: NSObject, ObservableObject {
     static let holidaysURL = URL(
         string: "https://myupes-beta.upes.ac.in/connectportal/user/student/calendar-events"
     )!
+    static let attendanceURL = URL(
+        string: "https://myupes-beta.upes.ac.in/connectportal/user/student/student-attendance"
+    )!
     static let profileURL = URL(
         string: "https://myupes-beta.upes.ac.in/connectportal/user/student/collaboration/studentprofile"
     )!
@@ -97,6 +100,9 @@ final class Portal: NSObject, ObservableObject {
         let termEnd: String?
         /// Empty when already known, since the calendar does not change.
         let holidays: [Holiday]
+        /// The register, one row per session. Empty when the search page did
+        /// not cooperate, which leaves whatever was read last in place.
+        let daywise: [DaySession]
         /// `data:image/...;base64,` URI from the dashboard header, if present.
         let photo: String?
     }
@@ -212,7 +218,7 @@ final class Portal: NSObject, ObservableObject {
                         Reading(
                             rows: rows, sessions: sessions, student: self.student,
                             week: [:], weekDiag: nil, termEnd: nil,
-                            holidays: [], photo: photo
+                            holidays: [], daywise: [], photo: photo
                         )
                     )
 
@@ -231,7 +237,7 @@ final class Portal: NSObject, ObservableObject {
                             rows: rows, sessions: sessions, student: self.student,
                             week: week.days, weekDiag: week.diag,
                             termEnd: week.whole ? week.days.keys.max() : nil,
-                            holidays: [], photo: photo
+                            holidays: [], daywise: [], photo: photo
                         )
                     )
 
@@ -247,6 +253,14 @@ final class Portal: NSObject, ObservableObject {
                         self.status = "Getting your name from your profile."
                         self.student = await self.fetchStudentName()
                     }
+
+                    // Last, because it is the slowest thing the app does - one
+                    // form submission per subject - and by this point every
+                    // screen is already filled in and usable.
+                    let span = Portal.registerSpan(week.days.keys.min())
+                    self.daywise = await self.fetchDaywise(
+                        rows: rows, from: span.from, to: span.to
+                    )
 
                     // The photo is inline in the dashboard header, so it is
                     // read while that page is still the live document.
@@ -266,6 +280,112 @@ final class Portal: NSObject, ObservableObject {
 
     private var student: String?
     private var holidays: [Holiday] = []
+    private var daywise: [DaySession] = []
+
+    // MARK: - The register
+
+    private struct FieldsPayload: Decodable {
+        let ok: Bool
+        let courses: [String]
+        let hasSearch: Bool
+        let diag: String
+    }
+
+    private struct GridRow: Decodable {
+        let date: String
+        let time: String
+        let present: Bool
+    }
+
+    private struct GridPayload: Decodable {
+        let ok: Bool
+        let rows: [GridRow]
+        let diag: String
+    }
+
+    /// The form wants dd-MM-yyyy, which is not what anything else here speaks.
+    private static let dmy: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "dd-MM-yyyy"
+        return f
+    }()
+
+    /// The window to ask the register for: from the first day the timetable
+    /// knows about to today. Ninety days back if the timetable is empty, which
+    /// is a whole semester so far and costs nothing extra to ask for.
+    static func registerSpan(_ firstKnownDay: String?) -> (from: String, to: String) {
+        let now = Date()
+        let start = firstKnownDay.flatMap { Snapshot.isoDay.date(from: $0) }
+            ?? Calendar.current.date(byAdding: .day, value: -90, to: now)
+            ?? now
+        return (dmy.string(from: start), dmy.string(from: now))
+    }
+
+    /// One search per subject, because the form takes one course at a time.
+    ///
+    /// Only subjects the dashboard already counts are asked for: the dropdown
+    /// lists everything the programme offers, and a course with no register
+    /// costs a page load to learn nothing. A subject that fails is skipped
+    /// rather than failing the read - a partial register is worth having.
+    private func fetchDaywise(
+        rows: [AttRow], from: String, to: String
+    ) async -> [DaySession] {
+        webView.load(URLRequest(url: Portal.attendanceURL))
+
+        var fields: FieldsPayload?
+        for _ in 0..<25 {
+            if Task.isCancelled { return [] }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard let raw = ((try? await eval(Scrapers.attFields)) ?? nil) as? String,
+                let data = raw.data(using: .utf8),
+                let p = try? JSONDecoder().decode(FieldsPayload.self, from: data),
+                p.ok, !p.courses.isEmpty
+            else { continue }
+            fields = p
+            break
+        }
+        guard let f = fields else { return [] }
+
+        var wanted: [(option: String, key: String)] = []
+        for option in f.courses {
+            guard let row = matchSubject(option, in: rows), row.total > 0 else { continue }
+            if wanted.contains(where: { $0.key == row.key }) { continue }
+            wanted.append((option, row.key))
+        }
+        guard !wanted.isEmpty else { return [] }
+
+        var out: [DaySession] = []
+        for (i, w) in wanted.enumerated() {
+            if Task.isCancelled { break }
+            status = "Reading the register, \(i + 1) of \(wanted.count)."
+
+            let req = ["course": w.option, "from": from, "to": to]
+            guard let body = try? JSONEncoder().encode(req),
+                let js = String(data: body, encoding: .utf8)
+            else { continue }
+
+            _ = try? await eval("window.__attReq = \(js); true")
+            _ = try? await eval(Scrapers.attRun)
+
+            for _ in 0..<20 {
+                if Task.isCancelled { break }
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                guard let raw = ((try? await eval(Scrapers.attGrid)) ?? nil) as? String,
+                    let data = raw.data(using: .utf8),
+                    let g = try? JSONDecoder().decode(GridPayload.self, from: data),
+                    g.ok
+                else { continue }
+                out.append(
+                    contentsOf: g.rows.map {
+                        DaySession(subject: w.key, date: $0.date, time: $0.time, present: $0.present)
+                    }
+                )
+                break
+            }
+        }
+        return out
+    }
 
     private struct HolidayPayload: Decodable {
         let ok: Bool
@@ -496,6 +616,7 @@ final class Portal: NSObject, ObservableObject {
                 week: week.days, weekDiag: week.diag,
                 termEnd: week.whole ? week.days.keys.max() : nil,
                 holidays: holidays,
+                daywise: daywise,
                 photo: photo
             )
         )

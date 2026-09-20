@@ -1115,154 +1115,146 @@ enum Scrapers {
 
     /// What the day-by-day attendance form is made of.
     ///
-    /// Kendo renders a dropdown as a span over a hidden control, so the
-    /// options are in the widget dataSource rather than in the DOM. This
-    /// reads both, and reports what it found either way - a search that
-    /// silently sets nothing is the failure mode to avoid.
+    /// The first version of this looked for a <select> or an <input> next to a
+    /// <label>, and found only the two date fields: on this portal the three
+    /// dropdowns are Kendo widgets with no form control underneath at all.
+    /// This one matches on the label text itself, walks up to whatever control
+    /// sits beside it, and reports the ancestor chain when it cannot read the
+    /// options - a scraper that fails silently costs a whole sideload to
+    /// diagnose.
     static let attFields = #"""
 (function () {
   function norm(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
   function low(s) { return norm(s).toLowerCase(); }
+  function ownText(el) {
+    var s = '', c = el.childNodes;
+    for (var i = 0; i < c.length; i++) { if (c[i].nodeType === 3) s += c[i].nodeValue; }
+    return norm(s);
+  }
+  var CTRL = 'select,input,textarea,kendo-dropdownlist,kendo-combobox,kendo-datepicker,'
+    + '.k-dropdownlist,.k-dropdown,.k-combobox,.k-picker,[role=combobox],[role=listbox]';
 
-  function widget(el) {
-    if (!window.jQuery) return null;
-    var d;
-    try { d = window.jQuery(el).data(); } catch (e) { return null; }
-    if (!d) return null;
-    for (var k in d) {
-      if (k.indexOf('kendo') === 0 && d[k] && typeof d[k] === 'object') return d[k];
+  function labelled(name) {
+    var all = document.querySelectorAll('label,span,div,p,strong,b');
+    for (var i = 0; i < all.length; i++) {
+      var t = low(ownText(all[i])).replace(/[*:]+$/, '').trim();
+      if (t !== name) continue;
+      var p = all[i].parentElement, hop = 0;
+      while (p && hop < 5) {
+        var c = p.querySelector(CTRL);
+        if (c) return { label: all[i], ctrl: c, box: p };
+        hop++;
+        p = p.parentElement;
+      }
+      return { label: all[i], ctrl: null, box: all[i].parentElement };
     }
     return null;
   }
 
-  function labelFor(el) {
-    if (el.id) {
-      var l = document.querySelector('label[for="' + el.id + '"]');
-      if (l) return low(l.textContent);
-    }
-    // Walk up, but only accept a level holding exactly one label. The row
-    // that wraps all five fields also holds all five labels, and taking the
-    // first would quietly call every control on the form "program".
-    var p = el.parentElement, hop = 0;
-    while (p && hop < 5) {
-      var labs = p.querySelectorAll('label');
-      if (labs.length === 1) return low(labs[0].textContent);
-      if (labs.length > 1) return '';
-      hop++;
-      p = p.parentElement;
-    }
-    return '';
+  function tagOf(el) {
+    if (!el) return 'none';
+    var cls = String(el.className || '');
+    if (cls.baseVal !== undefined) cls = cls.baseVal;
+    return el.tagName.toLowerCase() + (cls ? '.' + cls.split(' ')[0] : '');
   }
 
-  function textsOf(el) {
-    var w = widget(el);
+  function texts(el) {
     var out = [];
-    if (w && w.dataSource && typeof w.dataSource.data === 'function') {
-      var ds = w.dataSource.data() || [];
-      var tf = (w.options && w.options.dataTextField) || '';
-      for (var i = 0; i < ds.length; i++) {
-        var it = ds[i];
-        var t = '';
-        if (tf && it[tf] != null) t = String(it[tf]);
-        else if (typeof it === 'string') t = it;
-        else t = norm(it.Text || it.text || it.Name || it.name || it.Description || '');
-        if (t) out.push(norm(t));
-      }
-      if (out.length) return out;
-    }
+    if (!el) return out;
     if (el.tagName === 'SELECT') {
       for (var j = 0; j < el.options.length; j++) {
         var o = norm(el.options[j].textContent);
         if (o) out.push(o);
       }
+      return out;
+    }
+    // Kendo for jQuery keeps its list in the widget rather than the DOM.
+    if (window.jQuery) {
+      try {
+        var d = window.jQuery(el).data();
+        for (var k in d) {
+          var w = d[k];
+          if (k.indexOf('kendo') !== 0 || !w || !w.dataSource) continue;
+          var ds = w.dataSource.data ? w.dataSource.data() : [];
+          var tf = (w.options && w.options.dataTextField) || '';
+          for (var i = 0; i < ds.length; i++) {
+            var it = ds[i];
+            var t = tf && it[tf] != null ? String(it[tf])
+              : (typeof it === 'string' ? it : norm(it.Text || it.text || it.Name || it.name || ''));
+            if (t) out.push(norm(t));
+          }
+          if (out.length) return out;
+        }
+      } catch (e) { }
     }
     return out;
   }
 
-  var fields = [];
-  var els = document.querySelectorAll('select, input, textarea');
-  for (var i = 0; i < els.length; i++) {
-    var el = els[i];
-    if (el.type === 'hidden') continue;
-    var lab = labelFor(el);
-    if (!lab) continue;
-    fields.push({ label: lab, tag: el.tagName, id: el.id || '', n: textsOf(el).length });
+  var names = ['program', 'term', 'course', 'start date', 'end date'];
+  var seen = [];
+  for (var n = 0; n < names.length; n++) {
+    var f = labelled(names[n]);
+    seen.push(names[n].replace(' date', '') + '=' + (f ? tagOf(f.ctrl) : 'nolabel'));
   }
 
-  function find(want) {
-    for (var i = 0; i < els.length; i++) {
-      if (els[i].type === 'hidden') continue;
-      if (labelFor(els[i]).indexOf(want) === 0) return els[i];
-    }
-    return null;
+  // When the course control is not something this can read options out of,
+  // the ancestor chain is the only thing that says what it actually is.
+  var chain = '';
+  var cf = labelled('course');
+  if (cf) {
+    var p = cf.label, hops = [];
+    for (var h = 0; h < 4 && p; h++) { hops.push(tagOf(p)); p = p.parentElement; }
+    chain = ' chain=' + hops.join('<');
   }
 
-  var course = find('course');
   var hasSearch = false;
-  var btns = document.querySelectorAll('button, a, input[type=submit], span');
+  var btns = document.querySelectorAll('button,a,input[type=submit],span');
   for (var b = 0; b < btns.length; b++) {
     if (low(btns[b].textContent) === 'search' || low(btns[b].value) === 'search') { hasSearch = true; break; }
   }
 
+  var courses = cf ? texts(cf.ctrl) : [];
   return JSON.stringify({
-    ok: !!course,
-    courses: course ? textsOf(course) : [],
+    ok: !!(cf && cf.ctrl),
+    courses: courses,
     hasSearch: hasSearch,
-    diag: 'fields=' + fields.length
-      + ' labels=' + fields.map(function (f) { return f.label.slice(0, 14) + ':' + f.n; }).join('|').slice(0, 300)
+    diag: seen.join(' ') + ' search=' + hasSearch + chain
   });
 })()
 """#
 
-    /// Fill the form for one course and press Search.
+    /// Set both dates and open the course dropdown.
     ///
     /// Reads `window.__attReq` = { course, from, to }, which Swift sets in a
-    /// separate eval so this stays a plain literal the syntax gate can check.
-    /// Writing `el.value` alone is not enough: the Kendo widget keeps its own
-    /// state, so the span still shows the old choice and the postback sends it.
-    static let attRun = #"""
+    /// separate eval so this stays a literal the syntax gate can parse.
+    /// Dates go in through the native value setter, because Angular and React
+    /// both wrap that property and a plain assignment is invisible to them.
+    static let attOpen = #"""
 (function () {
-  var req = window.__attReq;
-  if (!req) return JSON.stringify({ ok: false, diag: 'no request' });
+  var req = window.__attReq || {};
 
   function norm(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
   function low(s) { return norm(s).toLowerCase(); }
-
-  function widget(el) {
-    if (!window.jQuery) return null;
-    var d;
-    try { d = window.jQuery(el).data(); } catch (e) { return null; }
-    if (!d) return null;
-    for (var k in d) {
-      if (k.indexOf('kendo') === 0 && d[k] && typeof d[k] === 'object') return d[k];
-    }
-    return null;
+  function ownText(el) {
+    var s = '', c = el.childNodes;
+    for (var i = 0; i < c.length; i++) { if (c[i].nodeType === 3) s += c[i].nodeValue; }
+    return norm(s);
   }
+  var CTRL = 'select,input,textarea,kendo-dropdownlist,kendo-combobox,kendo-datepicker,'
+    + '.k-dropdownlist,.k-dropdown,.k-combobox,.k-picker,[role=combobox],[role=listbox]';
 
-  function labelFor(el) {
-    if (el.id) {
-      var l = document.querySelector('label[for="' + el.id + '"]');
-      if (l) return low(l.textContent);
-    }
-    // Walk up, but only accept a level holding exactly one label. The row
-    // that wraps all five fields also holds all five labels, and taking the
-    // first would quietly call every control on the form "program".
-    var p = el.parentElement, hop = 0;
-    while (p && hop < 5) {
-      var labs = p.querySelectorAll('label');
-      if (labs.length === 1) return low(labs[0].textContent);
-      if (labs.length > 1) return '';
-      hop++;
-      p = p.parentElement;
-    }
-    return '';
-  }
-
-  var els = document.querySelectorAll('select, input, textarea');
-  function find(want) {
-    for (var i = 0; i < els.length; i++) {
-      if (els[i].type === 'hidden') continue;
-      if (labelFor(els[i]).indexOf(want) === 0) return els[i];
+  function labelled(name) {
+    var all = document.querySelectorAll('label,span,div,p,strong,b');
+    for (var i = 0; i < all.length; i++) {
+      var t = low(ownText(all[i])).replace(/[*:]+$/, '').trim();
+      if (t !== name) continue;
+      var p = all[i].parentElement, hop = 0;
+      while (p && hop < 5) {
+        var c = p.querySelector(CTRL);
+        if (c) return { label: all[i], ctrl: c, box: p };
+        hop++;
+        p = p.parentElement;
+      }
     }
     return null;
   }
@@ -1275,151 +1267,143 @@ enum Scrapers {
     if (window.jQuery) { try { window.jQuery(el).trigger('change'); } catch (e) { } }
   }
 
-  // Kendo widgets keep their own state; writing el.value alone leaves the
-  // rendered span showing the old choice and the postback sending it too.
-  function setText(el, wanted) {
-    if (!el) return false;
-    var w = widget(el);
-    if (w && typeof w.value === 'function') {
-      var ds = (w.dataSource && typeof w.dataSource.data === 'function') ? (w.dataSource.data() || []) : [];
-      var tf = (w.options && w.options.dataTextField) || '';
-      var vf = (w.options && w.options.dataValueField) || '';
-      for (var i = 0; i < ds.length; i++) {
-        var it = ds[i];
-        var t = tf && it[tf] != null ? String(it[tf]) : (typeof it === 'string' ? it : norm(it.Text || it.text || it.Name || it.name || ''));
-        if (low(t) !== low(wanted)) continue;
-        var v = vf && it[vf] != null ? it[vf] : t;
-        try { w.value(v); } catch (e) { }
-        if (typeof w.trigger === 'function') { try { w.trigger('change'); } catch (e) { } }
-        fire(el);
-        return true;
+  // A real click, not element.click(): both Kendo flavours open on mousedown
+  // and a bare click() never produces one.
+  function tap(el) {
+    var kinds = ['pointerdown', 'mousedown', 'mouseup', 'click'];
+    for (var i = 0; i < kinds.length; i++) {
+      try {
+        el.dispatchEvent(new MouseEvent(kinds[i], { bubbles: true, cancelable: true, view: window }));
+      } catch (e) {
+        try { el.dispatchEvent(new Event(kinds[i], { bubbles: true })); } catch (e2) { }
       }
-      if (!ds.length) {
-        try { w.value(wanted); } catch (e) { }
-        if (typeof w.trigger === 'function') { try { w.trigger('change'); } catch (e) { } }
-        fire(el);
-        return true;
-      }
-      return false;
     }
-    if (el.tagName === 'SELECT') {
-      for (var j = 0; j < el.options.length; j++) {
-        if (low(el.options[j].textContent) === low(wanted)) {
-          el.selectedIndex = j;
-          fire(el);
-          return true;
-        }
-      }
-      return false;
+  }
+
+  function setDate(name, value) {
+    var f = labelled(name);
+    if (!f || !value) return false;
+    var input = f.ctrl.tagName === 'INPUT' ? f.ctrl : f.ctrl.querySelector('input');
+    if (!input) return false;
+    // The native setter, because Angular and React both wrap the property and
+    // a plain assignment is invisible to them.
+    try {
+      var proto = Object.getPrototypeOf(input);
+      var desc = Object.getOwnPropertyDescriptor(proto, 'value');
+      if (desc && desc.set) { desc.set.call(input, value); } else { input.value = value; }
+    } catch (e) { input.value = value; }
+    fire(input);
+    if (window.jQuery) {
+      try {
+        var w = window.jQuery(input).data('kendoDatePicker');
+        if (w && w.value) { w.value(value); w.trigger('change'); }
+      } catch (e2) { }
     }
-    el.value = wanted;
-    fire(el);
     return true;
   }
 
-  var course = find('course');
-  var start = find('start date') || find('start');
-  var end = find('end date') || find('end');
+  var okFrom = setDate('start date', req.from);
+  var okTo = setDate('end date', req.to);
 
-  var okC = setText(course, req.course);
-  var okS = setText(start, req.from);
-  var okE = setText(end, req.to);
+  var f = labelled('course');
+  if (!f) return JSON.stringify({ ok: false, diag: 'no course field' });
 
-  var clicked = false;
-  var btns = document.querySelectorAll('button, a, input[type=submit]');
-  for (var b = 0; b < btns.length && !clicked; b++) {
-    var t = low(btns[b].textContent) || low(btns[b].value);
-    if (t !== 'search') continue;
-    try { btns[b].click(); clicked = true; } catch (e) { }
-  }
+  var target = f.ctrl.querySelector('.k-input-button,.k-select,.k-input-inner,input,span')
+    || f.ctrl;
+  tap(target);
+  tap(f.ctrl);
 
-  window.__attAt = Date.now();
   return JSON.stringify({
-    ok: okC && clicked,
-    diag: 'c=' + okC + ' s=' + okS + ' e=' + okE + ' click=' + clicked
+    ok: true,
+    diag: 'dates=' + okFrom + '/' + okTo + ' opened=' + f.ctrl.tagName.toLowerCase()
   });
 })()
 """#
 
-    /// The results grid, once it has settled.
+    /// The options currently on screen.
     ///
-    /// Not ok until the row count matches the pager total, because a grid
-    /// halfway through rendering looks exactly like a finished short one.
-    /// The page size is pushed to 200 first, so one read is the whole course.
-    static let attGrid = #"""
+    /// A closed popup is still in the DOM, so visibility is the only thing
+    /// separating this dropdown from every other one on the page.
+    static let attList = #"""
+(function () {
+  function norm(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
+
+  var nodes = document.querySelectorAll('[role=option],.k-list-item,li.k-item,li.k-list-item');
+  var out = [], seen = {};
+  for (var i = 0; i < nodes.length; i++) {
+    var el = nodes[i];
+    // A closed popup is still in the DOM; offsetParent is what says otherwise.
+    if (!el.offsetParent && el.offsetHeight === 0) continue;
+    var t = norm(el.textContent);
+    if (!t || seen[t]) continue;
+    seen[t] = 1;
+    out.push(t);
+  }
+  return JSON.stringify({
+    ok: out.length > 0,
+    courses: out,
+    diag: 'visible=' + out.length + ' total=' + nodes.length
+  });
+})()
+"""#
+
+    /// Click the option named in `window.__attReq.course`.
+    static let attPick = #"""
+(function () {
+  var req = window.__attReq || {};
+  function norm(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
+  function low(s) { return norm(s).toLowerCase(); }
+
+  function tap(el) {
+    var kinds = ['pointerdown', 'mousedown', 'mouseup', 'click'];
+    for (var i = 0; i < kinds.length; i++) {
+      try {
+        el.dispatchEvent(new MouseEvent(kinds[i], { bubbles: true, cancelable: true, view: window }));
+      } catch (e) {
+        try { el.dispatchEvent(new Event(kinds[i], { bubbles: true })); } catch (e2) { }
+      }
+    }
+  }
+
+  var nodes = document.querySelectorAll('[role=option],.k-list-item,li.k-item,li.k-list-item');
+  for (var i = 0; i < nodes.length; i++) {
+    if (low(nodes[i].textContent) !== low(req.course)) continue;
+    tap(nodes[i]);
+    return JSON.stringify({ ok: true, diag: 'picked' });
+  }
+  return JSON.stringify({ ok: false, diag: 'no option matched, of ' + nodes.length });
+})()
+"""#
+
+    /// Press Search.
+    ///
+    /// A real mouse sequence rather than element.click(): both Kendo flavours
+    /// act on mousedown, and a bare click() never produces one.
+    static let attSearch = #"""
 (function () {
   function norm(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
   function low(s) { return norm(s).toLowerCase(); }
 
-  function iso(v) {
-    var m = norm(v).match(/(\d{2})-(\d{2})-(\d{4})/);
-    if (m) return m[3] + '-' + m[2] + '-' + m[1];
-    m = norm(v).match(/(\d{4})-(\d{2})-(\d{2})/);
-    if (m) return m[1] + '-' + m[2] + '-' + m[3];
-    return null;
-  }
-
-  // The grid is paged at ten. Ask for the biggest page the pager offers
-  // before reading anything, so one pass is the whole course.
-  var grew = false;
-  if (window.jQuery) {
-    try {
-      var grids = window.jQuery('[data-role=grid]');
-      grids.each(function () {
-        var g = window.jQuery(this).data('kendoGrid');
-        if (!g || !g.dataSource) return;
-        if (g.dataSource.pageSize && g.dataSource.pageSize() < 200) {
-          g.dataSource.pageSize(200);
-          grew = true;
-        }
-      });
-    } catch (e) { }
-  }
-
-  var rows = [];
-  var tables = document.querySelectorAll('table');
-  for (var t = 0; t < tables.length; t++) {
-    var heads = tables[t].querySelectorAll('th');
-    var idx = { date: -1, time: -1, status: -1 };
-    for (var h = 0; h < heads.length; h++) {
-      var ht = low(heads[h].textContent);
-      if (idx.date < 0 && ht.indexOf('session date') === 0) idx.date = h;
-      else if (idx.time < 0 && ht.indexOf('session time') === 0) idx.time = h;
-      else if (idx.status < 0 && ht === 'attendance') idx.status = h;
+  function tap(el) {
+    var kinds = ['pointerdown', 'mousedown', 'mouseup', 'click'];
+    for (var i = 0; i < kinds.length; i++) {
+      try {
+        el.dispatchEvent(new MouseEvent(kinds[i], { bubbles: true, cancelable: true, view: window }));
+      } catch (e) {
+        try { el.dispatchEvent(new Event(kinds[i], { bubbles: true })); } catch (e2) { }
+      }
     }
-    if (idx.date < 0 || idx.status < 0) continue;
-
-    var trs = tables[t].querySelectorAll('tr');
-    for (var r = 0; r < trs.length; r++) {
-      var tds = trs[r].querySelectorAll('td');
-      if (!tds.length || tds.length <= idx.status) continue;
-      var d = iso(tds[idx.date].textContent);
-      if (!d) continue;
-      var st = low(tds[idx.status].textContent);
-      if (st.indexOf('present') < 0 && st.indexOf('absent') < 0) continue;
-      rows.push({
-        date: d,
-        time: idx.time >= 0 ? norm(tds[idx.time].textContent) : '',
-        present: st.indexOf('present') >= 0
-      });
-    }
-    if (rows.length) break;
   }
 
-  // "1 - 7 of 7 items" is the only honest statement of completeness on the
-  // page; without it a half-rendered grid reads as a finished one.
-  var total = -1;
-  var info = document.querySelectorAll('.k-pager-info, .k-pager-sizes, span');
-  for (var p = 0; p < info.length; p++) {
-    var m = norm(info[p].textContent).match(/^\d+\s*-\s*\d+\s+of\s+(\d+)\s+items$/i);
-    if (m) { total = +m[1]; break; }
+  var btns = document.querySelectorAll('button,a,input[type=submit]');
+  for (var b = 0; b < btns.length; b++) {
+    var t = low(btns[b].textContent) || low(btns[b].value);
+    if (t !== 'search') continue;
+    tap(btns[b]);
+    try { btns[b].click(); } catch (e) { }
+    return JSON.stringify({ ok: true, diag: 'searched' });
   }
-
-  return JSON.stringify({
-    ok: rows.length > 0 && !grew && (total < 0 || rows.length >= total),
-    rows: rows,
-    diag: 'rows=' + rows.length + ' total=' + total + (grew ? ' resized' : '')
-  });
+  return JSON.stringify({ ok: false, diag: 'no search button' });
 })()
 """#
 

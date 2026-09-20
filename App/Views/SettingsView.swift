@@ -17,6 +17,7 @@ struct SettingsView: View {
     let registerRows: Int
     let attDiag: String?
     let dueCount: Int
+    let courseCount: Int
     let lmsDiag: String?
     let age: String?
     /// Re-runs the schedule, because changing the lead time or switching
@@ -38,11 +39,11 @@ struct SettingsView: View {
                     if weekDays <= 1, let weekDiag {
                     diagnostic("Timetable", weekDiag, "The weekly scrape returned little or nothing.")
                 }
-                if dueCount == 0, let lmsDiag {
+                if dueCount == 0, courseCount == 0, let lmsDiag {
                     diagnostic(
                         "LMS",
                         lmsDiag,
-                        "Nothing came back from the LMS, so Due is hidden."
+                        "Nothing came back from the LMS, so Due and the LMS tab are empty."
                     )
                 }
                 if registerRows == 0, let attDiag {
@@ -151,6 +152,8 @@ struct SettingsView: View {
                     Rule()
                 }
                 Line(name: "Days cached", value: "\(weekDays)")
+                Rule()
+                Line(name: "LMS courses", value: "\(courseCount)")
                 Rule()
                 Line(name: "Version", value: SettingsView.version)
             }

@@ -1371,6 +1371,122 @@ enum Scrapers {
 })()
 """#
 
+    /// This semester's courses, and what is in them.
+    ///
+    /// `core_course_get_contents` is switched off on this Moodle, but the
+    /// course page's own state endpoint is not, and it carries more: every
+    /// section, every module, its type, its link, and whether this student may
+    /// open it. That last flag is the whole trick. A course here is taught by
+    /// half a dozen teachers to half a dozen batches, each with its own
+    /// section named after the teacher, and Moodle marks the sections that are
+    /// not yours invisible to you - so filtering on `uservisible` turns the
+    /// department's material into your teacher's material.
+    ///
+    /// The course list and then one state call per course, all of the latter
+    /// batched into a single request, because this endpoint takes an array.
+    static let lmsCourses = #"""
+(function () {
+  if (window.__lmsc) return JSON.stringify(window.__lmsc);
+
+  // Unparked until there is a sesskey, for the same reason as lmsDue: getting
+  // here is a redirect chain and the documents in the middle have none.
+  var sk = (window.M && M.cfg && M.cfg.sesskey) || '';
+  if (!sk) {
+    return JSON.stringify({ done: false, ok: false, courses: [], diag: 'waiting for the lms' });
+  }
+
+  var st = { done: false, ok: false, courses: [], diag: 'started' };
+  window.__lmsc = st;
+
+  // Course and section names come through HTML-escaped. innerHTML would undo
+  // that in one line and also run whatever a course name happened to contain.
+  function text(s) {
+    return String(s == null ? '' : s)
+      .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/&nbsp;/g, ' ');
+  }
+
+  function ws(calls) {
+    return fetch('/lib/ajax/service.php?sesskey=' + sk, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(calls)
+    }).then(function (r) { return r.json(); });
+  }
+
+  ws([{
+    index: 0,
+    methodname: 'core_course_get_enrolled_courses_by_timeline_classification',
+    // "inprogress" is this semester. "all" is every course ever enrolled in,
+    // which for a third year is most of a degree.
+    args: { classification: 'inprogress', limit: 0, offset: 0, sort: 'fullname' }
+  }]).then(function (j) {
+    var d = j && j[0];
+    if (!d || d.error) {
+      throw new Error(d && d.exception ? d.exception.message : 'no course list');
+    }
+    var list = (d.data && d.data.courses) || [];
+    if (!list.length) {
+      st.ok = true;
+      st.done = true;
+      st.diag = 'nothing in progress';
+      return;
+    }
+
+    return ws(list.map(function (c, i) {
+      return { index: i, methodname: 'core_courseformat_get_state', args: { courseid: c.id } };
+    })).then(function (states) {
+      var out = [], total = 0;
+      for (var i = 0; i < list.length; i++) {
+        var c = list[i], items = [];
+        var raw = states[i] && states[i].data;
+        if (raw) {
+          var s = JSON.parse(raw), secs = {}, cms = {};
+          (s.section || []).forEach(function (x) { secs[x.id] = x; });
+          (s.cm || []).forEach(function (x) { cms[x.id] = x; });
+          // sectionlist, not the section array, because only the former is in
+          // the order the course page shows.
+          ((s.course && s.course.sectionlist) || []).forEach(function (sid) {
+            var sec = secs[sid];
+            if (!sec || !sec.visible) return;
+            (sec.cmlist || []).forEach(function (id) {
+              var m = cms[id];
+              if (!m || !m.uservisible) return;
+              // A Subsection is a container whose contents arrive again as a
+              // section of their own, so counting it would double everything.
+              if (m.modname === 'Subsection') return;
+              items.push({
+                title: text(m.name),
+                kind: text(m.modname),
+                url: m.url || '',
+                group: text(sec.title)
+              });
+            });
+          });
+        }
+        total += items.length;
+        out.push({
+          id: Number(c.id),
+          // Every course this term is named "<subject>_Sem5".
+          name: text(c.fullname).replace(/_Sem\d+$/, ''),
+          url: 'https://lms.upes.ac.in/course/view.php?id=' + c.id,
+          items: items
+        });
+      }
+      st.courses = out;
+      st.ok = true;
+      st.done = true;
+      st.diag = out.length + ' courses, ' + total + ' items';
+    });
+  }).catch(function (e) {
+    st.done = true;
+    st.diag = 'lms courses threw ' + e;
+  });
+
+  return JSON.stringify(st);
+})()
+"""#
+
     /// Cheap check for whether the router has landed on the dashboard yet.
     static let route = "location.pathname"
 }

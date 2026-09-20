@@ -3,19 +3,20 @@ import Foundation
 import SwiftUI
 import UIKit
 
-/// The three screens, as a real tab bar.
+/// The four screens, as a real tab bar.
 ///
 /// This used to be a hamburger drawer, which is a Material Design pattern — no
 /// Apple app on the phone has one. A tab bar is what iOS users already know,
 /// and on iOS 26 the system gives it Liquid Glass for free.
 enum Route: String, CaseIterable, Hashable {
-    case today, timetable, attendance
+    case today, timetable, attendance, lms
 
     var title: String {
         switch self {
         case .today: return "Today"
         case .timetable: return "Timetable"
         case .attendance: return "Attendance"
+        case .lms: return "LMS"
         }
     }
 
@@ -26,6 +27,7 @@ enum Route: String, CaseIterable, Hashable {
         case .today: return "location.fill"
         case .timetable: return "calendar"
         case .attendance: return "chart.bar.fill"
+        case .lms: return "books.vertical.fill"
         }
     }
 }
@@ -149,7 +151,7 @@ struct RootView: View {
             // with an empty table no matter how long it waited. Full size and
             // covered keeps WebKit's timers unthrottled (the view is still in
             // the window) while the page lays out as if it were on screen.
-            if portal.hostingHidden {
+            if portal.hostingHidden, !portal.showingLogin, !portal.showingVisit {
                 PortalWebView(webView: portal.webView)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
@@ -179,6 +181,9 @@ struct RootView: View {
         .fullScreenCover(isPresented: $portal.showingLogin) {
             LoginSheet(portal: portal)
         }
+        .fullScreenCover(isPresented: $portal.showingVisit) {
+            VisitSheet(portal: portal)
+        }
         .sheet(isPresented: $showingSettings) {
             SettingsView(
                 weekDays: snapshot?.week.count ?? 0,
@@ -186,6 +191,7 @@ struct RootView: View {
                 registerRows: snapshot?.daywise.count ?? 0,
                 attDiag: snapshot?.attDiag,
                 dueCount: snapshot?.deadlines.count ?? 0,
+                courseCount: snapshot?.courses.count ?? 0,
                 lmsDiag: snapshot?.lmsDiag,
                 age: snapshot?.ageText,
                 onSettingsChanged: rescheduleReminders
@@ -252,6 +258,14 @@ struct RootView: View {
             pane(.attendance) {
                 screen(title: RootView.showsSubject ? "Subject" : Route.attendance.title) {
                     subjectOrList
+                }
+            }
+
+            pane(.lms) {
+                screen(title: Route.lms.title) {
+                    LmsView(courses: snapshot?.courses ?? []) { link in
+                        if let u = URL(string: link) { portal.visit(u) }
+                    }
                 }
             }
         }
@@ -503,7 +517,8 @@ struct RootView: View {
                 attDiag: r.attDiag ?? snapshot?.attDiag,
                 photo: r.photo ?? snapshot?.photo,
                 deadlines: r.deadlines.isEmpty ? (snapshot?.deadlines ?? []) : r.deadlines,
-                lmsDiag: r.lmsDiag ?? snapshot?.lmsDiag
+                lmsDiag: r.lmsDiag ?? snapshot?.lmsDiag,
+                courses: r.courses.isEmpty ? (snapshot?.courses ?? []) : r.courses
             )
             Store.save(snap)
             snapshot = snap
@@ -547,6 +562,43 @@ private struct PillBar: View {
         .glassy(Capsule(), tint: .well, material: .ultraThinMaterial)
         .padding(.horizontal, 26)
         .padding(.bottom, 6)
+    }
+}
+
+/// One LMS link, in the app's own webview.
+///
+/// Not Safari: the Moodle session lives in this webview and nowhere else, so
+/// a link handed to the system browser lands on a login form that nothing can
+/// get past. If the session has lapsed, `Portal.visit` rebuilds it underneath
+/// — which may mean the portal's own login page appearing here first, and the
+/// link opening by itself once it is done.
+private struct VisitSheet: View {
+    @ObservedObject var portal: Portal
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                if let s = portal.status {
+                    Text(s)
+                        .r(13.5, .medium)
+                        .foregroundStyle(Color.warnInk)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 12)
+                        .background(Color.bg)
+                }
+                PortalWebView(webView: portal.webView)
+            }
+            .background(Color.bg)
+            .navigationTitle("LMS")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { portal.endVisit() }
+                }
+            }
+        }
     }
 }
 

@@ -16,6 +16,8 @@ struct SettingsView: View {
     let weekDiag: String?
     let registerRows: Int
     let attDiag: String?
+    let dueCount: Int
+    let lmsDiag: String?
     let age: String?
     /// Re-runs the schedule, because changing the lead time or switching
     /// reminders off should take effect now rather than at the next refresh.
@@ -35,6 +37,13 @@ struct SettingsView: View {
                     data
                     if weekDays <= 1, let weekDiag {
                     diagnostic("Timetable", weekDiag, "The weekly scrape returned little or nothing.")
+                }
+                if dueCount == 0, let lmsDiag {
+                    diagnostic(
+                        "LMS",
+                        lmsDiag,
+                        "Nothing came back from the LMS, so Due is hidden."
+                    )
                 }
                 if registerRows == 0, let attDiag {
                     diagnostic(
@@ -142,9 +151,19 @@ struct SettingsView: View {
                     Rule()
                 }
                 Line(name: "Days cached", value: "\(weekDays)")
+                Rule()
+                Line(name: "Version", value: SettingsView.version)
             }
         }
     }
+
+    /// "1.1 (94)" - the marketing version and the CI run that built it.
+    private static let version: String = {
+        let b = Bundle.main.infoDictionary
+        let short = b?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = b?["CFBundleVersion"] as? String ?? "?"
+        return "\(short) (\(build))"
+    }()
 
     // MARK: - Diagnostic
 

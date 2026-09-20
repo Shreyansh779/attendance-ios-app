@@ -20,6 +20,10 @@ struct TodayView: View {
     @Binding var picked: String?
     let marks: [String: Mark]
     let today: String
+    /// Coursework the LMS is waiting on. Lives here rather than on its own
+    /// tab: there is at most a handful of it, and it belongs beside the day
+    /// it is competing with.
+    let due: [Deadline]
     let onMark: (String, String, Bool?) -> Void
 
     private var hero: Klass? {
@@ -127,6 +131,10 @@ struct TodayView: View {
             if !day.isEmpty {
                 DayStrip(day: day, picked: $picked, heroID: hero?.id, marks: marks, today: today)
                     .padding(.top, 18)
+            }
+
+            if !due.isEmpty {
+                Due(items: due).padding(.top, 18)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -261,6 +269,95 @@ private struct Tomorrow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .slab(.sur, radius: 28, pad: EdgeInsets(top: 20, leading: 22, bottom: 20, trailing: 22))
     }
+}
+
+/// What the LMS wants handed in.
+///
+/// Only assignments and quizzes reach this - the feed it comes from also
+/// carries a "should be completed" nag for every file ever uploaded to a
+/// course, and a reading list is not a deadline.
+private struct Due: View {
+    @Environment(\.openURL) private var openURL
+    let items: [Deadline]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(items.count == 1 ? "Due · 1 thing" : "Due · \(items.count) things")
+                .r(12.5, .semibold)
+                .textCase(.uppercase)
+                .kerning(0.6)
+                .foregroundStyle(Color.ink3)
+
+            VStack(alignment: .leading, spacing: 13) {
+                ForEach(items.prefix(6), id: \.self) { d in
+                    Button {
+                        if let u = URL(string: d.url) { openURL(u) }
+                    } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 11) {
+                            Text(when(d))
+                                .r(15, .bold)
+                                .kerning(-0.2)
+                                .foregroundStyle(overdue(d) ? Color.ink : Color.ink2)
+                                .frame(width: 62, alignment: .leading)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(title(d))
+                                    .r(15.5, .semibold)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Text(d.course)
+                                    .r(13, .medium)
+                                    .foregroundStyle(Color.ink3)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityElement(children: .combine)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .slab(.sur, radius: 28, pad: EdgeInsets(top: 20, leading: 22, bottom: 20, trailing: 22))
+    }
+
+    /// The LMS writes every one of these as "<name> is due", which is already
+    /// the heading of the card.
+    private func title(_ d: Deadline) -> String {
+        let t = d.title
+        for tail in [" is due", " should be completed", " closes"] where t.hasSuffix(tail) {
+            return String(t.dropLast(tail.count))
+        }
+        return t
+    }
+
+    private func days(_ d: Deadline) -> Int? {
+        guard let date = d.date else { return nil }
+        let cal = Calendar.current
+        return cal.dateComponents(
+            [.day], from: cal.startOfDay(for: Date()), to: cal.startOfDay(for: date)
+        ).day
+    }
+
+    private func overdue(_ d: Deadline) -> Bool { (days(d) ?? 1) < 0 }
+
+    private func when(_ d: Deadline) -> String {
+        guard let n = days(d) else { return "—" }
+        switch n {
+        case ..<0: return n == -1 ? "Late 1d" : "Late \(-n)d"
+        case 0: return "Today"
+        case 1: return "Tomorrow"
+        case 2...13: return "\(n) days"
+        default: return Due.short.string(from: d.date ?? Date())
+        }
+    }
+
+    private static let short: DateFormatter = {
+        let f = DateFormatter()
+        f.setLocalizedDateFormatFromTemplate("d MMM")
+        return f
+    }()
 }
 
 private struct Tag: View {

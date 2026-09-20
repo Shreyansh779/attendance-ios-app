@@ -161,8 +161,34 @@
                 ],
                 daywise: register(now: now),
                 attDiag: nil,
-                photo: nil
+                photo: nil,
+                deadlines: [
+                    // One late, one imminent, one far enough out to take the
+                    // absolute date branch.
+                    Deadline(
+                        title: "Experiment 2 is due", course: "Web Analytics",
+                        due: iso(-3, from: now), kind: "assign", url: ""
+                    ),
+                    Deadline(
+                        title: "Class Test 1 is due",
+                        course: "Object Oriented Analysis and Design",
+                        due: iso(1, from: now), kind: "quiz", url: ""
+                    ),
+                    Deadline(
+                        title: "PBL_Submission 1 is due",
+                        course: "Research Methodology in CS",
+                        due: iso(22, from: now), kind: "assign", url: ""
+                    ),
+                ],
+                lmsDiag: nil
             )
+        }
+
+        /// The LMS hands these over in UTC, with fractional seconds.
+        private static func iso(_ offset: Int, from now: Date) -> String {
+            let f = ISO8601DateFormatter()
+            f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            return f.string(from: cal.date(byAdding: .day, value: offset, to: now) ?? now)
         }
 
         /// Ten days of register rows, with a run of absences in the subject

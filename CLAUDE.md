@@ -64,17 +64,31 @@ The IPA ships **unsigned** by design; a sideloader re-signs it. Pushing to
   captcha, so there is no headless path: the webview goes on screen, the user
   logs in by hand, and the same webview is then read with `evaluateJavaScript`.
   A second webview would share cookies but not `sessionStorage`.
+  A refresh starts at `dashboardURL`, never the site root. With a session still
+  good the root redirects to `/oneportal/app/auth/login` and *stays there* —
+  it will not carry you back in — so starting there meant every refresh
+  demanded a password that was not needed. The dashboard URL resumes silently,
+  and the login sheet is held back until the route actually says `auth/login`.
 - `Scrapers.swift` — the JS. The timetable comes from `weekApi`, which reads the
   payload the page already fetched (`window.__ttData`, stashed by `installSpy`),
   not from rendered HTML. A DOM scraper exists as a fallback. `weekApi` keeps
   sixty days of past sessions as well as the term ahead, so back-paging the
   timetable is not blank.
-  `attFields`/`attRun`/`attGrid` drive the attendance *search* form — the only
-  page with the register, one row per session. Kendo renders a dropdown as a
-  span over a hidden control, so setting `el.value` alone changes nothing the
-  postback can see; they go through the widget API when jQuery has one. `attRun`
-  reads `window.__attReq`, set by a separate one-line eval, so it stays a plain
-  literal the syntax gate can parse.
+  `registerStart`/`registerRead` fetch the register — one row per session —
+  by asking `/student-attendance/studentattendancesummary` directly. Four
+  builds went into driving that page's search form instead, and none of it
+  could ever have worked: the date inputs are `readonly`, so only the calendar
+  popup can set them, and the results grid is two tables with the headers in
+  one and the rows in the other. The endpoint takes every course at once.
+  `lmsKey`/`lmsDue` get coursework, which the portal does not hold at all: its
+  "LMS" tile posts to `/sso/user/oauth2/access-lms` for a **one-shot** Moodle
+  login URL, the webview follows it, and Moodle's own AJAX endpoint answers
+  `core_calendar_get_action_events_by_timesort`. The key is spent on use, so
+  `lmsKey` is written to ask exactly once however often it is polled. Only
+  `assign` and `quiz` are kept — that feed also nags about every file ever
+  uploaded to a course.
+  Anything async parks its answer on a `window` global and is polled, because
+  `evaluateJavaScript` cannot wait for a promise.
 - `Models.swift` — `Budget` (can I skip?) and `Term` (can I still recover?).
   Integer arithmetic throughout so no rounding can shift an answer by one class.
   Brute-forced against 893,101 combinations in the verify suite.
@@ -112,8 +126,16 @@ A read hands data over in three instalments, not one: attendance rows the
 moment they settle, the timetable when it is scraped, everything else at the
 end. Every field a partial cannot fill is left empty, and the merge in
 `RootView` keeps whatever the last read established — so a partial can only
-add, never clear. `fetchDaywise` runs last because it is one form submission
-per subject and is the slowest thing the app does.
+add, never clear. `fetchDaywise` and then `fetchDeadlines` run after the read
+has already finished, off the critical path: the LMS is a different site, and
+while the register was on that path a portal that would not cooperate held
+`busy` and the banner hostage, so a read that had in fact succeeded looked
+like one that had hung.
+
+The version is `MARKETING_VERSION` in `project.yml`, bumped by hand when a
+release adds something; the build number is the CI run, passed on the
+`xcodebuild` line. Settings shows both, so a bug report can start from which
+build is actually on the phone.
 
 ## Design
 

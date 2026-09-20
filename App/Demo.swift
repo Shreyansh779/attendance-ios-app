@@ -49,9 +49,12 @@
         /// Whole hours either side of this one, so a screenshot shows "11:00"
         /// rather than whatever minute the runner happened to be on.
         private static func at(_ hours: Int, _ minute: Int, from now: Date) -> String {
-            let top = cal.date(bySetting: .minute, value: 0, of: now) ?? now
+            // date(bySetting:) searches *forward* for the next date matching
+            // the component, so asking for minute 0 at 12:17 hands back 13:00
+            // and the class that was meant to be live is an hour away.
+            let top = cal.date(from: cal.dateComponents([.year, .month, .day, .hour], from: now)) ?? now
             let t = cal.date(byAdding: .hour, value: hours, to: top) ?? now
-            return clock.string(from: cal.date(bySetting: .minute, value: minute, of: t) ?? t)
+            return clock.string(from: t.addingTimeInterval(TimeInterval(minute * 60)))
         }
 
         /// Six subjects: one comfortably clear, two behind, one that gates the
@@ -189,6 +192,12 @@
                     DaySession(
                         subject: "Formal Languages and Automata Theory", date: iso,
                         time: "09:00 - 09:55", present: d % 4 != 0
+                    )
+                )
+                out.append(
+                    DaySession(
+                        subject: "Probability, Entropy, and MC Simulation", date: iso,
+                        time: "14:00 - 14:55", present: d % 5 != 0
                     )
                 )
             }

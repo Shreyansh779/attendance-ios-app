@@ -11,7 +11,7 @@ runner in `.github/workflows/build-ipa.yml`. Every "does it build" costs a push
 and ~30 seconds. Write conservatively; you cannot check your work locally.
 
 **2. About a third of the app is JavaScript inside Swift raw string literals.**
-`Scrapers.swift` holds 12 blobs in `#"""…"""#`. `swiftc` sees opaque strings and
+`Scrapers.swift` holds 15 blobs in `#"""…"""#`. `swiftc` sees opaque strings and
 validates none of it. A broken blob compiles, ships, throws at runtime, and gets
 swallowed by `(try? await eval(...)) ?? nil` into a blank screen that looks like
 a slow portal. A `PostToolUse` hook (`.claude/hooks/check-scrapers.mjs`)
@@ -66,7 +66,15 @@ The IPA ships **unsigned** by design; a sideloader re-signs it. Pushing to
   A second webview would share cookies but not `sessionStorage`.
 - `Scrapers.swift` — the JS. The timetable comes from `weekApi`, which reads the
   payload the page already fetched (`window.__ttData`, stashed by `installSpy`),
-  not from rendered HTML. A DOM scraper exists as a fallback.
+  not from rendered HTML. A DOM scraper exists as a fallback. `weekApi` keeps
+  sixty days of past sessions as well as the term ahead, so back-paging the
+  timetable is not blank.
+  `attFields`/`attRun`/`attGrid` drive the attendance *search* form — the only
+  page with the register, one row per session. Kendo renders a dropdown as a
+  span over a hidden control, so setting `el.value` alone changes nothing the
+  postback can see; they go through the widget API when jQuery has one. `attRun`
+  reads `window.__attReq`, set by a separate one-line eval, so it stays a plain
+  literal the syntax gate can parse.
 - `Models.swift` — `Budget` (can I skip?) and `Term` (can I still recover?).
   Integer arithmetic throughout so no rounding can shift an answer by one class.
   Brute-forced against 893,101 combinations in the verify suite.
@@ -100,14 +108,35 @@ The IPA ships **unsigned** by design; a sideloader re-signs it. Pushing to
   whenever one load interrupts another, which `fetchWeek`/`fetchStudentName` do
   on purpose twice per read.
 
+A read hands data over in three instalments, not one: attendance rows the
+moment they settle, the timetable when it is scraped, everything else at the
+end. Every field a partial cannot fill is left empty, and the merge in
+`RootView` keeps whatever the last read established — so a partial can only
+add, never clear. `fetchDaywise` runs last because it is one form submission
+per subject and is the slowest thing the app does.
+
 ## Design
 
-Three tabs in a `TabView`, each with its own `NavigationStack` and large title —
-not a drawer. Corners never under 18, no borders or hairline rules anywhere,
-separation carried by space and tone. Motion lives in `Theme.swift`: Apple's own
-figures (drawer = damping 0.8 / response 0.3; general UI critically damped),
-with `bounce = 1 - damping`. Bounce is spent only where the gesture carried
-momentum. `Animation.reduced(_:)` honours Reduce Motion everywhere.
+Three screens, each with its own `NavigationStack` and large title. Not a
+drawer, and no longer a `TabView` either: the tab bar is a floating glass
+capsule (`PillBar`, draggable), and the screens are a cross-fading `ZStack` —
+all three mounted, so paging the timetable survives a trip to Attendance.
+
+Every card is a material with a lit edge and a shadow, never a flat fill, and
+`Backdrop` sits behind the lot because glass over one flat colour blurs to
+exactly that colour. The surface tokens (`sur`, `surLive`, `surDim`…) are
+*tints* laid over a material, not fills — an opaque one collapses the system
+back into rectangles. Corners never under 18; the only hairline in the app is
+the rule between two rows of one Settings card.
+
+Two faces, both already on the phone: SF Pro for interface text, New York for
+screen titles and the one number a screen exists to show. Styrene and Tiempos
+cannot be bundled and New York is the closest serif iOS ships. Rationing it is
+the point — setting small numbers in it too made the app look like two apps.
+
+Motion lives in `Theme.swift` and nothing overshoots: bounce is earned by a
+gesture that carried momentum and there is no such gesture here.
+`Animation.reduced(_:)` honours Reduce Motion everywhere.
 
 Every colour is a solved light/dark pair, and the ink ramp is contrast-solved so
 even the dimmest step clears WCAG AA (4.5:1) on every surface in its own scheme.

@@ -186,24 +186,29 @@
                         id: 1, name: "Ethical Hacking & Penetration Testing",
                         url: "https://lms.upes.ac.in/course/view.php?id=1",
                         items: [
+                            // Loose under the teacher, which is one of the two
+                            // shapes a course page uses.
                             LmsItem(
-                                title: "Web Fundamentals - TryHackMe", kind: "URL",
-                                url: "https://lms.upes.ac.in/mod/url/view.php?id=1",
-                                group: "Rahul Kumar"
+                                title: "Syllabus", kind: "File",
+                                url: "https://lms.upes.ac.in/mod/resource/view.php?id=1",
+                                group: "Dr.  Navin Mani Upadhyay (B-7, B-8, B-9)",
+                                folder: ""
                             ),
                             LmsItem(
-                                title: "Class Test 1", kind: "Assignment",
-                                url: "https://lms.upes.ac.in/mod/assign/view.php?id=2",
-                                group: "Richa Kumari"
+                                title: "Lecture-1", kind: "File",
+                                url: "https://lms.upes.ac.in/mod/resource/view.php?id=2",
+                                group: "Dr.  Navin Mani Upadhyay (B-7, B-8, B-9)",
+                                folder: "Unit-1"
                             ),
                             // A long one, because a course page is full of them
                             // and a row that only ever gets short titles proves
                             // nothing about how it wraps.
                             LmsItem(
-                                title: "Unit_1 and Unit_2_half_and_Course_Plan",
-                                kind: "Folder",
-                                url: "https://lms.upes.ac.in/mod/folder/view.php?id=3",
-                                group: "Unit-1"
+                                title: "Footprinting using SHODAN and other tools",
+                                kind: "Assignment",
+                                url: "https://lms.upes.ac.in/mod/assign/view.php?id=3",
+                                group: "Dr.  Navin Mani Upadhyay (B-7, B-8, B-9)",
+                                folder: "Lab"
                             ),
                         ]
                     ),
@@ -214,7 +219,7 @@
                             LmsItem(
                                 title: "QUIZ UNIT 1 & 3", kind: "Quiz",
                                 url: "https://lms.upes.ac.in/mod/quiz/view.php?id=4",
-                                group: "Dr. Ashutosh Sharma"
+                                group: "DEEPIKA KAMBOJ | CSF B7B8B9", folder: "QUIZ"
                             )
                         ]
                     ),

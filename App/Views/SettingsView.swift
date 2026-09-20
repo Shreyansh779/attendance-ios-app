@@ -23,8 +23,11 @@ struct SettingsView: View {
     /// Re-runs the schedule, because changing the lead time or switching
     /// reminders off should take effect now rather than at the next refresh.
     let onSettingsChanged: () -> Void
+    /// Throws the cache away and leaves the app on its empty state.
+    let onClearCache: () -> Void
 
     @State private var testResult: String?
+    @State private var clearing = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -60,6 +63,24 @@ struct SettingsView: View {
                 .padding(.bottom, 32)
             }
             .background(Backdrop())
+            // A destructive, irreversible thing with a portal login and a
+            // captcha standing between it and being undone, so it asks.
+            .confirmationDialog(
+                "Clear everything read from the portal?",
+                isPresented: $clearing,
+                titleVisibility: .visible
+            ) {
+                Button("Clear cached data", role: .destructive) {
+                    onClearCache()
+                    dismiss()
+                }
+                Button("Keep it", role: .cancel) {}
+            } message: {
+                Text(
+                    "Attendance, timetable, register, LMS and the classes you ticked by "
+                        + "hand. Getting it back means signing in to the portal again."
+                )
+            }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -154,6 +175,22 @@ struct SettingsView: View {
                 Line(name: "Days cached", value: "\(weekDays)")
                 Rule()
                 Line(name: "LMS courses", value: "\(courseCount)")
+                Rule()
+                Button {
+                    clearing = true
+                } label: {
+                    HStack {
+                        Text("Clear cached data")
+                            .r(15.5, .medium)
+                        Spacer(minLength: 0)
+                        Image(systemName: "trash")
+                            .font(.system(size: 13, weight: .semibold))
+                    }
+                    .foregroundStyle(Color.warnInk)
+                    .padding(.vertical, 13)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
                 Rule()
                 Line(name: "Version", value: SettingsView.version)
             }

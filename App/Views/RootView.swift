@@ -194,7 +194,13 @@ struct RootView: View {
                 courseCount: snapshot?.courses.count ?? 0,
                 lmsDiag: snapshot?.lmsDiag,
                 age: snapshot?.ageText,
-                onSettingsChanged: rescheduleReminders
+                onSettingsChanged: rescheduleReminders,
+                onClearCache: {
+                    Store.clear()
+                    snapshot = nil
+                    picked = nil
+                    rescheduleReminders()
+                }
             )
         }
         // A fresh install used to throw the portal's login page up the instant
@@ -518,7 +524,8 @@ struct RootView: View {
                 photo: r.photo ?? snapshot?.photo,
                 deadlines: r.deadlines.isEmpty ? (snapshot?.deadlines ?? []) : r.deadlines,
                 lmsDiag: r.lmsDiag ?? snapshot?.lmsDiag,
-                courses: r.courses.isEmpty ? (snapshot?.courses ?? []) : r.courses
+                courses: r.courses.isEmpty ? (snapshot?.courses ?? []) : r.courses,
+                faculty: r.faculty.isEmpty ? (snapshot?.faculty ?? [:]) : r.faculty
             )
             Store.save(snap)
             snapshot = snap

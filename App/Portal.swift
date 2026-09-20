@@ -95,6 +95,8 @@ final class Portal: NSObject, ObservableObject {
     struct WeekResult {
         var days: [String: [Session]] = [:]
         var diag: String?
+        /// Subject to the teachers who take your classes.
+        var teachers: [String: [String]] = [:]
         /// True only for the API payload, which carries the whole term. The
         /// DOM agenda never shows more than six days, and six days must not be
         /// mistaken for "that is every class left" - the term maths would then
@@ -127,6 +129,8 @@ final class Portal: NSObject, ObservableObject {
         let lmsDiag: String?
         /// This semester's courses and their material. Same visit, same page.
         let courses: [LmsCourse]
+        /// Subject to the teachers who take your classes.
+        let faculty: [String: [String]]
     }
 
     // MARK: - Entry point
@@ -282,7 +286,7 @@ final class Portal: NSObject, ObservableObject {
                             rows: rows, sessions: sessions, student: self.student,
                             week: [:], weekDiag: nil, termEnd: nil,
                             holidays: [], daywise: [], attDiag: nil, photo: photo,
-                            deadlines: [], lmsDiag: nil, courses: []
+                            deadlines: [], lmsDiag: nil, courses: [], faculty: [:]
                         )
                     )
 
@@ -302,7 +306,7 @@ final class Portal: NSObject, ObservableObject {
                             week: week.days, weekDiag: week.diag,
                             termEnd: week.whole ? week.days.keys.max() : nil,
                             holidays: [], daywise: [], attDiag: nil, photo: photo,
-                            deadlines: [], lmsDiag: nil, courses: []
+                            deadlines: [], lmsDiag: nil, courses: [], faculty: week.teachers
                         )
                     )
 
@@ -355,6 +359,7 @@ final class Portal: NSObject, ObservableObject {
     private var deadlines: [Deadline] = []
     private var lmsDiag: String?
     private var courses: [LmsCourse] = []
+    private var faculty: [String: [String]] = [:]
 
     // MARK: - The register
 
@@ -544,11 +549,19 @@ final class Portal: NSObject, ObservableObject {
 
     /// This semester's courses and their material, off the page fetchDeadlines
     /// is already sitting on. No second login, no second navigation.
-    private func fetchCourses() async -> [LmsCourse] {
+    private func fetchCourses(faculty: [String: [String]]) async -> [LmsCourse] {
+        // Handed over rather than fetched: the timetable is on the portal's
+        // origin and this runs on Moodle's, so there is no way for the blob to
+        // go and get it. Set on every pass, because the first passes land on
+        // the documents of a redirect chain and none of them keep it.
+        let mine = (try? JSONEncoder().encode(faculty))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+
         var last = "no reply from the page"
         for _ in 0..<30 {
             if Task.isCancelled { return [] }
             try? await Task.sleep(nanoseconds: 400_000_000)
+            _ = try? await eval("window.__mine = \(mine); 1")
             guard let p = await decode(CoursePayload.self, Scrapers.lmsCourses) else { continue }
             last = p.diag
             guard p.done else { continue }
@@ -685,6 +698,9 @@ final class Portal: NSObject, ObservableObject {
         let diag: String?
         let tasks: Int?
         let view: String?
+        /// Subject to the teachers who take your classes. The LMS needs it to
+        /// tell your own teacher's sections from the other nineteen's.
+        let teachers: [String: [String]]?
         /// Raw entry count in the payload. The dashboard calls the same
         /// endpoint for its own one-day card, so size is what separates the
         /// real term feed from that.
@@ -746,7 +762,8 @@ final class Portal: NSObject, ObservableObject {
                         // the dashboard's own call to this endpoint returns a
                         // handful. Only the former may claim to be the term.
                         bestWeek = WeekResult(
-                            days: byDay, diag: p.diag, whole: (p.items ?? 0) >= 50
+                            days: byDay, diag: p.diag, teachers: p.teachers ?? [:],
+                            whole: (p.items ?? 0) >= 50
                         )
                     }
                     // The dashboard calls the same endpoint for its "today"
@@ -849,6 +866,7 @@ final class Portal: NSObject, ObservableObject {
         rows: [AttRow], sessions: [Session],
         week: WeekResult, photo: String?
     ) {
+        faculty = week.teachers
         pollTask?.cancel()
         pollTask = nil
         showingLogin = false
@@ -864,7 +882,8 @@ final class Portal: NSObject, ObservableObject {
             photo: photo,
             deadlines: deadlines,
             lmsDiag: lmsDiag,
-            courses: courses
+            courses: courses,
+            faculty: faculty
         )
         last = reading
         onDone?(reading)
@@ -896,7 +915,7 @@ final class Portal: NSObject, ObservableObject {
             if Task.isCancelled { return }
             self.deadlines = due
             // Same Moodle page, so this costs a request rather than a login.
-            self.courses = await self.fetchCourses()
+            self.courses = await self.fetchCourses(faculty: self.faculty)
             if Task.isCancelled { return }
             self.status = nil
             self.hostingHidden = false
@@ -911,7 +930,8 @@ final class Portal: NSObject, ObservableObject {
                     photo: base.photo,
                     deadlines: due,
                     lmsDiag: self.lmsDiag,
-                    courses: self.courses
+                    courses: self.courses,
+                    faculty: self.faculty
                 )
             )
         }

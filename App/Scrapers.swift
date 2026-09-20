@@ -811,9 +811,31 @@ enum Scrapers {
     }).slice(0, 24).join(' ');
   }
 
+  // Who teaches you what. Built straight off the raw feed rather than off
+  // the parsed sessions, because it needs nothing the parse could fail at -
+  // and it is the only place in the whole portal that says which of a
+  // course's twenty teachers is yours. The LMS needs that to tell your own
+  // teacher's material from the rest of the department's.
+  var teachers = {};
+  for (var t = 0; t < arr.length; t++) {
+    var mods = arr[t] && arr[t].ModuleList;
+    var who = arr[t] && arr[t].TeacherList;
+    if (!mods || !mods.length || !who || !who.length) continue;
+    var subj = clean(mods[0].ModuleName);
+    if (!subj) continue;
+    if (!teachers[subj]) teachers[subj] = [];
+    for (var u = 0; u < who.length; u++) {
+      var nm = clean(who[u].Name);
+      if (nm && teachers[subj].indexOf(nm) < 0) teachers[subj].push(nm);
+    }
+  }
+
   // items is how the app distinguishes the real term feed (hundreds) from
   // the dashboard's own six-item "today" call to the same endpoint.
-  return JSON.stringify({ ok: uniq.length > 0, sessions: uniq, diag: diag, items: arr.length });
+  return JSON.stringify({
+    ok: uniq.length > 0, sessions: uniq, diag: diag, items: arr.length,
+    teachers: teachers
+  });
 })()
 """#
 
@@ -1371,19 +1393,30 @@ enum Scrapers {
 })()
 """#
 
-    /// This semester's courses, and what is in them.
+    /// This semester's courses, and what *your* teachers put in them.
     ///
-    /// `core_course_get_contents` is switched off on this Moodle, but the
-    /// course page's own state endpoint is not, and it carries more: every
-    /// section, every module, its type, its link, and whether this student may
-    /// open it. That last flag is the whole trick. A course here is taught by
-    /// half a dozen teachers to half a dozen batches, each with its own
-    /// section named after the teacher, and Moodle marks the sections that are
-    /// not yours invisible to you - so filtering on `uservisible` turns the
-    /// department's material into your teacher's material.
+    /// The shape of a course here, which took a live look to establish:
     ///
-    /// The course list and then one state call per course, all of the latter
-    /// batched into a single request, because this endpoint takes an array.
+    ///   top-level section   one per teacher — "Dr. Manupriya Darshani",
+    ///                       "Kaustubh_Ijardar_CSF_B7_B8_B9", "Ayush Gurjar" —
+    ///                       plus the occasional shared one, "General" or
+    ///                       "PEMC(Batches - CCSF (4,5,6,7,8,9)...".
+    ///   subsection          a folder inside one of those: BOOKS, QUIZ,
+    ///                       Unit-1, CLASS TESTS. Carries parentsectionid.
+    ///   module              the thing you open.
+    ///
+    /// A course is taught by twenty teachers to twenty batches. `uservisible`
+    /// hides most of the others' material but not all of it — Cryptography
+    /// leaves another teacher's page readable — so the sections are matched
+    /// against the teachers the *timetable* says take your classes, handed in
+    /// on window.__mine. A section that matches nobody is kept only if it does
+    /// not look like a person's name, which is what keeps the shared ones.
+    ///
+    /// Only "_Sem5" courses: "inprogress" still includes a couple of
+    /// year-long ones from before.
+    ///
+    /// One request for the course list, one batched request for every
+    /// course's contents.
     static let lmsCourses = #"""
 (function () {
   if (window.__lmsc) return JSON.stringify(window.__lmsc);
@@ -1398,12 +1431,56 @@ enum Scrapers {
   var st = { done: false, ok: false, courses: [], diag: 'started' };
   window.__lmsc = st;
 
-  // Course and section names come through HTML-escaped. innerHTML would undo
-  // that in one line and also run whatever a course name happened to contain.
+  // Set by the app just before this runs: { subject: [teacher, ...] } out of
+  // the timetable. Without it every teacher's section is kept, which is the
+  // old behaviour and still better than an empty screen.
+  var MINE = window.__mine || {};
+
+  // Names come through HTML-escaped. innerHTML would undo that in one line
+  // and also run whatever a course name happened to contain.
   function text(s) {
     return String(s == null ? '' : s)
       .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
       .replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/&nbsp;/g, ' ');
+  }
+
+  // "Kaustubh_Ijardar_CSF_B7_B8_B9" and "Dr.  Navin Mani Upadhyay (B-7, B-8,
+  // B-9)" have to come out comparable with "Kaustubh  Ijardar" and "Navin
+  // Upadhyay" - hence words, not strings.
+  function words(s) {
+    return text(s).toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .split(' ')
+      .filter(function (w) {
+        return w && w.length > 2 && ['dr', 'prof', 'mr', 'mrs', 'ms', 'the'].indexOf(w) < 0;
+      });
+  }
+
+  // Every word of the teacher's name appears in the section's title. Middle
+  // names only the LMS knows about are therefore fine; a shared surname is
+  // not enough on its own.
+  function isTeacher(title, who) {
+    var have = words(title);
+    for (var i = 0; i < who.length; i++) {
+      var want = words(who[i]);
+      if (!want.length) continue;
+      var all = true;
+      for (var j = 0; j < want.length; j++) {
+        if (have.indexOf(want[j]) < 0) { all = false; break; }
+      }
+      if (all) return true;
+    }
+    return false;
+  }
+
+  // Two plain words, or an honorific, and it is somebody's name. "General",
+  // "PEMC(Batches - CCSF (4,5,6,7,8,9)" and "Unit-1" are not, which is how
+  // the sections a course shares with every batch survive the filter.
+  function personish(t) {
+    var s = text(t).replace(/[_|.]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (/^(dr|prof|mr|mrs|ms)\b/i.test(s)) return true;
+    var w = s.split(' ');
+    return w.length >= 2 && /^[A-Za-z]{3,}$/.test(w[0]) && /^[A-Za-z]{2,}$/.test(w[1]);
   }
 
   function ws(calls) {
@@ -1417,66 +1494,109 @@ enum Scrapers {
   ws([{
     index: 0,
     methodname: 'core_course_get_enrolled_courses_by_timeline_classification',
-    // "inprogress" is this semester. "all" is every course ever enrolled in,
-    // which for a third year is most of a degree.
+    // "all" would be every course of the whole degree, not this semester.
     args: { classification: 'inprogress', limit: 0, offset: 0, sort: 'fullname' }
   }]).then(function (j) {
     var d = j && j[0];
     if (!d || d.error) {
       throw new Error(d && d.exception ? d.exception.message : 'no course list');
     }
-    var list = (d.data && d.data.courses) || [];
+    // "inprogress" still carries a year-long course or two from last
+    // semester; the term is in the name.
+    var list = ((d.data && d.data.courses) || []).filter(function (c) {
+      return /_Sem\d+$/.test(text(c.fullname));
+    });
     if (!list.length) {
       st.ok = true;
       st.done = true;
-      st.diag = 'nothing in progress';
+      st.diag = 'no _Sem courses in progress';
       return;
     }
 
     return ws(list.map(function (c, i) {
       return { index: i, methodname: 'core_courseformat_get_state', args: { courseid: c.id } };
     })).then(function (states) {
-      var out = [], total = 0;
+      var out = [], total = 0, unmatched = [];
+
       for (var i = 0; i < list.length; i++) {
-        var c = list[i], items = [];
+        var c = list[i];
+        var name = text(c.fullname).replace(/_Sem\d+$/, '');
+        var mine = MINE[name] || [];
+        var items = [], dropped = 0;
         var raw = states[i] && states[i].data;
+
         if (raw) {
           var s = JSON.parse(raw), secs = {}, cms = {};
           (s.section || []).forEach(function (x) { secs[x.id] = x; });
           (s.cm || []).forEach(function (x) { cms[x.id] = x; });
+
+          // Which top-level section a section belongs to, and how deep it is.
+          // Subsections carry parentsectionid; teachers' sections do not.
+          var rootOf = function (sec) {
+            var seen = 0;
+            while (sec && sec.parentsectionid && secs[sec.parentsectionid] && seen < 8) {
+              sec = secs[sec.parentsectionid];
+              seen++;
+            }
+            return sec;
+          };
+
           // sectionlist, not the section array, because only the former is in
           // the order the course page shows.
           ((s.course && s.course.sectionlist) || []).forEach(function (sid) {
             var sec = secs[sid];
             if (!sec || !sec.visible) return;
+
+            var root = rootOf(sec);
+            if (!root) return;
+            var owner = text(root.title);
+
+            // The whole point: your teacher's sections, plus the ones that
+            // belong to no teacher at all.
+            var keep = mine.length ? isTeacher(owner, mine) : true;
+            if (!keep && !personish(owner)) keep = true;
+            if (!keep) {
+              dropped += (sec.cmlist || []).length;
+              return;
+            }
+
+            // A subsection's own title is the folder; a top-level section has
+            // no folder and its items sit loose under the teacher.
+            var folder = (root.id === sec.id) ? '' : text(sec.title);
+
             (sec.cmlist || []).forEach(function (id) {
               var m = cms[id];
               if (!m || !m.uservisible) return;
-              // A Subsection is a container whose contents arrive again as a
-              // section of their own, so counting it would double everything.
+              // A Subsection is only a pointer to a section that arrives on
+              // its own, so counting it would list everything twice.
               if (m.modname === 'Subsection') return;
               items.push({
                 title: text(m.name),
                 kind: text(m.modname),
                 url: m.url || '',
-                group: text(sec.title)
+                group: owner,
+                folder: folder
               });
             });
           });
+
+          if (!items.length && dropped) unmatched.push(name.slice(0, 18));
         }
+
         total += items.length;
         out.push({
           id: Number(c.id),
-          // Every course this term is named "<subject>_Sem5".
-          name: text(c.fullname).replace(/_Sem\d+$/, ''),
+          name: name,
           url: 'https://lms.upes.ac.in/course/view.php?id=' + c.id,
           items: items
         });
       }
+
       st.courses = out;
       st.ok = true;
       st.done = true;
-      st.diag = out.length + ' courses, ' + total + ' items';
+      st.diag = out.length + ' courses, ' + total + ' items'
+        + (unmatched.length ? ', nothing of yours in: ' + unmatched.join(', ') : '');
     });
   }).catch(function (e) {
     st.done = true;

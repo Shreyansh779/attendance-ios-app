@@ -397,39 +397,68 @@ check('lmsDue keeps only real deadlines and tidies the course name', () => {
   truthy(/\.\d{3}Z$/.test(out.items[0].due), 'due is not fractional-second ISO: ' + out.items[0].due);
 });
 
-check('lmsCourses keeps only what this student may open', () => {
-  // One course, six teachers. Section 0 is this student's; the rest belong to
-  // other batches and Moodle marks their modules not visible to this user.
-  const state = {
-    course: { sectionlist: ['10', '11', '12'] },
+check('lmsCourses keeps your teachers, their folders, and the shared sections', () => {
+  const courses = [
+    { id: 100891, fullname: 'Cryptography and Network Security_Sem5' },
+    { id: 101886, fullname: 'Ethical Hacking &amp; Penetration Testing_Sem5' },
+    // No _Sem suffix, so not this semester however "inprogress" it claims to be.
+    { id: 39504, fullname: 'Leading Conversations' },
+  ];
+
+  const crypto = {
+    course: { sectionlist: ['1', '2', '3'] },
     section: [
-      { id: '10', title: 'Rahul Kumar', visible: true, cmlist: ['1', '2', '9'] },
-      { id: '11', title: 'Dr. Someone Else (B10-B12)', visible: true, cmlist: ['3'] },
-      { id: '12', title: 'Unit-1', visible: true, cmlist: ['4'] },
+      // Visible material belonging to a teacher who is not mine. uservisible
+      // does not hide this one, which is the whole reason for the name match.
+      { id: '1', title: 'Dr. Justin Joseph | CCVT B1-B6', visible: true, parentsectionid: null, cmlist: ['a'] },
+      { id: '2', title: 'Ayush Gurjar', visible: true, parentsectionid: null, cmlist: ['b'] },
+      { id: '3', title: 'General', visible: true, parentsectionid: null, cmlist: ['c'] },
     ],
     cm: [
-      { id: '1', name: 'Class Test 1', modname: 'Assignment', uservisible: true, url: 'https://lms/a' },
-      { id: '2', name: 'QUIZ UNIT 1 &amp; 3', modname: 'Quiz', uservisible: true, url: 'https://lms/q' },
-      // The container for section 12. Counting it would list Unit-1 twice.
-      { id: '9', name: 'Unit-1', modname: 'Subsection', uservisible: true, url: 'https://lms/s' },
-      { id: '3', name: 'Someone else\'s handout', modname: 'File', uservisible: false, url: 'https://lms/x' },
-      { id: '4', name: 'Lecture-1', modname: 'File', uservisible: true, url: 'https://lms/f' },
+      { id: 'a', name: 'Resources', modname: 'Page', uservisible: true, url: 'https://lms/x' },
+      { id: 'b', name: 'Assignment_1', modname: 'Assignment', uservisible: true, url: 'https://lms/a1' },
+      { id: 'c', name: 'Course Plan', modname: 'File', uservisible: true, url: 'https://lms/cp' },
     ],
   };
-  const courses = [{ id: 101886, fullname: 'Ethical Hacking &amp; Penetration Testing_Sem5' }];
-  const win = { M: { cfg: { sesskey: 'sk1' } } };
+
+  const ethical = {
+    course: { sectionlist: ['10', '11', '12'] },
+    section: [
+      { id: '10', title: 'Dr.  Navin Mani Upadhyay (B-7, B-8, B-9)', visible: true, parentsectionid: null, cmlist: ['p', 'sub'] },
+      // A folder inside that teacher, not a teacher of its own.
+      { id: '11', title: 'Unit-1', visible: true, parentsectionid: '10', cmlist: ['q'] },
+      { id: '12', title: 'Sushma_Choudhary', visible: true, parentsectionid: null, cmlist: ['r'] },
+    ],
+    cm: [
+      { id: 'p', name: 'Syllabus', modname: 'File', uservisible: true, url: 'https://lms/s' },
+      { id: 'sub', name: 'Unit-1', modname: 'Subsection', uservisible: true, url: 'https://lms/sub' },
+      { id: 'q', name: 'Lecture-1', modname: 'File', uservisible: true, url: 'https://lms/l1' },
+      { id: 'r', name: 'Someone else', modname: 'File', uservisible: true, url: 'https://lms/e' },
+    ],
+  };
+
+  const win = {
+    M: { cfg: { sesskey: 'sk1' } },
+    __mine: {
+      // Spaced and cased as the timetable writes them, which is not how the
+      // LMS writes them.
+      'Cryptography and Network Security': ['Ayush  Gurjar'],
+      // Middle name the timetable has never heard of.
+      'Ethical Hacking & Penetration Testing': ['Navin  Upadhyay'],
+    },
+  };
   let asked = 0;
   const fetch = (url, opt) => {
     asked++;
     const calls = JSON.parse(opt.body);
     if (calls[0].methodname.indexOf('timeline_classification') > -1) {
-      // "all" would be every course of the whole degree, not this semester.
       eq(calls[0].args.classification, 'inprogress', 'wrong classification');
       return sync({ json: () => sync([{ error: false, data: { courses } }]) });
     }
-    eq(calls.length, courses.length, 'the state calls were not batched');
+    eq(calls.length, 2, 'Leading Conversations was not dropped before the state calls');
+    const bodies = [crypto, ethical];
     return sync({
-      json: () => sync(calls.map((c, i) => ({ index: i, error: false, data: JSON.stringify(state) }))),
+      json: () => sync(calls.map((c, i) => ({ index: i, error: false, data: JSON.stringify(bodies[i]) }))),
     });
   };
   const call = () => JSON.parse(
@@ -439,13 +468,28 @@ check('lmsCourses keeps only what this student may open', () => {
   call();
   const out = call();
   truthy(out.done && out.ok, 'never finished: ' + out.diag);
-  eq(out.courses.length, 1, 'wrong course count');
+  eq(out.courses.length, 2, 'wrong course count');
+
   const c = out.courses[0];
-  eq(c.name, 'Ethical Hacking & Penetration Testing', 'course name not tidied');
-  eq(c.items.map((i) => i.title), ['Class Test 1', 'QUIZ UNIT 1 & 3', 'Lecture-1'], 'wrong items');
-  eq(c.items[2].group, 'Unit-1', 'section title lost');
-  // Two requests total however many courses there are: the list, then one
-  // batch of state calls.
+  eq(c.name, 'Cryptography and Network Security', 'course name not tidied');
+  eq(
+    c.items.map((i) => i.group + '/' + i.folder + '/' + i.title),
+    ['Ayush Gurjar//Assignment_1', 'General//Course Plan'],
+    "another teacher's section, or the shared one, was handled wrong"
+  );
+
+  const e = out.courses[1];
+  eq(e.name, 'Ethical Hacking & Penetration Testing', 'ampersand not unescaped');
+  eq(
+    e.items.map((i) => i.folder + '/' + i.title),
+    ['/Syllabus', 'Unit-1/Lecture-1'],
+    'the folder is not being attributed to its teacher'
+  );
+  // Every item of a course belongs to the teacher, never to the folder.
+  truthy(
+    e.items.every((i) => i.group.indexOf('Upadhyay') > -1),
+    'a folder was promoted to a teacher: ' + JSON.stringify(e.items.map((i) => i.group))
+  );
   eq(asked, 2, 'more requests than the list plus one batch');
 });
 

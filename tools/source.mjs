@@ -58,7 +58,11 @@ for (const rel of releases) {
   // is the reliable one - the title has changed shape before.
   const build = /(\d+)\s*$/.exec(rel.tag_name)?.[1];
   if (!build) continue;
-  const marketing = /Today\s+(\d+(?:\.\d+)*)/.exec(rel.name || '')?.[1] ?? '2.0';
+  // The earliest releases were titled `Today build-19`, with no version in
+  // them at all. Falling back to the current one would have published those
+  // as 2.0.19, which is a claim about a build from before 2.0 existed - so
+  // they fall back to 0.0 and read as the prehistory they are.
+  const marketing = /Today\s+(\d+(?:\.\d+)*)/.exec(rel.name || '')?.[1] ?? '0.0';
 
   // The first line of the notes is the commit subject, which is what actually
   // changed. The rest is the same sideloading boilerplate on every release.

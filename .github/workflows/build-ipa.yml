@@ -98,3 +98,25 @@ jobs:
             --notes-file notes.md \
             --latest
           echo "### Download Today.ipa from the release: $TAG" >> "$GITHUB_STEP_SUMMARY"
+
+      # Every push to main cuts a release, so the list reached 77 of them - 35
+      # MB of builds nobody would install again, and a page nobody could read.
+      # Five is enough to roll back to when something is wrong on the phone,
+      # which matters here because there is no way to check a build locally.
+      #
+      # build-19 is kept forever. It is the first release this project ever
+      # cut and the owner wants to be able to look back at it.
+      - name: Prune old releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          FIRST=build-19
+          gh release list -L 200 --json tagName -q '.[].tagName' \
+            | grep -E '^build-[0-9]+$' \
+            | sort -t- -k2 -n -r \
+            | tail -n +6 \
+            | grep -vx "$FIRST" \
+            | while read -r tag; do
+                echo "pruning $tag"
+                gh release delete "$tag" --yes --cleanup-tag
+              done

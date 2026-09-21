@@ -586,7 +586,13 @@ final class Portal: NSObject, ObservableObject {
             .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
 
         var last = "no reply from the page"
-        for _ in 0..<30 {
+        // Sixty, not thirty: the blob opens each Folder module's own page one
+        // at a time, up to the cap in `lmsCourses`, and a page apiece on a
+        // phone is a second or two of work the two API calls never were.
+        // Giving up early does not lose the list - the merge keeps the last
+        // one - but it means the tab never updates again, and on a first run
+        // it stays empty while the work was about to finish.
+        for _ in 0..<60 {
             if Task.isCancelled { return nil }
             try? await Task.sleep(nanoseconds: 400_000_000)
             _ = try? await eval("window.__mine = \(mine); 1")

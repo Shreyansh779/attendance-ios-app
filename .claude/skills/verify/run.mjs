@@ -574,13 +574,21 @@ check('a Folder module is opened here and its files take its place', () => {
     '</div>';
 
   // A page whose theme gives the anchor no text at all, so the name has to
-  // come off the url - percent-escaped, which is how Moodle writes it.
+  // come off the url - percent-escaped, which is how Moodle writes it. Also
+  // carries a link off this Moodle: whatever opens these holds the portal
+  // session, so an absolute url elsewhere must not survive.
   const bare =
     '<div class="filemanager"><a href="https://lms/pluginfile.php/3/mod_folder/content/0/' +
     encodeURIComponent('Week 2 notes.pdf') +
-    '"></a></div>';
+    '"></a>' +
+    '<a href="https://not-the-lms.example/pluginfile.php/9/mod_folder/content/0/x.pdf">x.pdf</a>' +
+    '</div>';
 
-  const win = { M: { cfg: { sesskey: 'sk1' } }, __mine: { 'Web Analytics': ['Ayush Gurjar'] } };
+  const win = {
+    location: { origin: 'https://lms' },
+    M: { cfg: { sesskey: 'sk1' } },
+    __mine: { 'Web Analytics': ['Ayush Gurjar'] },
+  };
   const asked = [];
   const fetch = (url, opt) => {
     asked.push(url);
@@ -630,41 +638,59 @@ check('a Folder module is opened here and its files take its place', () => {
     !items.some((i) => i.url.indexOf('banner.png') > -1),
     "the intro's image was picked up as a file"
   );
+  truthy(
+    !items.some((i) => i.url.indexOf('not-the-lms') > -1),
+    'a link off this Moodle survived - it would open in the session webview'
+  );
   eq(asked.length, 4, 'expected the course list, the state, and one fetch per folder');
 });
 
-check('a folder that will not open stays a folder', () => {
-  const courses = [{ id: 7, fullname: 'Web Analytics_Sem5' }];
-  const state = {
-    course: { sectionlist: ['1'] },
-    section: [{ id: '1', title: 'Ayush Gurjar', visible: true, parentsectionid: null, cmlist: ['b'] }],
-    cm: [{ id: 'b', name: 'Slides', modname: 'folder', uservisible: true, url: 'https://lms/f' }],
-  };
-  const win = { M: { cfg: { sesskey: 'sk1' } }, __mine: {} };
-  const fetch = (url, opt) => {
-    if (opt && opt.body) {
-      const calls = JSON.parse(opt.body);
-      if (calls[0].methodname.indexOf('timeline_classification') > -1) {
-        return sync({ json: () => sync([{ error: false, data: { courses } }]) });
-      }
-      return sync({ json: () => sync([{ index: 0, error: false, data: JSON.stringify(state) }]) });
-    }
-    // A folder page with nothing on it that looks like a file.
-    return sync({ text: () => sync('<html><body>Sorry, no access.</body></html>') });
-  };
-  const call = () => JSON.parse(
-    new Function('window', 'M', 'fetch', 'return (' + blobs.lmsCourses + ')')(win, win.M, fetch)
-  );
+// A thenable that rejects, so the catch in the folder loop is actually
+// exercised. `sync` discards its catch handler, which would have let a test
+// claim to cover the failure path without ever entering it.
+const boom = {
+  then: function () { return boom; },
+  catch: (f) => sync(f(new Error('refused'))),
+};
 
-  call();
-  const out = call();
-  truthy(out.done && out.ok, 'never finished: ' + out.diag);
-  eq(
-    out.courses[0].items.map((i) => i.kind + '/' + i.title),
-    ['folder/Slides'],
-    'the row was dropped instead of left alone'
-  );
-});
+for (const [how, answer] of [
+  // A folder page with nothing on it that looks like one of its files.
+  ['holds nothing openable', () => sync({ text: () => sync('<p>Sorry, no access.</p>') })],
+  // The request itself fails - offline, or the session has lapsed.
+  ['cannot be fetched at all', () => boom],
+]) {
+  check(`a folder that ${how} stays a folder`, () => {
+    const courses = [{ id: 7, fullname: 'Web Analytics_Sem5' }];
+    const state = {
+      course: { sectionlist: ['1'] },
+      section: [{ id: '1', title: 'Ayush Gurjar', visible: true, parentsectionid: null, cmlist: ['b'] }],
+      cm: [{ id: 'b', name: 'Slides', modname: 'folder', uservisible: true, url: 'https://lms/f' }],
+    };
+    const win = { location: { origin: 'https://lms' }, M: { cfg: { sesskey: 'sk1' } }, __mine: {} };
+    const fetch = (url, opt) => {
+      if (opt && opt.body) {
+        const calls = JSON.parse(opt.body);
+        if (calls[0].methodname.indexOf('timeline_classification') > -1) {
+          return sync({ json: () => sync([{ error: false, data: { courses } }]) });
+        }
+        return sync({ json: () => sync([{ index: 0, error: false, data: JSON.stringify(state) }]) });
+      }
+      return answer();
+    };
+    const call = () => JSON.parse(
+      new Function('window', 'M', 'fetch', 'return (' + blobs.lmsCourses + ')')(win, win.M, fetch)
+    );
+
+    call();
+    const out = call();
+    truthy(out.done && out.ok, 'never finished: ' + out.diag);
+    eq(
+      out.courses[0].items.map((i) => i.kind + '/' + i.title),
+      ['folder/Slides'],
+      'the row was dropped instead of left alone'
+    );
+  });
+}
 
 check('lmsKey finds the session by shape and spends only one key', () => {
   const store = {

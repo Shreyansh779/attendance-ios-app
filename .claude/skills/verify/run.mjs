@@ -539,6 +539,133 @@ check('lmsCourses keeps your teachers, their folders, and the shared sections', 
   eq(asked, 2, 'more requests than the list plus one batch');
 });
 
+check('a Folder module is opened here and its files take its place', () => {
+  const courses = [{ id: 7, fullname: 'Web Analytics_Sem5' }];
+  const state = {
+    course: { sectionlist: ['1', '2'] },
+    section: [
+      { id: '1', title: 'Ayush Gurjar', visible: true, parentsectionid: null, cmlist: ['a', 'b'] },
+      { id: '2', title: 'Unit-1', visible: true, parentsectionid: '1', cmlist: ['c'] },
+    ],
+    cm: [
+      { id: 'a', name: 'Syllabus', modname: 'File', uservisible: true, url: 'https://lms/s' },
+      // The one under test. Moodle calls the module "folder", lowercase.
+      { id: 'b', name: 'Slides', modname: 'folder', uservisible: true, url: 'https://lms/mod/folder/view.php?id=9' },
+      // A folder nested inside a subsection, so its files carry both names.
+      { id: 'c', name: 'Readings', modname: 'Folder', uservisible: true, url: 'https://lms/mod/folder/view.php?id=10' },
+    ],
+  };
+
+  // Shaped like a real folder page: the file manager holds the files, and an
+  // embedded image sits in the intro above it, outside the manager.
+  const page = (names) =>
+    '<div class="intro"><img src="https://lms/pluginfile.php/1/mod_folder/intro/banner.png"></div>' +
+    '<div id="folder_tree9" class="filemanager">' +
+    names
+      .map(
+        (n) =>
+          '<span class="fp-filename-icon"><a href="https://lms/pluginfile.php/2/mod_folder/content/0/' +
+          encodeURIComponent(n) +
+          '?forcedownload=1"><span class="fp-icon"></span><span class="fp-filename">' +
+          n +
+          '</span></a></span>'
+      )
+      .join('') +
+    '</div>';
+
+  // A page whose theme gives the anchor no text at all, so the name has to
+  // come off the url - percent-escaped, which is how Moodle writes it.
+  const bare =
+    '<div class="filemanager"><a href="https://lms/pluginfile.php/3/mod_folder/content/0/' +
+    encodeURIComponent('Week 2 notes.pdf') +
+    '"></a></div>';
+
+  const win = { M: { cfg: { sesskey: 'sk1' } }, __mine: { 'Web Analytics': ['Ayush Gurjar'] } };
+  const asked = [];
+  const fetch = (url, opt) => {
+    asked.push(url);
+    if (opt && opt.body) {
+      const calls = JSON.parse(opt.body);
+      if (calls[0].methodname.indexOf('timeline_classification') > -1) {
+        return sync({ json: () => sync([{ error: false, data: { courses } }]) });
+      }
+      return sync({ json: () => sync([{ index: 0, error: false, data: JSON.stringify(state) }]) });
+    }
+    if (url.indexOf('id=9') > -1) {
+      return sync({ text: () => sync(page(['Lecture 1.pdf', 'Lecture 2.pdf'])) });
+    }
+    return sync({ text: () => sync(bare) });
+  };
+  const call = () => JSON.parse(
+    new Function('window', 'M', 'fetch', 'return (' + blobs.lmsCourses + ')')(win, win.M, fetch)
+  );
+
+  call();
+  const out = call();
+  truthy(out.done && out.ok, 'never finished: ' + out.diag);
+
+  const items = out.courses[0].items;
+  eq(
+    items.map((i) => i.folder + '/' + i.title),
+    [
+      '/Syllabus',
+      // The folder module is gone; its files stand where it stood, under a
+      // folder named after it.
+      'Slides/Lecture 1.pdf',
+      'Slides/Lecture 2.pdf',
+      // Nested: the subsection it lived in, then the folder itself.
+      'Unit-1 / Readings/Week 2 notes.pdf',
+    ],
+    'a folder was not expanded into its files'
+  );
+  truthy(
+    items.every((i) => i.kind.toLowerCase() !== 'folder'),
+    'a Folder module survived as a row to tap'
+  );
+  truthy(
+    items.every((i) => i.group === 'Ayush Gurjar'),
+    'an expanded file lost its teacher'
+  );
+  truthy(
+    !items.some((i) => i.url.indexOf('banner.png') > -1),
+    "the intro's image was picked up as a file"
+  );
+  eq(asked.length, 4, 'expected the course list, the state, and one fetch per folder');
+});
+
+check('a folder that will not open stays a folder', () => {
+  const courses = [{ id: 7, fullname: 'Web Analytics_Sem5' }];
+  const state = {
+    course: { sectionlist: ['1'] },
+    section: [{ id: '1', title: 'Ayush Gurjar', visible: true, parentsectionid: null, cmlist: ['b'] }],
+    cm: [{ id: 'b', name: 'Slides', modname: 'folder', uservisible: true, url: 'https://lms/f' }],
+  };
+  const win = { M: { cfg: { sesskey: 'sk1' } }, __mine: {} };
+  const fetch = (url, opt) => {
+    if (opt && opt.body) {
+      const calls = JSON.parse(opt.body);
+      if (calls[0].methodname.indexOf('timeline_classification') > -1) {
+        return sync({ json: () => sync([{ error: false, data: { courses } }]) });
+      }
+      return sync({ json: () => sync([{ index: 0, error: false, data: JSON.stringify(state) }]) });
+    }
+    // A folder page with nothing on it that looks like a file.
+    return sync({ text: () => sync('<html><body>Sorry, no access.</body></html>') });
+  };
+  const call = () => JSON.parse(
+    new Function('window', 'M', 'fetch', 'return (' + blobs.lmsCourses + ')')(win, win.M, fetch)
+  );
+
+  call();
+  const out = call();
+  truthy(out.done && out.ok, 'never finished: ' + out.diag);
+  eq(
+    out.courses[0].items.map((i) => i.kind + '/' + i.title),
+    ['folder/Slides'],
+    'the row was dropped instead of left alone'
+  );
+});
+
 check('lmsKey finds the session by shape and spends only one key', () => {
   const store = {
     a9x: JSON.stringify({ Identity: { AccessToken: 'tok' } }),

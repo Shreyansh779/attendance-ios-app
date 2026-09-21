@@ -179,24 +179,24 @@ struct SubjectView: View {
 
     // MARK: - Which way it is going
 
+    /// A sparkline used to sit here, and another beside the aggregate on the
+    /// attendance screen. Both are gone: a 34pt line with no axis said only
+    /// which way, and the number beside it already said which way and by how
+    /// much.
     private var trend: some View {
         let delta = (series.last ?? 0) - (series.first ?? 0)
         return VStack(alignment: .leading, spacing: 12) {
             Text("Since you started tracking")
                 .r(16, .semibold)
                 .foregroundStyle(Color.ink)
-            HStack(spacing: 14) {
-                Spark(values: series, tint: delta >= 0 ? Color.mintHi : Color.coral)
-                    .frame(height: 34)
-                Text(
-                    abs(delta) < 0.05
-                        ? "flat"
-                        : "\(delta >= 0 ? "+" : "−")\(String(format: "%.1f", abs(delta))) pts"
-                )
-                .r(15, .semibold)
-                .foregroundStyle(delta >= 0 ? Color.mintHi : Color.coral)
-                .fixedSize()
-            }
+            Text(
+                abs(delta) < 0.05
+                    ? "flat"
+                    : "\(delta >= 0 ? "+" : "−")\(String(format: "%.1f", abs(delta))) pts"
+            )
+            .r(15, .semibold)
+            .foregroundStyle(delta >= 0 ? Color.mintHi : Color.coral)
+            .fixedSize()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .slab(.sur, radius: 28, pad: EdgeInsets(top: 20, leading: 22, bottom: 20, trailing: 22))

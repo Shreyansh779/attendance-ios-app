@@ -103,6 +103,14 @@ The IPA ships **unsigned** by design; a sideloader re-signs it. Pushing to
   origin. A section matching nobody is kept only when it does not look like a
   person's name, which is what keeps "General" and
   "PEMC(Batches - CCSF (4,5,6,7,8,9)". Courses are filtered to `_Sem5`.
+  A **Folder module** is not a row to tap: its page is fetched here and its
+  `pluginfile.php` links take its place in the list, under a folder named
+  after it — so the screen never sends you out to a page that is only a list
+  of files. The state API cannot supply them and `core_course_get_contents`
+  is off, so the folder's own page is the only source. Fetched one at a time
+  and capped at forty, on a path that runs after the read has finished. A
+  folder that will not open, or holds nothing that looks like a file, stays a
+  row — losing material is worse than an extra tap.
   Anything async parks its answer on a `window` global and is polled, because
   `evaluateJavaScript` cannot wait for a promise.
 - `Models.swift` — `Budget` (can I skip?) and `Term` (can I still recover?).

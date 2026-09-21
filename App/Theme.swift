@@ -461,37 +461,6 @@ struct Skeleton: View {
 
 // MARK: - Charts
 
-/// A trend line with no axes, no labels and no grid.
-///
-/// The number next to it is the value; this only has to answer "which way".
-/// Anything more would be a chart, and a chart is a different screen.
-struct Spark: View {
-    let values: [Double]
-    let tint: Color
-
-    var body: some View {
-        GeometryReader { geo in
-            if values.count > 1 {
-                let lo = values.min() ?? 0
-                let hi = values.max() ?? 1
-                // A flat series would divide by zero and, worse, render as a
-                // dramatic zigzag of rounding noise. Give it a floor.
-                let span = Swift.max(hi - lo, 1.0)
-                Path { p in
-                    for (i, v) in values.enumerated() {
-                        let x = geo.size.width * Double(i) / Double(values.count - 1)
-                        let y = geo.size.height * (1 - (v - lo) / span)
-                        let pt = CGPoint(x: x, y: y)
-                        if i == 0 { p.move(to: pt) } else { p.addLine(to: pt) }
-                    }
-                }
-                .stroke(tint, style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
-            }
-        }
-        .accessibilityHidden(true)
-    }
-}
-
 /// Progress toward the threshold. Capsule, so there is nothing to line.
 struct Meter: View {
     let pct: Double

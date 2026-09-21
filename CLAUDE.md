@@ -193,6 +193,19 @@ surface. Do not dim text below `ink4`, and do not introduce a raw hex — a hook
 (`.claude/hooks/check-tokens.mjs`) refuses one anywhere under `App/` except
 `Theme.swift` itself.
 
+The icon is generated, not drawn: `node tools/icon.mjs` writes
+`icon-1024.png` straight into the asset catalogue. There is no image tooling
+on this machine, so the script carries its own PNG writer — node's zlib is
+the only thing it needs. The mark is the threshold: a ring three quarters
+closed, mint on the app's own ground, gap centred at the top. Change the
+palette in `Theme.swift` and change it there too; nothing links them.
+
+The portal webview forces **no** scheme. It inherits Dark from the app, so
+the portal renders dark — an override to light was tried and reverted,
+because the keyboard takes its appearance from the traits of the view that
+raised it, and a light keyboard under a dark app is worse every login than
+the portal being dark once.
+
 Urgency has three states, not two: mint (fine), amber (short but recoverable),
 coral (the blocker, or no longer reachable). Coral is spent on one row, not on
 every row that happens to be below the line — when everything is an alarm,

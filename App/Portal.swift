@@ -85,12 +85,11 @@ final class Portal: NSObject, ObservableObject {
         let wv = WKWebView(frame: .zero, configuration: cfg)
         wv.navigationDelegate = self
         wv.allowsBackForwardNavigationGestures = true
-        // No override here. Forcing this webview to light was meant to keep
-        // the portal's login page rendering the way it always had, on the
-        // theory that its captcha might not survive a dark scheme. It does.
-        // What the override did instead was hand the login sheet a light
-        // keyboard in a dark app, which is the one part of that screen you
-        // actually look at while typing.
+        // No scheme forced here. Overriding to light to keep the portal
+        // rendering the way it always had also turned the keyboard light,
+        // because the keyboard takes its appearance from the traits of the
+        // view that raised it - and a light keyboard under a dark app is more
+        // jarring, every time you log in, than the portal being dark once.
         return wv
     }
 
@@ -197,6 +196,50 @@ final class Portal: NSObject, ObservableObject {
         visitTask = nil
         showingVisit = false
         status = nil
+    }
+
+    /// The document on screen, as a file on disk, so the share sheet has
+    /// something real to hand to Files, Mail or anything else.
+    ///
+    /// Sharing the URL instead would be useless: a Moodle `pluginfile.php`
+    /// link outside this webview lands on a login form, so whatever received
+    /// it would get a page about signing in. The bytes have to travel, which
+    /// means fetching them again with this webview's cookies.
+    func downloadVisible() async -> URL? {
+        guard let url = webView.url else { return nil }
+
+        let store = webView.configuration.websiteDataStore.httpCookieStore
+        let cookies: [HTTPCookie] = await withCheckedContinuation { k in
+            store.getAllCookies { k.resume(returning: $0) }
+        }
+
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.httpCookieStorage = HTTPCookieStorage.shared
+        cookies.forEach { cfg.httpCookieStorage?.setCookie($0) }
+        cfg.httpShouldSetCookies = true
+
+        guard let (tmp, response) = try? await URLSession(configuration: cfg).download(from: url)
+        else { return nil }
+
+        // The server's own name for it where there is one - a pluginfile path
+        // ends in the filename, but percent-escaped, and Moodle does not
+        // always say. Anything without an extension confuses every receiver,
+        // so it gets one.
+        var name = response.suggestedFilename
+            ?? url.lastPathComponent.removingPercentEncoding
+            ?? url.lastPathComponent
+        if name.isEmpty || !name.contains(".") { name = (name.isEmpty ? "document" : name) + ".pdf" }
+
+        // Its own directory, so two files of the same name from two courses
+        // do not overwrite each other mid-share.
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("shared/\(UUID().uuidString)", isDirectory: true)
+        guard (try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)) != nil
+        else { return nil }
+
+        let dest = dir.appendingPathComponent(name)
+        guard (try? FileManager.default.moveItem(at: tmp, to: dest)) != nil else { return nil }
+        return dest
     }
 
     // MARK: - Polling

@@ -1473,6 +1473,35 @@ enum Scrapers {
     return false;
   }
 
+  // A Folder module is a page with a pile of files on it. Opening one on the
+  // phone means leaving the app for a list, so its files are read off it here
+  // and take its place. `core_courseformat_get_state` cannot supply them - it
+  // carries module names and urls only - and `core_course_get_contents` is
+  // switched off on this Moodle, so the folder's own page is the only source.
+  //
+  // Themes differ in how they mark the anchor up, so the name is taken from
+  // the link text when there is any and from the url when there is not.
+  function filesIn(html) {
+    // Start at the file manager when the theme provides one; otherwise the
+    // whole page, which over-captures an embedded image at worst.
+    var box = /<div[^>]+class="[^"]*filemanager[^"]*"[\s\S]*/i.exec(html);
+    var hay = box ? box[0] : html;
+    var re = /<a[^>]+href="([^"]*\/pluginfile\.php\/[^"]*)"[^>]*>([\s\S]*?)<\/a>/gi;
+    var out = [], seen = {}, m;
+    while ((m = re.exec(hay))) {
+      var url = text(m[1]);
+      if (seen[url]) continue;
+      seen[url] = 1;
+      var name = text(m[2].replace(/<[^>]*>/g, '')).replace(/\s+/g, ' ').trim();
+      if (!name) {
+        var tail = url.split('?')[0].split('/').pop();
+        try { name = decodeURIComponent(tail); } catch (e) { name = tail; }
+      }
+      if (name) out.push({ title: name, url: url });
+    }
+    return out;
+  }
+
   // Two plain words, or an honorific, and it is somebody's name. "General",
   // "PEMC(Batches - CCSF (4,5,6,7,8,9)" and "Unit-1" are not, which is how
   // the sections a course shares with every batch survive the filter.
@@ -1593,10 +1622,68 @@ enum Scrapers {
       }
 
       st.courses = out;
-      st.ok = true;
-      st.done = true;
-      st.diag = out.length + ' courses, ' + total + ' items'
-        + (unmatched.length ? ', nothing of yours in: ' + unmatched.join(', ') : '');
+      var note = (unmatched.length ? ', nothing of yours in: ' + unmatched.join(', ') : '');
+
+      var pending = [];
+      out.forEach(function (c) {
+        c.items.forEach(function (it) {
+          if (String(it.kind).toLowerCase() === 'folder' && it.url) {
+            pending.push({ course: c, item: it });
+          }
+        });
+      });
+      // ponytail: forty folders is already an absurd course. Raise the cap if
+      // a real one ever reaches it - each is one more request on a path that
+      // already runs after the read has finished.
+      pending = pending.slice(0, 40);
+
+      if (!pending.length) {
+        st.ok = true;
+        st.done = true;
+        st.diag = out.length + ' courses, ' + total + ' items' + note;
+        return;
+      }
+
+      function finish() {
+        var opened = 0;
+        pending.forEach(function (f) {
+          if (!f.files || !f.files.length) return;
+          // Looked up fresh, because an earlier splice into the same course
+          // has already moved everything after it.
+          var at = f.course.items.indexOf(f.item);
+          if (at < 0) return;
+          opened++;
+          var inner = f.item.folder ? f.item.folder + ' / ' + f.item.title : f.item.title;
+          var kids = f.files.map(function (x) {
+            return { title: x.title, kind: 'File', url: x.url, group: f.item.group, folder: inner };
+          });
+          f.course.items.splice.apply(f.course.items, [at, 1].concat(kids));
+        });
+
+        var count = 0;
+        out.forEach(function (c) { count += c.items.length; });
+        st.ok = true;
+        st.done = true;
+        st.diag = out.length + ' courses, ' + count + ' items'
+          + (opened ? ', ' + opened + ' of ' + pending.length + ' folders opened' : '')
+          + note;
+      }
+
+      // One at a time, not Promise.all: forty parallel requests at a Moodle
+      // is rude, and this runs after the read has already finished so nothing
+      // is waiting on it.
+      var next = 0;
+      function openNext() {
+        if (next >= pending.length) { finish(); return null; }
+        var f = pending[next++];
+        return fetch(f.item.url, { credentials: 'same-origin' })
+          .then(function (r) { return r.text(); })
+          .then(function (html) { f.files = filesIn(html); return openNext(); })
+          // A folder that will not open stays a folder: the row still works,
+          // and dropping it would lose material rather than tidy it.
+          .catch(function () { f.files = []; return openNext(); });
+      }
+      return openNext();
     });
   }).catch(function (e) {
     st.done = true;

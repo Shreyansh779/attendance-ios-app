@@ -9,6 +9,10 @@
 	<key>CFBundlePackageType</key><string>APPL</string>
 	<key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
+	<!-- Dark only. Every colour in Theme.swift is solved against one ground;
+	     letting the phone hand us a light scheme would render the whole ink
+	     ramp against a surface it was never contrast-checked on. -->
+	<key>UIUserInterfaceStyle</key><string>Dark</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>

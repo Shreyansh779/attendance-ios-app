@@ -9,12 +9,11 @@
 # is a thing to run when a layout is in question rather than on every push.
 name: Screenshots
 
+#
+# Dark only: the app pins `UIUserInterfaceStyle` to `Dark`, so a light
+# simulator would photograph the same screens.
 on:
   workflow_dispatch:
-    inputs:
-      appearance:
-        description: dark, light, or both
-        default: both
 
 jobs:
   shots:
@@ -93,16 +92,14 @@ jobs:
             echo "shot $name"
           }
 
-          for MODE in $(echo "${{ inputs.appearance }}" | sed 's/both/dark light/'); do
-            xcrun simctl ui "$UDID" appearance "$MODE"
-            sleep 1
-            shoot "$MODE-1-today"      -tab today
-            shoot "$MODE-2-timetable"  -tab timetable
-            shoot "$MODE-3-attendance" -tab attendance
-            shoot "$MODE-4-subject"    -tab subject
-            shoot "$MODE-5-lms"        -tab lms
-            shoot "$MODE-6-settings"   -tab today -sheet settings
-          done
+          xcrun simctl ui "$UDID" appearance dark
+          sleep 1
+          shoot "dark-1-today"      -tab today
+          shoot "dark-2-timetable"  -tab timetable
+          shoot "dark-3-attendance" -tab attendance
+          shoot "dark-4-subject"    -tab subject
+          shoot "dark-5-lms"        -tab lms
+          shoot "dark-6-settings"   -tab today -sheet settings
           ls -la shots
 
       - uses: actions/upload-artifact@v4

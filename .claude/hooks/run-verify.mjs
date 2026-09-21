@@ -11,6 +11,8 @@
 // under App/.
 import { spawnSync } from 'child_process';
 import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 let ev;
 try {
@@ -22,9 +24,24 @@ try {
 const file = (ev.tool_input?.file_path ?? '').replace(/\\/g, '/');
 if (!/\/App\/.*\.swift$/.test(file)) process.exit(0);
 
-const r = spawnSync(process.execPath, ['.claude/skills/verify/run.mjs'], {
-  encoding: 'utf8',
-});
+// Relative to this hook, not to the cwd. A hook invoked from anywhere but the
+// repo root would otherwise fail to spawn, and the branch below would read
+// that as a failing suite and block every edit under App/.
+const suite = path.resolve(fileURLToPath(import.meta.url), '../../skills/verify/run.mjs');
+
+const r = spawnSync(process.execPath, [suite], { encoding: 'utf8' });
+
+// A suite that could not be started is not a suite that failed. `status` is
+// null when spawn errored or the process was killed by a signal, and blocking
+// an edit on that - with no output to explain it - is worse than not checking.
+if (r.error || r.status === null) {
+  console.error(
+    'run-verify: could not run the suite (' +
+      (r.error?.message ?? 'killed by ' + r.signal) +
+      ').\nThe edit stands unchecked - run `node .claude/skills/verify/run.mjs`\nby hand.'
+  );
+  process.exit(0);
+}
 
 if (r.status !== 0) {
   console.error(

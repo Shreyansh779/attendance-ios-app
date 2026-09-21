@@ -35,7 +35,11 @@ try {
 // it; `Color(red:...)`, `UIColor(red:...)` and `.opacity` on a literal white
 // are the other ways a raw colour gets in.
 const patterns = [
-  [/\bColor\(\s*0x[0-9A-Fa-f]{6}/, 'a raw hex'],
+  // `UIColor(0x…)` needs naming separately: there is no word boundary between
+  // the `I` and the `C`, so `\bColor\(` does not match it - and since every
+  // surface token in Theme.swift is now spelled `Color(UIColor(0x…))`, that is
+  // the form most likely to get copied into a view.
+  [/\b(UI)?Color\(\s*0x[0-9A-Fa-f]{6}/, 'a raw hex'],
   [/\b(Color|UIColor)\(\s*red:/, 'a raw RGB literal'],
   [/\b(Color|UIColor)\(\s*white:/, 'a raw greyscale literal'],
   [/\b(Color|UIColor)\(\s*hue:/, 'a raw HSB literal'],

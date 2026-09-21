@@ -78,6 +78,12 @@ jobs:
 
       - name: Shoot every screen
         run: |
+          # Clear it first. The screens have been renumbered before (the LMS
+          # tab pushed Settings from 5 to 6), and a leftover PNG under the old
+          # name is indistinguishable from a current one - the ui-review agent
+          # reads the whole directory and would report on a layout that no
+          # longer exists.
+          rm -rf shots
           mkdir -p shots
           ID=com.shreyansh.today
 

@@ -29,9 +29,19 @@ try {
 
 // `sources:` runs until the next key at the same indent. Info.plist is only a
 // problem inside that block; it is required as INFOPLIST_FILE elsewhere.
+// Every `sources:` block, not just the first - a second target would
+// otherwise carry the same mistake past this hook unseen.
 // No /m: `$` must mean end of file, or it ends the block at the first newline.
-const m = /(?:^|\n)([ \t]*)sources:[ \t]*\n([\s\S]*?)(?=\n\1[^ \t\n]|$)/.exec(src);
-if (m && /Info\.plist/.test(m[2])) {
+const re = /(?:^|\n)([ \t]*)sources:[ \t]*\n([\s\S]*?)(?=\n\1[^ \t\n]|$)/g;
+let m;
+let offender = null;
+while ((m = re.exec(src))) {
+  if (/Info\.plist/.test(m[2])) { offender = m; break; }
+  // A zero-width match would spin here; a block always has at least one line.
+  if (m[0].length === 0) re.lastIndex++;
+}
+
+if (offender) {
   console.error(
     'project.yml lists Info.plist under `sources:`.\n\n' +
       'INFOPLIST_FILE already targets it. Leaving it in sources makes XcodeGen\n' +

@@ -85,11 +85,12 @@ final class Portal: NSObject, ObservableObject {
         let wv = WKWebView(frame: .zero, configuration: cfg)
         wv.navigationDelegate = self
         wv.allowsBackForwardNavigationGestures = true
-        // The app is pinned to Dark, and that reaches the web content as
-        // `prefers-color-scheme: dark`. The portal is not ours, its login page
-        // is the only way into this app, and the captcha on it has to be read
-        // by eye - so it renders the way it always has, whatever the app does.
-        wv.overrideUserInterfaceStyle = .light
+        // No override here. Forcing this webview to light was meant to keep
+        // the portal's login page rendering the way it always had, on the
+        // theory that its captcha might not survive a dark scheme. It does.
+        // What the override did instead was hand the login sheet a light
+        // keyboard in a dark app, which is the one part of that screen you
+        // actually look at while typing.
         return wv
     }
 

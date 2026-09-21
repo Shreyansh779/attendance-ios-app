@@ -146,9 +146,16 @@ for (const f of fs.existsSync('shots') ? fs.readdirSync('shots') : []) {
   if (f.endsWith('.png')) fs.copyFileSync(path.join('shots', f), path.join(OUT, 'shots', f));
 }
 
-// A page whose only job is the one-tap add. Typing a Pages URL into SideStore
-// on a phone is the worst part of this, and `sidestore://` removes it.
+// A page whose only job is the one-tap add. Typing a Pages URL in by hand is
+// the worst part of this, and worse than it looks: Sources is not a tab in
+// SideStore, it is buried inside Browse, and that is the step people give up
+// on. The url scheme skips it entirely.
+//
+// Both schemes are offered. SideStore forks AltStore, and which of the two a
+// build registers depends on how it was made; the wrong one does nothing at
+// all, silently, so it is not worth guessing.
 const addURL = `sidestore://source?url=${PAGES}/source.json`;
+const altURL = `altstore://source?url=${PAGES}/source.json`;
 fs.writeFileSync(
   path.join(OUT, 'index.html'),
   `<!doctype html>
@@ -175,6 +182,11 @@ fs.writeFileSync(
     padding: 0.85rem 1.6rem; border-radius: 999px;
     background: ${MINT}; color: #131316;
   }
+  a.alt {
+    text-decoration: none; font-size: 0.85rem; color: #a8a8b3;
+    border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 2px;
+  }
+  b { color: #f5f5f7; font-weight: 600; }
   code {
     display: block; margin-top: 0.5rem; padding: 0.7rem 0.9rem; border-radius: 14px;
     background: rgba(255,255,255,0.055); color: #a8a8b3;
@@ -187,7 +199,9 @@ fs.writeFileSync(
   <h1>Today</h1>
   <p>UPES attendance, and whether you can skip. Version ${versions[0].version}.</p>
   <a class="add" href="${addURL}">Add to SideStore</a>
-  <p>Or paste this into SideStore &rarr; Sources &rarr; Add.<code>${PAGES}/source.json</code></p>
+  <a class="alt" href="${altURL}">Nothing happened? Try AltStore</a>
+  <p>By hand: the <b>Browse</b> tab, then <b>Sources</b>, then <b>+</b>, and paste this.
+  There is no Sources tab &mdash; it lives inside Browse.<code>${PAGES}/source.json</code></p>
 </body>
 </html>
 `

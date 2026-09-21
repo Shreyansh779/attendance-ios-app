@@ -7,6 +7,18 @@
           {
             "type": "command",
             "command": "node .claude/hooks/check-scrapers.mjs"
+          },
+          {
+            "type": "command",
+            "command": "node .claude/hooks/check-tokens.mjs"
+          },
+          {
+            "type": "command",
+            "command": "node .claude/hooks/check-project.mjs"
+          },
+          {
+            "type": "command",
+            "command": "node .claude/hooks/run-verify.mjs"
           }
         ]
       }

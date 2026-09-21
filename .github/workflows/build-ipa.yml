@@ -88,8 +88,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="build-${{ github.run_number }}"
+          # The commit subject on the first line, because that line is what
+          # SideStore shows against the version - boilerplate there told the
+          # reader nothing about what changed.
+          git log -1 --pretty=%s > notes.md
+          printf '\nUnsigned IPA. A sideloader re-signs it on install.\n' >> notes.md
           gh release create "$TAG" out/Today.ipa \
             --title "Today $VERSION ($TAG)" \
-            --notes "Unsigned IPA. Download Today.ipa and sideload it." \
+            --notes-file notes.md \
             --latest
           echo "### Download Today.ipa from the release: $TAG" >> "$GITHUB_STEP_SUMMARY"

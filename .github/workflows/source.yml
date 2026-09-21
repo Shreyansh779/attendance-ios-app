@@ -1,0 +1,64 @@
+# Publishes the SideStore source to GitHub Pages.
+#
+# A SideStore "repo" is one static JSON file listing the app and its versions.
+# tools/source.mjs builds it from the releases that already exist, so there is
+# nothing to keep up by hand - every build that cuts a release turns up here
+# on its own.
+#
+# Triggered by the build workflow finishing rather than by `release:
+# published`, because a release created with the workflow token does not raise
+# release events - that is deliberate on GitHub's side, to stop workflows
+# triggering each other in a loop.
+name: SideStore source
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["Build unsigned IPA"]
+    types: [completed]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time, and the newest wins: two builds landing together
+# should not race over which version the source offers.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    # A failed build published no IPA, so there is nothing new to list.
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: pages
+        uses: actions/configure-pages@v5
+
+      # Asked for rather than assumed: the download URLs in the JSON have to
+      # be absolute, and a wrong host makes every install fail on fetch.
+      - name: Build the source
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PAGES_URL: ${{ steps.pages.outputs.base_url }}
+        run: node tools/source.mjs
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4
+
+      - name: Say where it landed
+        run: |
+          echo "### SideStore source" >> "$GITHUB_STEP_SUMMARY"
+          echo '`${{ steps.deploy.outputs.page_url }}source.json`' >> "$GITHUB_STEP_SUMMARY"

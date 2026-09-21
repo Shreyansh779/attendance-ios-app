@@ -3,3 +3,4 @@ out/
 *.xcodeproj
 *.ipa
 .DS_Store
+_site/

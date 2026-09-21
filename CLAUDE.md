@@ -196,9 +196,15 @@ surface. Do not dim text below `ink4`, and do not introduce a raw hex — a hook
 The icon is generated, not drawn: `node tools/icon.mjs` writes
 `icon-1024.png` straight into the asset catalogue. There is no image tooling
 on this machine, so the script carries its own PNG writer — node's zlib is
-the only thing it needs. The mark is the threshold: a ring three quarters
-closed, mint on the app's own ground, gap centred at the top. Change the
-palette in `Theme.swift` and change it there too; nothing links them.
+the only thing it needs. Change the palette in `Theme.swift` and change it
+there too; nothing links them.
+
+The mark is a **serif T**, mint on the app's ground, constructed rather than
+set — the font cannot be bundled, and tracing the closest installed serif is
+a worse lie than building the letter honestly. Every measurement in the
+script is a fraction of the cap height, so the weight can be recut without
+redrawing it. A progress ring lived here first; it was a shape standing in
+for an idea, and it is the shape every tracking app already reaches for.
 
 The portal webview forces **no** scheme. It inherits Dark from the app, so
 the portal renders dark — an override to light was tried and reverted,

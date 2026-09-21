@@ -93,6 +93,12 @@ jobs:
           # reader nothing about what changed.
           git log -1 --pretty=%s > notes.md
           printf '\nUnsigned IPA. A sideloader re-signs it on install.\n' >> notes.md
+          # What is actually inside the IPA, for tools/source.mjs to read. A
+          # SideStore source has to state the bundle's own version exactly;
+          # reading it back out of the release title works until the title
+          # changes shape, and the cost of being wrong is every install
+          # failing with "the download version doesn't match".
+          printf '\nbundle %s (%s)\n' "$VERSION" "${{ github.run_number }}" >> notes.md
           gh release create "$TAG" out/Today.ipa \
             --title "Today $VERSION ($TAG)" \
             --notes-file notes.md \

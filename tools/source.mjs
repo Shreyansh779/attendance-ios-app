@@ -8,13 +8,17 @@
 // means it can be generated from the GitHub releases API and served from
 // Pages, with nothing to keep up by hand.
 //
-// The one thing that needs care here: MARKETING_VERSION is pinned at 2.0 and
-// bumped only when a release adds something, while the build number is the CI
-// run. A store that dedupes on the version string would therefore see one
-// version forever and never offer an update. So the version published here is
-// `<marketing>.<build>` - 2.0.105 - which is honest, strictly increasing, and
-// unambiguous to any client. `buildVersion` is sent as well for the clients
-// that read it.
+// The version published here must be the bundle's own
+// CFBundleShortVersionString, and buildVersion its CFBundleVersion, exactly.
+// SideStore reads them out of the downloaded IPA and refuses to install when
+// they disagree with what the source promised - "the download version doesn't
+// match version specified".
+//
+// This was got wrong once, in the other direction: MARKETING_VERSION is
+// pinned at 2.0 and moves only when a release adds something, while the build
+// number is the CI run, so it looked as though a store deduping on the
+// version string would see one version forever. Publishing `2.0.108` fixed a
+// problem that buildVersion already solves and broke every install instead.
 import fs from 'fs';
 import path from 'path';
 
@@ -54,22 +58,30 @@ for (const rel of releases) {
   // than published as a version that would fail on download.
   if (!ipa) continue;
 
-  // `build-105` from the tag; `Today 2.0 (build-105)` from the title. The tag
-  // is the reliable one - the title has changed shape before.
-  const build = /(\d+)\s*$/.exec(rel.tag_name)?.[1];
-  if (!build) continue;
+  // What the bundle actually says, read off the `bundle 2.0 (108)` line the
+  // build workflow writes into the notes. Guessing it from the release title
+  // works until the title's shape changes - it has before - and the cost of
+  // being wrong is no longer cosmetic: a version that disagrees with the IPA
+  // is a hard install failure.
+  const stated = /^bundle (\S+) \((\d+)\)$/m.exec(rel.body || '');
+
+  // Releases cut before that line existed. The title carries the version and
+  // the tag carries the build, which is what the workflow put there.
+  const build = stated?.[2] ?? /(\d+)\s*$/.exec(rel.tag_name)?.[1];
+  const marketing = stated?.[1] ?? /Today\s+(\d+(?:\.\d+)*)/.exec(rel.name || '')?.[1];
+
   // The earliest releases were titled `Today build-19`, with no version in
-  // them at all. Falling back to the current one would have published those
-  // as 2.0.19, which is a claim about a build from before 2.0 existed - so
-  // they fall back to 0.0 and read as the prehistory they are.
-  const marketing = /Today\s+(\d+(?:\.\d+)*)/.exec(rel.name || '')?.[1] ?? '0.0';
+  // them at all, so there is nothing here that says what is inside that IPA.
+  // Left out rather than guessed: it stays on GitHub to look back at, and a
+  // guess would only produce a download that refuses to install.
+  if (!build || !marketing) continue;
 
   // The first line of the notes is the commit subject, which is what actually
   // changed. The rest is the same sideloading boilerplate on every release.
   const note = (rel.body || '').split('\n').map((l) => l.trim()).find((l) => l.length > 0);
 
   versions.push({
-    version: `${marketing}.${build}`,
+    version: marketing,
     buildVersion: build,
     date: rel.published_at,
     localizedDescription: note || 'No notes for this build.',

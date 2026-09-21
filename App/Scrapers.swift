@@ -1481,16 +1481,28 @@ enum Scrapers {
   //
   // Themes differ in how they mark the anchor up, so the name is taken from
   // the link text when there is any and from the url when there is not.
+  // Whatever opens one of these urls is the webview holding the portal
+  // session, so a link that leads off this Moodle has no business being
+  // followed with it. Fails closed: no origin, nothing opened.
+  var HOME = (window.location && window.location.origin) || '';
+  function sameOrigin(u) {
+    if (!u) return false;
+    if (u.charAt(0) === '/') return true;
+    return HOME ? u.indexOf(HOME + '/') === 0 : false;
+  }
+
   function filesIn(html) {
-    // Start at the file manager when the theme provides one; otherwise the
-    // whole page, which over-captures an embedded image at worst.
-    var box = /<div[^>]+class="[^"]*filemanager[^"]*"[\s\S]*/i.exec(html);
-    var hay = box ? box[0] : html;
-    var re = /<a[^>]+href="([^"]*\/pluginfile\.php\/[^"]*)"[^>]*>([\s\S]*?)<\/a>/gi;
+    // A file inside a Folder module is always under
+    // `/pluginfile.php/<ctx>/mod_folder/content/`, which excludes the
+    // module's own intro images and every other module's attachments on the
+    // same page. Anchored on the url rather than on where the link sits in
+    // the markup: themes move the markup, and a region regex that ran to the
+    // end of the document scoped nothing at all.
+    var re = /<a[^>]+href="([^"]*\/pluginfile\.php\/[^"]*\/mod_folder\/content\/[^"]*)"[^>]*>([\s\S]*?)<\/a>/gi;
     var out = [], seen = {}, m;
-    while ((m = re.exec(hay))) {
+    while ((m = re.exec(html))) {
       var url = text(m[1]);
-      if (seen[url]) continue;
+      if (seen[url] || !sameOrigin(url)) continue;
       seen[url] = 1;
       var name = text(m[2].replace(/<[^>]*>/g, '')).replace(/\s+/g, ' ').trim();
       if (!name) {
@@ -1678,10 +1690,13 @@ enum Scrapers {
         var f = pending[next++];
         return fetch(f.item.url, { credentials: 'same-origin' })
           .then(function (r) { return r.text(); })
-          .then(function (html) { f.files = filesIn(html); return openNext(); })
+          .then(function (html) { f.files = filesIn(html); })
           // A folder that will not open stays a folder: the row still works,
           // and dropping it would lose material rather than tidy it.
-          .catch(function () { f.files = []; return openNext(); });
+          .catch(function () { f.files = []; })
+          // Outside the catch, or a rejection from further down the loop
+          // would unwind into it and start the loop a second time.
+          .then(function () { return openNext(); });
       }
       return openNext();
     });

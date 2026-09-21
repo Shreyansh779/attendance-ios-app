@@ -3,6 +3,11 @@
 A single-user iOS app that scrapes the UPES student portal and answers one
 question well: *can I skip this class?*
 
+**Read [STATUS.md](STATUS.md) first.** This file explains how the app works and
+why it is built this way. STATUS.md says what state it is actually in — which
+build is on the phone, what the portal has been proven to do and not do, what
+is unverified, and the constraints that stand whatever the task.
+
 ## The two things that will surprise you
 
 **1. There is no Swift compiler on the dev machine.** Development happens on

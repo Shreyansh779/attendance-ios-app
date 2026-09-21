@@ -1632,7 +1632,9 @@ enum Scrapers {
         });
       }
 
-      st.courses = out;
+      // Published in finish(), not here: every poll returns the whole of
+      // `st` as JSON, and until then the items carry the `__files` the fetch
+      // below parks on them. Nothing reads `courses` before `done` anyway.
       var note = (unmatched.length ? ', nothing of yours in: ' + unmatched.join(', ') : '');
 
       var pending = [];
@@ -1669,6 +1671,7 @@ enum Scrapers {
           count += flat.length;
         });
 
+        st.courses = out;
         st.ok = true;
         st.done = true;
         st.diag = out.length + ' courses, ' + count + ' items'

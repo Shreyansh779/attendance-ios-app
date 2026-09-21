@@ -18,23 +18,15 @@ extension Color {
         )
     }
 
-    /// Dark value first, because this app was designed dark-first and that is
-    /// still the one anyone looks at.
-    ///
-    /// Every ink below clears WCAG AA (4.5:1) against its own ground in both
-    /// schemes, and each step of the ramp stays ~1.4x apart in luminance so the
-    /// hierarchy survives the floor.
-    init(_ dark: UInt32, _ light: UInt32) {
-        self.init(UIColor { $0.userInterfaceStyle == .dark ? UIColor(dark) : UIColor(light) })
-    }
-
-    fileprivate static func adaptive(_ dark: UIColor, _ light: UIColor) -> Color {
-        Color(UIColor { $0.userInterfaceStyle == .dark ? dark : light })
-    }
-
     // MARK: Ground
+    //
+    // This app is dark only: `UIUserInterfaceStyle` is pinned to `Dark` in
+    // Info.plist, so nothing here ever renders against a light ground. Every
+    // ink below clears WCAG AA (4.5:1) against that one ground, and each step
+    // of the ramp stays ~1.4x apart in luminance so the hierarchy survives the
+    // floor.
 
-    static let bg = Color(0x111113, 0xF2F2F4)
+    static let bg = Color(0x111113)
 
     // MARK: Surfaces
     //
@@ -43,53 +35,47 @@ extension Color {
     // An opaque card would have nothing to blur and the whole system would
     // collapse back into flat rectangles.
 
-    static let sur = adaptive(UIColor(white: 1, alpha: 0.055), UIColor(white: 1, alpha: 0.55))
-    static let surDim = adaptive(UIColor(white: 0, alpha: 0.16), UIColor(white: 0.55, alpha: 0.10))
-    static let surLive = adaptive(
-        UIColor(0x7FD9AE).withAlphaComponent(0.16), UIColor(0x2E7D5B).withAlphaComponent(0.13)
-    )
-    static let surVirtual = adaptive(
-        UIColor(0xB9A8E0).withAlphaComponent(0.14), UIColor(0x6B5B95).withAlphaComponent(0.11)
-    )
-    static let surLow = adaptive(
-        UIColor(0xF0917A).withAlphaComponent(0.15), UIColor(0xB8402A).withAlphaComponent(0.10)
-    )
-    static let track = adaptive(UIColor(white: 1, alpha: 0.13), UIColor(white: 0, alpha: 0.09))
+    static let sur = Color(UIColor(white: 1, alpha: 0.055))
+    static let surDim = Color(UIColor(white: 0, alpha: 0.16))
+    static let surLive = Color(UIColor(0x7FD9AE).withAlphaComponent(0.16))
+    static let surVirtual = Color(UIColor(0xB9A8E0).withAlphaComponent(0.14))
+    static let surLow = Color(UIColor(0xF0917A).withAlphaComponent(0.15))
+    static let track = Color(UIColor(white: 1, alpha: 0.13))
     /// The groove a thumb slides in. Deliberately darker than any other
-    /// surface: the thumb is ink, which in the dark scheme is nearly white,
-    /// and a white thumb on pale glass is two whites arguing.
-    static let well = adaptive(UIColor(white: 0, alpha: 0.40), UIColor(white: 0, alpha: 0.075))
+    /// surface: the thumb is ink, which is nearly white, and a white thumb on
+    /// pale glass is two whites arguing.
+    static let well = Color(UIColor(white: 0, alpha: 0.40))
 
     /// The one pixel of light along a glass edge, and the shadow that lifts it
     /// off the ground. Without both, a material reads as a grey rectangle.
-    static let edge = adaptive(UIColor(white: 1, alpha: 0.10), UIColor(white: 1, alpha: 0.70))
-    static let shade = adaptive(UIColor(white: 0, alpha: 0.44), UIColor(white: 0.40, alpha: 0.15))
+    static let edge = Color(UIColor(white: 1, alpha: 0.10))
+    static let shade = Color(UIColor(white: 0, alpha: 0.44))
 
     // MARK: Ink - the only accent
 
-    static let ink = Color(0xF5F5F7, 0x131316)
-    static let ink2 = Color(0xA8A8B3, 0x6B6B73)
-    static let ink3 = Color(0x8E8E98, 0x74747C)
-    static let ink4 = Color(0x82828A, 0x7C7C84)
+    static let ink = Color(0xF5F5F7)
+    static let ink2 = Color(0xA8A8B3)
+    static let ink3 = Color(0x8E8E98)
+    static let ink4 = Color(0x82828A)
 
     /// Text on top of an ink-filled control. Ink is the accent in this palette,
     /// so "on accent" is simply the ground it was cut out of.
-    static let onInk = Color(0x131316, 0xFFFFFF)
+    static let onInk = Color(0x131316)
 
     // MARK: Urgency - the only colour
 
-    static let mint = Color(0x7FD9AE, 0x2E7D5B)
-    static let mintHi = Color(0x8FE0B8, 0x28714F)
-    static let mintDim = Color(0x6FBF9A, 0x3D755C)
-    static let coral = Color(0xF0917A, 0xB8402A)
+    static let mint = Color(0x7FD9AE)
+    static let mintHi = Color(0x8FE0B8)
+    static let mintDim = Color(0x6FBF9A)
+    static let coral = Color(0xF0917A)
     /// The middle state. Before this there was only "fine" and "alarm", so a
     /// term where every subject is short rendered as an unbroken wall of red -
     /// and when everything is an alarm, nothing is.
-    static let amber = Color(0xF0C060, 0x8A5E14)
-    static let violet = Color(0xB9A8E0, 0x6B5B95)
-    static let warnInk = Color(0xE0CCA4, 0x6F5518)
+    static let amber = Color(0xF0C060)
+    static let violet = Color(0xB9A8E0)
+    static let warnInk = Color(0xE0CCA4)
     /// Text that sits on top of a filled control.
-    static let onAccent = Color(0x131316, 0xFFFFFF)
+    static let onAccent = Color(0x131316)
 
     /// How loudly a subject should shout.
     static func urgencyTint(_ u: Urgency) -> Color {

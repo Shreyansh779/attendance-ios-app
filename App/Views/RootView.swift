@@ -174,8 +174,6 @@ struct RootView: View {
         // accessibility1 a 92pt room number stops being a layout and starts
         // being a single digit. The hero keeps minimumScaleFactor as well.
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
-        // No forced scheme. Every colour is a solved light/dark pair now, so
-        // the app follows the phone instead of insisting.
         .sensoryFeedback(.selection, trigger: route)
         .onReceive(clock) { tick = $0 }
         .fullScreenCover(isPresented: $portal.showingLogin) {

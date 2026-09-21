@@ -109,13 +109,13 @@ There is no Swift toolchain on this machine, so:
   the Actions run is what says whether it built.
 - `.github/workflows/shots.yml` — manual only (macOS runners bill 10x). Boots a
   simulator, launches with `-demo` (the fixture in `App/Demo.swift`, DEBUG
-  only), and photographs all five screens in light and dark. This is how visual
-  bugs get found without anyone photographing a phone.
+  only), and photographs all six screens. Dark only, because the app is. This
+  is how visual bugs get found without anyone photographing a phone.
 
 ## Open / unverified
 
-- Light palette at large Dynamic Type sizes has never been checked on device.
-- The LMS tab has only been photographed in dark mode.
+- The committed PNGs in `shots/` predate the LMS tab and the sparkline
+  removal. Re-run the Screenshots workflow before trusting them.
 - A leftover from an earlier session: the scheduled task
   `headroom-default-startup` is still registered on this machine and needs
   Administrator to remove.

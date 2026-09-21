@@ -74,8 +74,11 @@ struct AttendanceView: View {
     /// Which way it is going, and by how much, since the first reading kept.
     ///
     /// Nil until there are two days of history: one point is not a direction,
-    /// and drawing a flat line from a single reading would imply otherwise.
-    private var trend: (series: [Double], delta: Double, label: String)? {
+    /// and saying "flat since today" from one reading would imply otherwise.
+    ///
+    /// A sparkline used to sit beside this line. It was 52x14 points and said
+    /// nothing the sentence does not already say in words.
+    private var trend: (delta: Double, label: String)? {
         let usable = history.filter { $0.total > 0 }
         guard usable.count >= 2, let first = usable.first, let last = usable.last else { return nil }
         let delta = last.pct - first.pct
@@ -84,7 +87,7 @@ struct AttendanceView: View {
         let label = word == "flat"
             ? "flat since \(since)"
             : "\(word) \(String(format: "%.1f", abs(delta))) points since \(since)"
-        return (usable.map(\.pct), delta, label)
+        return (delta, label)
     }
 
     /// Two numbers and a direction. Everything else that used to live here -
@@ -113,13 +116,9 @@ struct AttendanceView: View {
                         .foregroundStyle(Color.ink2)
                 }
                 if let t = trend {
-                    HStack(spacing: 9) {
-                        Spark(values: t.series, tint: t.delta >= 0 ? Color.mintHi : Color.coral)
-                            .frame(width: 52, height: 14)
-                        Text(t.label)
-                            .r(13, .medium)
-                            .foregroundStyle(t.delta >= 0 ? Color.mintHi : Color.coral)
-                    }
+                    Text(t.label)
+                        .r(13, .medium)
+                        .foregroundStyle(t.delta >= 0 ? Color.mintHi : Color.coral)
                 }
             }
             Spacer(minLength: 0)

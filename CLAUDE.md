@@ -176,9 +176,14 @@ Motion lives in `Theme.swift` and nothing overshoots: bounce is earned by a
 gesture that carried momentum and there is no such gesture here.
 `Animation.reduced(_:)` honours Reduce Motion everywhere.
 
-Every colour is a solved light/dark pair, and the ink ramp is contrast-solved so
-even the dimmest step clears WCAG AA (4.5:1) on every surface in its own scheme.
-Do not dim text below `ink4`, and do not introduce a raw hex — it cannot adapt.
+The app is **dark only** — `UIUserInterfaceStyle` is pinned to `Dark` in
+`Info.plist`. There was a light palette; it was computed, contrast-verified,
+never once looked at on a device, and deleted. Every token in `Theme.swift` is
+now a single value solved against that one ground, and the ink ramp is
+contrast-solved so even the dimmest step clears WCAG AA (4.5:1) on every
+surface. Do not dim text below `ink4`, and do not introduce a raw hex — a hook
+(`.claude/hooks/check-tokens.mjs`) refuses one anywhere under `App/` except
+`Theme.swift` itself.
 
 Urgency has three states, not two: mint (fine), amber (short but recoverable),
 coral (the blocker, or no longer reachable). Coral is spent on one row, not on
@@ -198,6 +203,42 @@ responding to the reader's text-size setting. Clamped at `accessibility1`.
 - Classes earlier *today* count as "remaining" in the term maths, so late in the
   day a subject can look one class better off than it is. Errs toward
   "recoverable", which is the safe direction.
-- The light palette is computed and contrast-verified but has never been seen on
-  a device. If it looks wrong, that is why.
 - `ponytail:` comments mark deliberate shortcuts with their ceiling.
+
+## Skills a session here should be using
+
+Eight plugins are installed on this machine. Most are for work this project
+does not do — documents, spreadsheets, web animation, React Native, charts,
+LLM API code. These are the ones that earn their place here, and a session
+should reach for them without being asked:
+
+- **`write-swift`** — the one that matters most. There is no Swift compiler on
+  this machine, so idiom and concurrency correctness have to come from reading.
+  Load it before touching `Portal.swift`, `Store.swift` or anything `async`.
+- **`verify`** (in this repo) — the only test suite. Run it before every push.
+- **`code-review`** / `agent-skills:code-review-and-quality` — before a push,
+  because a push is the only way to find out anything.
+- **`apple-design`** — the glass, the springs, the materials and the
+  Reduce-Motion handling in `Theme.swift` are all Apple-idiom. It is written
+  for the web; read the principles, not the CSS.
+- **`impeccable`** and **`ui-ux-pro-max`** — visual work. Both are wired into
+  the `ui-review` agent.
+- **`llm-council`** — for a decision with real trade-offs, not for routine work.
+- **`ponytail`** — forced on by a SessionStart hook. The ladder applies.
+- **`karpathy-guidelines`** — surgical diffs, no speculative abstraction.
+- **`i-have-adhd`** — the owner's output style. User-invocable only: ask them
+  to run `/i-have-adhd`, do not imitate it.
+
+Deliberately **not** for this project: `dataviz`, `mobile-native`, `animate`,
+`animate-expo`, `emil-design-eng`, `ask-sonner` (all web or React Native),
+`claude-api` (no LLM code here), `security-audit` (single user, no server, no
+credentials stored beyond a session cookie), the `docs`/`docx`/`xlsx`/`pptx`/
+`pdf` family, and the `design:*` connectors (Figma, Linear, Notion, Slack —
+all need OAuth that has never been granted).
+
+## Agents in this repo
+
+- **`swift-lint`** — stands in for the compiler. Run it on the diff before a
+  push; a failed CI run costs thirty seconds and a release tag.
+- **`ui-review`** — reads `shots/*.png` against the Design rules above. The
+  only eye the app gets between CI and a device.

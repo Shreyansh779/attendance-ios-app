@@ -1557,7 +1557,7 @@ enum Scrapers {
     return ws(list.map(function (c, i) {
       return { index: i, methodname: 'core_courseformat_get_state', args: { courseid: c.id } };
     })).then(function (states) {
-      var out = [], total = 0, unmatched = [];
+      var out = [], unmatched = [];
 
       for (var i = 0; i < list.length; i++) {
         var c = list[i];
@@ -1624,7 +1624,6 @@ enum Scrapers {
           if (!items.length && dropped) unmatched.push(name.slice(0, 18));
         }
 
-        total += items.length;
         out.push({
           id: Number(c.id),
           name: name,
@@ -1639,8 +1638,8 @@ enum Scrapers {
       var pending = [];
       out.forEach(function (c) {
         c.items.forEach(function (it) {
-          if (String(it.kind).toLowerCase() === 'folder' && it.url) {
-            pending.push({ course: c, item: it });
+          if (it.kind.toLowerCase() === 'folder' && it.url) {
+            pending.push(it);
           }
         });
       });
@@ -1649,31 +1648,27 @@ enum Scrapers {
       // already runs after the read has finished.
       pending = pending.slice(0, 40);
 
-      if (!pending.length) {
-        st.ok = true;
-        st.done = true;
-        st.diag = out.length + ' courses, ' + total + ' items' + note;
-        return;
-      }
-
+      // Each list rebuilt in order rather than spliced in place: a folder
+      // stands aside for its own files, everything else is carried across
+      // untouched. `__files` is where the fetch below parked them.
       function finish() {
-        var opened = 0;
-        pending.forEach(function (f) {
-          if (!f.files || !f.files.length) return;
-          // Looked up fresh, because an earlier splice into the same course
-          // has already moved everything after it.
-          var at = f.course.items.indexOf(f.item);
-          if (at < 0) return;
-          opened++;
-          var inner = f.item.folder ? f.item.folder + ' / ' + f.item.title : f.item.title;
-          var kids = f.files.map(function (x) {
-            return { title: x.title, kind: 'File', url: x.url, group: f.item.group, folder: inner };
+        var opened = 0, count = 0;
+        out.forEach(function (c) {
+          var flat = [];
+          c.items.forEach(function (it) {
+            var kids = it.__files;
+            delete it.__files;
+            if (!kids || !kids.length) { flat.push(it); return; }
+            opened++;
+            var inner = it.folder ? it.folder + ' / ' + it.title : it.title;
+            kids.forEach(function (x) {
+              flat.push({ title: x.title, kind: 'File', url: x.url, group: it.group, folder: inner });
+            });
           });
-          f.course.items.splice.apply(f.course.items, [at, 1].concat(kids));
+          c.items = flat;
+          count += flat.length;
         });
 
-        var count = 0;
-        out.forEach(function (c) { count += c.items.length; });
         st.ok = true;
         st.done = true;
         st.diag = out.length + ' courses, ' + count + ' items'
@@ -1687,13 +1682,13 @@ enum Scrapers {
       var next = 0;
       function openNext() {
         if (next >= pending.length) { finish(); return null; }
-        var f = pending[next++];
-        return fetch(f.item.url, { credentials: 'same-origin' })
+        var it = pending[next++];
+        return fetch(it.url, { credentials: 'same-origin' })
           .then(function (r) { return r.text(); })
-          .then(function (html) { f.files = filesIn(html); })
+          .then(function (html) { it.__files = filesIn(html); })
           // A folder that will not open stays a folder: the row still works,
           // and dropping it would lose material rather than tidy it.
-          .catch(function () { f.files = []; })
+          .catch(function () { it.__files = []; })
           // Outside the catch, or a rejection from further down the loop
           // would unwind into it and start the loop a second time.
           .then(function () { return openNext(); });

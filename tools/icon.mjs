@@ -6,83 +6,124 @@
 // which is the whole shape of this project - so the PNG is written by hand.
 // Node's zlib is the only thing needed and it ships with node.
 //
-// The mark is the threshold: a ring three quarters closed, which is the one
-// number this app exists to answer against. Mint for the part that is done,
-// the app's own dim track for what is missing, on the app's own ground. No
-// letter, no glyph, nothing that needs reading at 40 points.
+// The mark is a T, because the app is Today and New York is the one face this
+// app spends on anything that matters. It is drawn here rather than set: the
+// font cannot be bundled and tracing the closest installed serif would be a
+// worse lie than building the letter honestly. So it is constructed the way a
+// transitional serif is - a thick vertical stem, a thinner arm, serifs that
+// bracket into both rather than butting against them.
+//
+// A ring lived here before. It was a progress ring standing in for an idea,
+// which is the shape every tracking app reaches for; a letterform is an
+// identity and a shape is not.
 import zlib from 'zlib';
 import fs from 'fs';
 import path from 'path';
 
 const SIZE = 1024;
-const CX = SIZE / 2;
-const CY = SIZE / 2;
-const R = 330; // ring radius, leaving ~13% margin, which is where an iOS icon breathes
-const W = 96; // stroke, as chunky as the meters in the app
-const SS = 4; // subsamples per axis; 16 levels of coverage is plenty here
+const SS = 4; // subsamples per axis; 16 coverage levels is plenty at this size
 
 // Straight out of Theme.swift.
-const GROUND_TOP = [26, 26, 30]; // a shade above bg, so the square is not flat
+const GROUND_TOP = [26, 26, 30]; // a shade above bg, so the tile has a top
 const GROUND_BOTTOM = [12, 12, 14];
-const TRACK = [48, 48, 50]; // `track`: white at 13% over the ground
 const MINT = [127, 217, 174]; // 0x7FD9AE
-const GLOW = 0.05; // the lit edge the cards have, as the faintest halo
 
-const TAU = Math.PI * 2;
-const SWEEP = TAU * 0.75; // THRESHOLD, in radians
-// The gap sits centred on twelve o'clock rather than starting there. Same
-// three quarters either way, but a cap parked at the top reads as a spinner
-// caught mid-load; symmetry reads as a mark somebody drew.
-const START = -Math.PI / 2 + (TAU - SWEEP) / 2;
+// MARK: - The letter
+//
+// Proportioned against the cap height, the way a type designer would, so the
+// numbers below mean something if anyone ever wants a heavier or lighter cut.
+const CAP = 560;
+const TOP = 226; // optical centre sits a touch high; a T is top-heavy
+const BASE = TOP + CAP;
+const MID = SIZE / 2;
 
-const end = (a) => [CX + R * Math.cos(a), CY + R * Math.sin(a)];
-const [E0X, E0Y] = end(START);
-const [E1X, E1Y] = end(START + SWEEP);
+const STEM = CAP * 0.122; // the thick stroke
+const ARM = CAP * 0.076; // the thin one - roughly 0.62 of the stem
+const WIDTH = CAP * 0.7; // a T is narrower than it is tall
 
-/// Distance from a point to the arc's centre line, capped at both ends the
-/// way a rounded stroke is.
-function toArc(x, y) {
-  const dx = x - CX;
-  const dy = y - CY;
-  let t = Math.atan2(dy, dx) - START;
-  t -= Math.floor(t / TAU) * TAU;
-  if (t <= SWEEP) return Math.abs(Math.hypot(dx, dy) - R);
-  return Math.min(Math.hypot(x - E0X, y - E0Y), Math.hypot(x - E1X, y - E1Y));
+const SL = MID - STEM / 2;
+const SR = MID + STEM / 2;
+const AL = MID - WIDTH / 2;
+const AR = MID + WIDTH / 2;
+const ARM_B = TOP + ARM; // underside of the arm
+
+const SPUR = CAP * 0.055; // the vertical serif hanging off each arm end
+const SPUR_B = ARM_B + CAP * 0.132; // dropping properly, not a nub
+
+const FOOT = CAP * 0.058; // the foot serif - thinner than the arm, as it is cut
+const FOOT_W = CAP * 0.38;
+const FOOT_T = BASE - FOOT;
+
+// Brackets: the curve that carries a stroke into its serif. Without these the
+// letter is a slab, and a slab is not what this app's type sounds like.
+// Small on purpose. A bracket is a cove where two strokes meet, and at any
+// radius that fills the gap it stops being a cove and becomes a rounded
+// rectangle punched out of the negative space.
+const R_FOOT = CAP * 0.05;
+const R_ARM = CAP * 0.03;
+const R_SPUR = CAP * 0.022;
+
+const box = (x, y, x0, y0, x1, y1) => x >= x0 && x <= x1 && y >= y0 && y <= y1;
+
+/// A concave fillet in the corner of `box`, curving away from `(kx, ky)` -
+/// the corner of that box which sits outside the letter.
+const fillet = (x, y, x0, y0, x1, y1, kx, ky, r) =>
+  box(x, y, x0, y0, x1, y1) && Math.hypot(x - kx, y - ky) > r;
+
+function inLetter(x, y) {
+  // The arm, its two hanging serifs, the stem, and the foot.
+  if (box(x, y, AL, TOP, AR, ARM_B)) return true;
+  if (box(x, y, AL, ARM_B, AL + SPUR, SPUR_B)) return true;
+  if (box(x, y, AR - SPUR, ARM_B, AR, SPUR_B)) return true;
+  if (box(x, y, SL, ARM_B, SR, BASE)) return true;
+  if (box(x, y, MID - FOOT_W / 2, FOOT_T, MID + FOOT_W / 2, BASE)) return true;
+
+  // Where the stem leaves the arm.
+  const a = R_ARM;
+  if (fillet(x, y, SL - a, ARM_B, SL, ARM_B + a, SL - a, ARM_B + a, a)) return true;
+  if (fillet(x, y, SR, ARM_B, SR + a, ARM_B + a, SR + a, ARM_B + a, a)) return true;
+
+  // Where each arm serif leaves the arm, on its inner side only - the outer
+  // side is the edge of the letter and carries no bracket.
+  const s = R_SPUR;
+  if (fillet(x, y, AL + SPUR, ARM_B, AL + SPUR + s, ARM_B + s, AL + SPUR + s, ARM_B + s, s)) return true;
+  if (fillet(x, y, AR - SPUR - s, ARM_B, AR - SPUR, ARM_B + s, AR - SPUR - s, ARM_B + s, s)) return true;
+
+  // Where the stem flares into the foot.
+  const f = R_FOOT;
+  if (fillet(x, y, SL - f, FOOT_T - f, SL, FOOT_T, SL - f, FOOT_T - f, f)) return true;
+  if (fillet(x, y, SR, FOOT_T - f, SR + f, FOOT_T, SR + f, FOOT_T - f, f)) return true;
+
+  return false;
 }
+
+// MARK: - Render
 
 const px = Buffer.alloc(SIZE * SIZE * 3);
 
 for (let y = 0; y < SIZE; y++) {
+  // The ground does not vary across a row, so it is computed per subrow.
   for (let x = 0; x < SIZE; x++) {
     let r = 0, g = 0, b = 0;
 
     for (let sy = 0; sy < SS; sy++) {
+      const py = y + (sy + 0.5) / SS;
+      const k = py / SIZE;
+      const gr = GROUND_TOP[0] + (GROUND_BOTTOM[0] - GROUND_TOP[0]) * k;
+      const gg = GROUND_TOP[1] + (GROUND_BOTTOM[1] - GROUND_TOP[1]) * k;
+      const gb = GROUND_TOP[2] + (GROUND_BOTTOM[2] - GROUND_TOP[2]) * k;
+
       for (let sx = 0; sx < SS; sx++) {
-        const px_ = x + (sx + 0.5) / SS;
-        const py_ = y + (sy + 0.5) / SS;
-
-        // Ground, with the faintest vertical lift so the tile has a top.
-        const k = py_ / SIZE;
-        let cr = GROUND_TOP[0] + (GROUND_BOTTOM[0] - GROUND_TOP[0]) * k;
-        let cg = GROUND_TOP[1] + (GROUND_BOTTOM[1] - GROUND_TOP[1]) * k;
-        let cb = GROUND_TOP[2] + (GROUND_BOTTOM[2] - GROUND_TOP[2]) * k;
-
-        // A halo, so the ring sits on the ground rather than being stamped
-        // into it - the same reason every card in the app carries a shadow.
-        const ring = Math.abs(Math.hypot(px_ - CX, py_ - CY) - R);
-        const halo = GLOW * Math.exp(-((ring / (W * 1.6)) ** 2));
-        cr += (MINT[0] - cr) * halo;
-        cg += (MINT[1] - cg) * halo;
-        cb += (MINT[2] - cb) * halo;
-
-        // Track first, then the mint over it: the quarter still to go is
-        // visible as the gap, which is the whole point of the mark.
-        if (ring <= W / 2) [cr, cg, cb] = TRACK;
-        if (toArc(px_, py_) <= W / 2) [cr, cg, cb] = MINT;
-
-        r += cr;
-        g += cg;
-        b += cb;
+        const pxx = x + (sx + 0.5) / SS;
+        if (inLetter(pxx, py)) {
+          r += MINT[0];
+          g += MINT[1];
+          b += MINT[2];
+        } else {
+          r += gr;
+          g += gg;
+          b += gb;
+        }
       }
     }
 
@@ -130,9 +171,8 @@ ihdr[10] = 0; // deflate
 ihdr[11] = 0; // adaptive filtering
 ihdr[12] = 0; // no interlace
 
-// One filter byte per scanline. Filter 0 (none) throughout: the image is
-// mostly flat colour, so deflate does the work and there is nothing to gain
-// from paeth here.
+// One filter byte per scanline, filter 0 throughout: the image is mostly flat
+// colour, so deflate does the work and paeth would buy nothing.
 const raw = Buffer.alloc(SIZE * (SIZE * 3 + 1));
 for (let y = 0; y < SIZE; y++) {
   raw[y * (SIZE * 3 + 1)] = 0;

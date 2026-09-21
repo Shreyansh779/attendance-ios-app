@@ -583,6 +583,17 @@ private struct PillBar: View {
 private struct VisitSheet: View {
     @ObservedObject var portal: Portal
 
+    /// The file to hand the share sheet, once it has been fetched. Nil while
+    /// there is nothing to share, which is also what dismissing it restores.
+    @State private var sharing: Shared?
+    @State private var fetching = false
+
+    /// A downloaded file, wrapped only because `.sheet(item:)` needs identity.
+    private struct Shared: Identifiable {
+        let id = UUID()
+        let url: URL
+    }
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -602,12 +613,42 @@ private struct VisitSheet: View {
             .navigationTitle("LMS")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        fetching = true
+                        Task {
+                            if let u = await portal.downloadVisible() { sharing = Shared(url: u) }
+                            fetching = false
+                        }
+                    } label: {
+                        if fetching {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                    }
+                    .disabled(fetching)
+                    .accessibilityLabel("Share this document")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { portal.endVisit() }
                 }
             }
+            .sheet(item: $sharing) { ShareSheet(url: $0.url) }
         }
     }
+}
+
+/// The system share sheet. SwiftUI's `ShareLink` needs its file up front, and
+/// this one does not exist until it has been fetched.
+private struct ShareSheet: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: [url], applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }
 
 /// The portal, on screen, with the live webview so cookies survive.

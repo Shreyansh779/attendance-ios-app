@@ -5,8 +5,6 @@ struct AttendanceView: View {
     let summary: Summary
     /// Keyed by `AttRow.key`. Empty when the whole term is not known.
     let terms: [String: Term]
-    /// Oldest first. Empty until the portal has been read on two separate days.
-    let history: [Stamp]
     /// The register. Empty until the attendance search page has been read.
     let daywise: [DaySession]
     let now: Date
@@ -34,7 +32,6 @@ struct AttendanceView: View {
                                 row: row,
                                 term: terms[row.key],
                                 blocker: summary.blocker,
-                                history: history,
                                 daywise: daywise.filter { $0.subject == row.key }
                             )
                         } label: {
@@ -71,25 +68,6 @@ struct AttendanceView: View {
         return (short.compactMap(\.clears).max(), short.filter { !$0.reachable }.count)
     }
 
-    /// Which way it is going, and by how much, since the first reading kept.
-    ///
-    /// Nil until there are two days of history: one point is not a direction,
-    /// and saying "flat since today" from one reading would imply otherwise.
-    ///
-    /// A sparkline used to sit beside this line. It was 52x14 points and said
-    /// nothing the sentence does not already say in words.
-    private var trend: (delta: Double, label: String)? {
-        let usable = history.filter { $0.total > 0 }
-        guard usable.count >= 2, let first = usable.first, let last = usable.last else { return nil }
-        let delta = last.pct - first.pct
-        let since = shortDate(first.day)
-        let word = delta >= 0.05 ? "up" : (delta <= -0.05 ? "down" : "flat")
-        let label = word == "flat"
-            ? "flat since \(since)"
-            : "\(word) \(String(format: "%.1f", abs(delta))) points since \(since)"
-        return (delta, label)
-    }
-
     /// Two numbers and a direction. Everything else that used to live here -
     /// the raw 105-of-144, the term end date - was arithmetic the screen had
     /// already done for you, printed again underneath.
@@ -114,11 +92,6 @@ struct AttendanceView: View {
                     Text("all clear by \(shortDate(d))")
                         .r(13.5, .medium)
                         .foregroundStyle(Color.ink2)
-                }
-                if let t = trend {
-                    Text(t.label)
-                        .r(13, .medium)
-                        .foregroundStyle(t.delta >= 0 ? Color.mintHi : Color.coral)
                 }
             }
             Spacer(minLength: 0)

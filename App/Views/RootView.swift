@@ -284,14 +284,12 @@ struct RootView: View {
                 row: row,
                 term: terms[row.key],
                 blocker: summary.blocker,
-                history: snapshot?.history ?? [],
                 daywise: (snapshot?.daywise ?? []).filter { $0.subject == row.key }
             )
         } else {
             AttendanceView(
                 summary: summary,
                 terms: terms,
-                history: snapshot?.history ?? [],
                 daywise: snapshot?.daywise ?? [],
                 now: tick
             )
@@ -610,7 +608,7 @@ private struct VisitSheet: View {
                 PortalWebView(webView: portal.webView)
             }
             .background(Color.bg)
-            .navigationTitle("LMS")
+            .navigationTitle(portal.visitTitle ?? "LMS")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {

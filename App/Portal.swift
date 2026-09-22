@@ -662,11 +662,18 @@ final class Portal: NSObject, ObservableObject {
     /// webview, and if the session has lapsed it is rebuilt underneath: a
     /// fresh key from the portal, or, when the portal itself has signed out,
     /// the portal's own login page followed by the link.
+    /// What the cover is showing, for its title. The file's own name says more
+    /// than "LMS" does when the thing on screen is a PDF.
+    @Published var visitTitle: String?
+
     func visit(_ url: URL) {
         // A read in flight is driving this same webview, so it has to stop
         // rather than fight over where the page goes.
         registerTask?.cancel()
         visitTask?.cancel()
+        // Percent-escaped in the url, and a query string on the end of it.
+        let name = url.deletingPathExtension().lastPathComponent.removingPercentEncoding
+        visitTitle = (name?.isEmpty == false) ? name : nil
         showingVisit = true
         status = nil
         hostingHidden = false
@@ -694,12 +701,24 @@ final class Portal: NSObject, ObservableObject {
                 // loop. The cover is already showing this webview, so the
                 // login page simply appears in it.
                 self.status = "Log in and solve the captcha — this opens straight after."
-                let inAgain = await self.waitForRoute(300) {
+                // Two waits, not one. Signing in lands on whatever the portal
+                // feels like and that is often not the dashboard - the read
+                // path already nudges it back, and this one did not, so it sat
+                // waiting for a route that was never coming and the link never
+                // opened.
+                let signedIn = await self.waitForRoute(300) { !$0.contains("auth/login") }
+                if Task.isCancelled { return }
+                guard signedIn else {
+                    self.status = "Gave up waiting for the portal."
+                    return
+                }
+                self.webView.load(URLRequest(url: Portal.dashboardURL))
+                let inAgain = await self.waitForRoute(30) {
                     $0.contains(Portal.dashboardMarker)
                 }
                 if Task.isCancelled { return }
                 guard inAgain else {
-                    self.status = "Gave up waiting for the portal."
+                    self.status = "Signed in, but the dashboard never loaded."
                     return
                 }
                 self.status = "Signing you in to the LMS."

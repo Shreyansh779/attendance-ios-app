@@ -671,9 +671,11 @@ final class Portal: NSObject, ObservableObject {
         // rather than fight over where the page goes.
         registerTask?.cancel()
         visitTask?.cancel()
-        // Percent-escaped in the url, and a query string on the end of it.
-        let name = url.deletingPathExtension().lastPathComponent.removingPercentEncoding
-        visitTitle = (name?.isEmpty == false) ? name : nil
+        // `lastPathComponent` is already percent-decoded. Decoding it a second
+        // time returns nil for any name carrying a literal % - "50% off.pdf"
+        // reads as a broken escape - and nil fell back to "LMS".
+        let name = url.deletingPathExtension().lastPathComponent
+        visitTitle = name.isEmpty ? nil : name
         showingVisit = true
         status = nil
         hostingHidden = false
@@ -701,24 +703,29 @@ final class Portal: NSObject, ObservableObject {
                 // loop. The cover is already showing this webview, so the
                 // login page simply appears in it.
                 self.status = "Log in and solve the captcha — this opens straight after."
-                // Two waits, not one. Signing in lands on whatever the portal
-                // feels like and that is often not the dashboard - the read
-                // path already nudges it back, and this one did not, so it sat
-                // waiting for a route that was never coming and the link never
-                // opened.
-                let signedIn = await self.waitForRoute(300) { !$0.contains("auth/login") }
-                if Task.isCancelled { return }
-                guard signedIn else {
-                    self.status = "Gave up waiting for the portal."
-                    return
-                }
-                self.webView.load(URLRequest(url: Portal.dashboardURL))
-                let inAgain = await self.waitForRoute(30) {
-                    $0.contains(Portal.dashboardMarker)
+                // Signing in lands on whatever the portal feels like, which is
+                // often not the dashboard - so it is asked for, repeatedly,
+                // until it arrives.
+                //
+                // Never phrased as "wait until the route is not the login
+                // page": `eval` returns "" whenever it cannot read the page,
+                // and "" is not the login page either, so that test passes on
+                // the first tick before anybody has typed anything.
+                var inAgain = false
+                for _ in 0..<60 {
+                    if Task.isCancelled { return }
+                    if await self.waitForRoute(5, { $0.contains(Portal.dashboardMarker) }) {
+                        inAgain = true
+                        break
+                    }
+                    let path = (((try? await self.eval(Scrapers.route)) ?? nil) as? String) ?? ""
+                    if !path.isEmpty, !path.contains("auth/login") {
+                        self.webView.load(URLRequest(url: Portal.dashboardURL))
+                    }
                 }
                 if Task.isCancelled { return }
                 guard inAgain else {
-                    self.status = "Signed in, but the dashboard never loaded."
+                    self.status = "Gave up waiting for the portal."
                     return
                 }
                 self.status = "Signing you in to the LMS."

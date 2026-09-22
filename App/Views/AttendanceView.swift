@@ -68,14 +68,18 @@ struct AttendanceView: View {
         return (short.compactMap(\.clears).max(), short.filter { !$0.reachable }.count)
     }
 
-    /// Two numbers and a direction. Everything else that used to live here -
-    /// the raw 105-of-144, the term end date - was arithmetic the screen had
-    /// already done for you, printed again underneath.
+    /// The percentage, and the day it stops mattering.
+    ///
+    /// A "+9 to attend" sat here first, aggregated across every subject. The
+    /// number was real and meant nothing: attendance is enforced per subject,
+    /// so nine classes spread over the six that are short is not a thing
+    /// anybody can act on. The per-subject rows below already say it where it
+    /// counts.
     private var header: some View {
         let o = summary.overall
         return HStack(alignment: .firstTextBaseline, spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(o.state == .short ? "+\(o.value) to attend" : "\(o.value) to spare")
+                Text("\(String(format: "%.1f", o.pct))%")
                     .contentTransition(.numericText())
                     .d(29, .bold)
                     .kerning(-0.5)
@@ -95,13 +99,6 @@ struct AttendanceView: View {
                 }
             }
             Spacer(minLength: 0)
-            Text("\(String(format: "%.1f", o.pct))%")
-                .r(15, .semibold)
-                .foregroundStyle(Color.ink2)
-                .padding(.horizontal, 13)
-                .padding(.vertical, 7)
-                .glassy(Capsule(), soft: false)
-                .fixedSize()
         }
     }
 

@@ -5,13 +5,11 @@ import SwiftUI
 /// The attendance list could only ever show a row's headline, and tapping it
 /// did nothing — a dead end on a screen that already had a NavigationStack
 /// wrapped round it. This is where the rest goes: the whole remaining
-/// schedule rather than a count, and the subject's own trend rather than the
-/// aggregate one.
+/// schedule rather than a count.
 struct SubjectView: View {
     let row: AttRow
     let term: Term?
     let blocker: AttRow?
-    let history: [Stamp]
     /// This subject's register rows, newest first. Empty until the attendance
     /// search page has been read.
     let daywise: [DaySession]
@@ -20,23 +18,12 @@ struct SubjectView: View {
         Color.urgencyTint(urgency(of: row, term: term, blocker: blocker))
     }
 
-    /// This subject's percentage on each day the portal was read.
-    private var series: [Double] {
-        history.compactMap { stamp in
-            guard let r = stamp.rows.first(where: { $0.key == row.key }), r.total > 0 else {
-                return nil
-            }
-            return Double(r.attended) / Double(r.total) * 100
-        }
-    }
-
     var body: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 16) {
                 headline
                 if let tm = term { schedule(tm) }
                 if !daywise.isEmpty { register }
-                if series.count >= 2 { trend }
             }
             .padding(.horizontal, 20)
             .padding(.top, 8)
@@ -177,28 +164,4 @@ struct SubjectView: View {
             : "\(tm.skippable) more can be missed."
     }
 
-    // MARK: - Which way it is going
-
-    /// A sparkline used to sit here, and another beside the aggregate on the
-    /// attendance screen. Both are gone: a 34pt line with no axis said only
-    /// which way, and the number beside it already said which way and by how
-    /// much.
-    private var trend: some View {
-        let delta = (series.last ?? 0) - (series.first ?? 0)
-        return VStack(alignment: .leading, spacing: 12) {
-            Text("Since you started tracking")
-                .r(16, .semibold)
-                .foregroundStyle(Color.ink)
-            Text(
-                abs(delta) < 0.05
-                    ? "flat"
-                    : "\(delta >= 0 ? "+" : "−")\(String(format: "%.1f", abs(delta))) pts"
-            )
-            .r(15, .semibold)
-            .foregroundStyle(delta >= 0 ? Color.mintHi : Color.coral)
-            .fixedSize()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .slab(.sur, radius: 28, pad: EdgeInsets(top: 20, leading: 22, bottom: 20, trailing: 22))
-    }
 }

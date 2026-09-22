@@ -462,6 +462,11 @@ private struct DayStrip: View {
                         Text(hhmm(k.s0))
                             .r(14, .bold)
                             .kerning(-0.2)
+                            // A two-digit hour plus the dot for a marked class
+                            // is wider than a sixth of the screen, and "10:00"
+                            // was wrapping to "10:0" over "0".
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
                     }
                     .foregroundStyle(k.live ? Color.mintHi : (k.past ? Color.ink4 : Color.ink))
                     Text(k.online ? "online" : (k.room ?? "—"))

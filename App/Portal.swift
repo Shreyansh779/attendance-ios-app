@@ -570,6 +570,11 @@ final class Portal: NSObject, ObservableObject {
     /// needs lives in that origin's localStorage.
     private func askForKey(seconds: Double) async -> (URL?, String) {
         var note = "no reply from the portal"
+        // Every call wants a fresh key. The portal stays one Angular document
+        // across signing in, so a failure `lmsKey` parked before the login -
+        // a stale token answered 401 - was still there after it, handed back
+        // on the first poll, and the link never opened.
+        _ = try? await eval("delete window.__lmsk; 1")
         for _ in 0..<Int(seconds / 0.4) {
             if Task.isCancelled { return (nil, "cancelled") }
             try? await Task.sleep(nanoseconds: 400_000_000)
@@ -1095,6 +1100,34 @@ final class Portal: NSObject, ObservableObject {
 }
 
 extension Portal: WKNavigationDelegate {
+    /// A tap on a file inside a Moodle page, sent back through `visit`.
+    ///
+    /// Moodle links an assignment's attachments with `forcedownload=1`, and a
+    /// WKWebView answers a download by doing nothing at all, so the tap went
+    /// nowhere. Without the flag the same URL is served inline. A link asking
+    /// for a new window gets nothing either - there is no UI delegate to make
+    /// one - so it opens here instead.
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction
+    ) async -> WKNavigationActionPolicy {
+        guard showingVisit, let url = navigationAction.request.url else { return .allow }
+        if navigationAction.navigationType == .linkActivated,
+            url.path.contains("/pluginfile.php/"),
+            var parts = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        {
+            let kept = (parts.queryItems ?? []).filter { $0.name != "forcedownload" }
+            parts.queryItems = kept.isEmpty ? nil : kept
+            visit(parts.url ?? url)
+            return .cancel
+        }
+        if navigationAction.targetFrame == nil {
+            webView.load(navigationAction.request)
+            return .cancel
+        }
+        return .allow
+    }
+
     nonisolated func webView(
         _ webView: WKWebView,
         didFailProvisionalNavigation navigation: WKNavigation!,

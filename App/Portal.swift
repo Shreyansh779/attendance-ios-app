@@ -581,7 +581,11 @@ final class Portal: NSObject, ObservableObject {
             guard let k = await decode(KeyPayload.self, Scrapers.lmsKey) else { continue }
             note = k.diag
             guard k.done else { continue }
-            return (k.ok ? URL(string: k.url) : nil, k.diag)
+            if k.ok, let url = URL(string: k.url) { return (url, k.diag) }
+            // Seen live: the first ask straight after signing in answered 500
+            // and the next one a key. So a failure is asked again while the
+            // budget lasts, not taken as the answer.
+            _ = try? await eval("delete window.__lmsk; 1")
         }
         return (nil, note)
     }
@@ -679,21 +683,27 @@ final class Portal: NSObject, ObservableObject {
         // `lastPathComponent` is already percent-decoded. Decoding it a second
         // time returns nil for any name carrying a literal % - "50% off.pdf"
         // reads as a broken escape - and nil fell back to "LMS".
+        // A page's path is `view.php`, which is no title at all; `landing`
+        // names those from the page once it is up.
         let name = url.deletingPathExtension().lastPathComponent
-        visitTitle = name.isEmpty ? nil : name
+        visitTitle = url.path.contains("/pluginfile.php/") && !name.isEmpty ? name : nil
         showingVisit = true
         status = nil
         hostingHidden = false
-        webView.load(URLRequest(url: url))
 
         visitTask = Task { [weak self] in
             guard let self else { return }
 
             // Moodle's session normally outlives the last refresh, so the link
-            // is tried first and the rest only happens when it bounces.
-            let bounced = await self.waitForRoute(8) { $0.contains("/login/index.php") }
+            // is tried first and the rest only happens when it bounces - and
+            // bouncing means landing on the portal. Seen live: Moodle's login
+            // is the portal's SSO, so a lapsed session redirects straight to
+            // the portal dashboard and `/login/index.php` never shows as a
+            // page. Watching for that page alone read every bounce as success
+            // and left the cover on the portal's home.
+            let at = await self.landing(url)
             if Task.isCancelled { return }
-            guard bounced else {
+            guard !at.isEmpty, !at.hasPrefix(Portal.lmsHost) || at.contains("login") else {
                 self.status = nil
                 return
             }
@@ -747,11 +757,53 @@ final class Portal: NSObject, ObservableObject {
             // hop. wantsurl is not relied on: one extra load is cheaper than a
             // parameter this portal's Moodle may or may not honour.
             self.webView.load(URLRequest(url: key))
-            _ = await self.waitForRoute(12) { !$0.contains("/auth/userkey/") }
+            // Waits for Moodle's own document, not for "not the key page".
+            // The old page is still the live document for the ~3s the key
+            // takes to redirect, and its path is not the key page either, so
+            // that test passed at once and the link load cancelled the sign-in.
+            for _ in 0..<40 {
+                if Task.isCancelled { return }
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                let here = (((try? await self.eval("location.host + location.pathname")) ?? nil) as? String) ?? ""
+                // "login" covers the key page and Moodle's own login form.
+                if here.hasPrefix(Portal.lmsHost), !here.contains("login") { break }
+            }
             if Task.isCancelled { return }
             self.status = nil
-            self.webView.load(URLRequest(url: url))
+            _ = await self.landing(url)
         }
+    }
+
+    static let lmsHost = "lms.upes.ac.in"
+
+    /// Load `url` and say where it ended up - host and path - once the new
+    /// document is up, naming the cover after a Moodle page on the way.
+    ///
+    /// The old document is marked first, because it can sit on the same
+    /// origin as the new one and would otherwise answer for it. "" when
+    /// nothing readable arrived, which is what a PDF looks like: script
+    /// cannot run in one, so for a file silence means it opened.
+    private func landing(_ url: URL) async -> String {
+        _ = try? await eval("window.__stale = 1; 1")
+        webView.load(URLRequest(url: url))
+        for _ in 0..<30 {
+            if Task.isCancelled { return "" }
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            let at = (((try? await eval("window.__stale ? '' : location.host + location.pathname")) ?? nil)
+                as? String) ?? ""
+            guard !at.isEmpty else { continue }
+            if visitTitle == nil, at.hasPrefix(Portal.lmsHost), !at.contains("login"),
+                let t = ((try? await eval("document.title")) ?? nil) as? String,
+                // "CSEG3056_387948523: Assignment 1 | UPES LMS"
+                let head = t.components(separatedBy: " | ").first?
+                    .components(separatedBy: ": ").last,
+                !head.isEmpty
+            {
+                visitTitle = head
+            }
+            return at
+        }
+        return ""
     }
 
     private struct HolidayPayload: Decodable {

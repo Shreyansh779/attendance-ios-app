@@ -606,6 +606,14 @@ private struct VisitSheet: View {
                         .background(Color.bg)
                 }
                 PortalWebView(webView: portal.webView)
+                    .overlay {
+                        if portal.visitHidden {
+                            ZStack {
+                                Color.bg
+                                ProgressView()
+                            }
+                        }
+                    }
             }
             .background(Color.bg)
             .navigationTitle(portal.visitTitle ?? "LMS")

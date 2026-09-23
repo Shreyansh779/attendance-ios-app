@@ -195,6 +195,7 @@ final class Portal: NSObject, ObservableObject {
         visitTask?.cancel()
         visitTask = nil
         showingVisit = false
+        visitHidden = false
         status = nil
     }
 
@@ -279,9 +280,21 @@ final class Portal: NSObject, ObservableObject {
                 let path = (((try? await self.eval(Scrapers.route)) ?? nil) as? String) ?? ""
                 guard path.contains(Portal.dashboardMarker) else {
                     if path.contains("auth/login") {
+                        sawLogin = true
+                        // The SSO hands back to this same path with a `code`,
+                        // and the portal can sit on it for a while before the
+                        // dashboard. The person's part is over by then, so the
+                        // sheet goes and the rest happens underneath.
+                        let search = ((try? await self.eval("location.search")) ?? nil) as? String
+                        if search?.contains("code=") == true {
+                            if self.showingLogin {
+                                self.showingLogin = false
+                                self.status = "Signed in. Reading your classes and attendance."
+                            }
+                            continue
+                        }
                         // Genuinely signed out, so now the sheet is worth
                         // showing.
-                        sawLogin = true
                         nudgedBack = false
                         if !self.showingLogin { self.showingLogin = true }
                         if !toldStillLoggingIn {
@@ -674,6 +687,9 @@ final class Portal: NSObject, ObservableObject {
     /// What the cover is showing, for its title. The file's own name says more
     /// than "LMS" does when the thing on screen is a PDF.
     @Published var visitTitle: String?
+    /// Covers the webview while the LMS is being signed back into, which is
+    /// the portal and a redirect - nothing anybody needs to watch.
+    @Published var visitHidden = false
 
     func visit(_ url: URL) {
         // A read in flight is driving this same webview, so it has to stop
@@ -688,6 +704,7 @@ final class Portal: NSObject, ObservableObject {
         let name = url.deletingPathExtension().lastPathComponent
         visitTitle = url.path.contains("/pluginfile.php/") && !name.isEmpty ? name : nil
         showingVisit = true
+        visitHidden = false
         status = nil
         hostingHidden = false
 
@@ -709,6 +726,7 @@ final class Portal: NSObject, ObservableObject {
             }
 
             self.status = "Signing you in to the LMS."
+            self.visitHidden = true
             self.webView.load(URLRequest(url: Portal.dashboardURL))
             var (key, note) = await self.askForKey(seconds: 8)
             if Task.isCancelled { return }
@@ -718,6 +736,7 @@ final class Portal: NSObject, ObservableObject {
                 // loop. The cover is already showing this webview, so the
                 // login page simply appears in it.
                 self.status = "Log in and solve the captcha — this opens straight after."
+                self.visitHidden = false
                 // Signing in lands on whatever the portal feels like, which is
                 // often not the dashboard - so it is asked for, repeatedly,
                 // until it arrives.
@@ -744,6 +763,7 @@ final class Portal: NSObject, ObservableObject {
                     return
                 }
                 self.status = "Signing you in to the LMS."
+                self.visitHidden = true
                 (key, note) = await self.askForKey(seconds: 10)
                 if Task.isCancelled { return }
             }
@@ -770,6 +790,7 @@ final class Portal: NSObject, ObservableObject {
             }
             if Task.isCancelled { return }
             self.status = nil
+            self.visitHidden = false
             _ = await self.landing(url)
         }
     }

@@ -274,6 +274,13 @@ struct RootView: View {
             }
         }
         .tint(Color.ink)
+        // An LMS link only works inside the portal's webview - Safari has no
+        // Moodle session - so every one, wherever it is tapped, goes there.
+        .environment(\.openURL, OpenURLAction { url in
+            guard url.host == Portal.lmsHost else { return .systemAction }
+            portal.visit(url)
+            return .handled
+        })
         .animation(Motion.ui.reduced(reduceMotion), value: route)
     }
 

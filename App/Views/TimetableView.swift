@@ -291,6 +291,11 @@ struct TimetableView: View {
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
                     .foregroundStyle(k.live ? Color.mintHi : (k.past ? Color.ink4 : Color.ink))
+                    // One spoken time, with the tick the dot only shows in
+                    // colour: otherwise "8:00" and "am" read separately and a
+                    // ticked class sounds the same as an unticked one.
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(timeSpoken)
 
                     if k.live {
                         Text("\(k.s1 - nowMin) min left")
@@ -340,6 +345,12 @@ struct TimetableView: View {
                 pad: EdgeInsets(top: k.live ? 22 : 18, leading: 20, bottom: k.live ? 22 : 18, trailing: 20)
             )
             .contentShape(Rectangle())
+        }
+
+        private var timeSpoken: String {
+            var s = "\(hhmm(k.s0)) \(ampm(k.s0))"
+            if let m = mark { s += m.attended ? ", marked attended" : ", marked missed" }
+            return s
         }
 
         private var place: String {

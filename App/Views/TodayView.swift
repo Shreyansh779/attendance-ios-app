@@ -499,13 +499,21 @@ private struct DayStrip: View {
                 }
                 }
                 .buttonStyle(.pressableCard)
-                .accessibilityLabel(
-                    "\(k.subject), \(hhmm(k.s0))\(ampm(k.s0)), "
-                        + (k.online ? "online" : (k.room.map { "room " + $0 } ?? "no room"))
-                )
+                // The dot is the only thing that says a class was ticked, and a
+                // coloured dot says nothing to VoiceOver.
+                .accessibilityLabel(spoken(k))
             }
         }
         // Pinning a class is a selection, not a commit.
         .sensoryFeedback(.selection, trigger: picked)
+    }
+
+    private func spoken(_ k: Klass) -> String {
+        let place = k.online ? "online" : (k.room.map { "room " + $0 } ?? "no room")
+        var s = "\(k.subject), \(hhmm(k.s0))\(ampm(k.s0)), \(place)"
+        if let m = marks[markKey(k, on: today)] {
+            s += m.attended ? ", marked attended" : ", marked missed"
+        }
+        return s
     }
 }

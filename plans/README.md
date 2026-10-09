@@ -6,13 +6,13 @@ plan is self-contained.
 
 | # | Title | Severity | Status | Files |
 | --- | --- | --- | --- | --- |
-| 001 | Animate the refresh landing | HIGH | TODO | `RootView.swift` |
-| 002 | Press feedback on the last un-styled tappables | MEDIUM | TODO | `TodayView.swift`, `LmsView.swift`, `TimetableView.swift` |
-| 003 | Show the refresh icon working | MEDIUM | TODO | `RootView.swift` |
-| 004 | Slide the pinned-class ring | LOW | TODO | `TodayView.swift` |
-| 005 | Fade the LMS link cover | LOW | TODO | `RootView.swift` |
-| 006 | Confirm the diagnostic Copy button | LOW | TODO | `SettingsView.swift` |
-| 007 | Animate the loading ↔ empty swap | LOW | TODO | `RootView.swift` |
+| 001 | Animate the refresh landing | HIGH | DONE | `RootView.swift` |
+| 002 | Press feedback on the last un-styled tappables | MEDIUM | DONE | `TodayView.swift`, `LmsView.swift`, `TimetableView.swift` |
+| 003 | Show the refresh icon working | MEDIUM | DONE | `RootView.swift` |
+| 004 | Slide the pinned-class ring | LOW | DONE | `TodayView.swift` |
+| 005 | Fade the LMS link cover | LOW | DONE | `RootView.swift` |
+| 006 | Confirm the diagnostic Copy button | LOW | DONE | `SettingsView.swift` |
+| 007 | Animate the loading ↔ empty swap | LOW | DONE | `RootView.swift` |
 
 ## Order
 

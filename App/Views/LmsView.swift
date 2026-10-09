@@ -29,6 +29,16 @@ struct LmsView: View {
 
     private var content: some View {
         VStack(alignment: .leading, spacing: 16) {
+            // Not yet read, or the read came back empty. Without this the tab
+            // is a title over a blank screen, which looks like a crash.
+            if courses.isEmpty {
+                Text("No LMS courses yet. They arrive after a refresh; if this stays empty, Settings shows what the LMS sent back.")
+                    .p(16)
+                    .foregroundStyle(Color.ink2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .slab(.sur, radius: 28, pad: EdgeInsets(top: 26, leading: 24, bottom: 26, trailing: 24))
+            }
+
             ForEach(stocked, id: \.id) { c in
                 NavigationLink {
                     CourseView(course: c, onOpen: onOpen)

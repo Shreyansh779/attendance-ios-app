@@ -534,7 +534,7 @@ struct RootView: View {
                 faculty: r.faculty.isEmpty ? (snapshot?.faculty ?? [:]) : r.faculty
             )
             Store.save(snap)
-            snapshot = snap
+            withAnimation(Motion.ui.reduced(reduceMotion)) { snapshot = snap }
             picked = nil
             tick = Date()
             rescheduleReminders()

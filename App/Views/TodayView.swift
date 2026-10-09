@@ -443,6 +443,7 @@ private struct DayStrip: View {
     /// instead of opening each one to find out.
     let marks: [String: Mark]
     let today: String
+    @Namespace private var ring
 
     var body: some View {
         HStack(spacing: 7) {
@@ -483,10 +484,13 @@ private struct DayStrip: View {
                     tint: k.live ? Color.surLive : (k.past ? Color.surDim : Color.sur),
                     soft: false
                 )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .strokeBorder(Color.ink.opacity(k.id == heroID ? 0.85 : 0), lineWidth: 1.5)
-                )
+                .overlay {
+                    if k.id == heroID {
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .strokeBorder(Color.ink.opacity(0.85), lineWidth: 1.5)
+                            .matchedGeometryEffect(id: "ring", in: ring)
+                    }
+                }
                 }
                 .buttonStyle(.pressableCard)
                 .accessibilityLabel(

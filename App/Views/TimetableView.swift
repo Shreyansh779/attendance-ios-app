@@ -259,7 +259,19 @@ struct TimetableView: View {
         let mark: Mark?
         let onTap: () -> Void
 
+        /// Only a row that does something acknowledges a press; on any other
+        /// day a press state would be a promise nothing keeps.
+        @ViewBuilder
         var body: some View {
+            if tappable {
+                Button(action: onTap) { card }
+                    .buttonStyle(.pressableCard)
+            } else {
+                card
+            }
+        }
+
+        private var card: some View {
             HStack(alignment: .top, spacing: 15) {
                 VStack(alignment: .leading, spacing: 4) {
                     // fixedSize, because 58pt fitted "8:00 am" and "3:00 pm"
@@ -325,7 +337,6 @@ struct TimetableView: View {
                 pad: EdgeInsets(top: k.live ? 22 : 18, leading: 20, bottom: k.live ? 22 : 18, trailing: 20)
             )
             .contentShape(Rectangle())
-            .onTapGesture { if tappable { onTap() } }
         }
 
         private var place: String {

@@ -190,10 +190,15 @@ private struct AttendAsk: View {
                     .r(14.5, .semibold)
                     .foregroundStyle(m.attended ? Color.mintHi : Color.coral)
                 Spacer(minLength: 0)
-                Button("Undo") { onMark(nil) }
-                    .r(14.5, .semibold)
-                    .foregroundStyle(Color.ink3)
-                    .buttonStyle(.pressable)
+                Button {
+                    onMark(nil)
+                } label: {
+                    Text("Undo")
+                        .r(14.5, .semibold)
+                        .foregroundStyle(Color.ink3)
+                        .hitSlop(13)
+                }
+                .buttonStyle(.pressable)
             } else {
                 Text(note)
                     .r(14.5, .medium)
@@ -225,6 +230,7 @@ private struct AttendAsk: View {
                     .padding(.horizontal, 18)
                     .padding(.vertical, 9)
                     .glassy(Capsule(), tint: tint.opacity(0.15), soft: false)
+                    .hitSlop(4)
             }
             .buttonStyle(.pressable)
         }

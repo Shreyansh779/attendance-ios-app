@@ -245,6 +245,7 @@ struct SettingsView: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
                     .glassy(Capsule(), soft: false)
+                    .hitSlop(6)
                 }
                 .buttonStyle(.pressable)
             }

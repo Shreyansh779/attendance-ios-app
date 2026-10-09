@@ -168,6 +168,16 @@ struct PressableStyle: ButtonStyle {
     }
 }
 
+extension View {
+    /// Grows what answers a tap by `slack` points on every side, and moves
+    /// nothing: a content shape is allowed to be bigger than its frame, so the
+    /// layout stays exactly as drawn. For controls smaller than the 44pt
+    /// minimum, where padding them out would change the design.
+    func hitSlop(_ slack: CGFloat) -> some View {
+        contentShape(Rectangle().inset(by: -slack))
+    }
+}
+
 extension ButtonStyle where Self == PressableStyle {
     /// Small controls: pills, arrows, text buttons.
     static var pressable: PressableStyle { PressableStyle() }

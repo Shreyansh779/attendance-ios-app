@@ -199,7 +199,8 @@ struct TimetableView: View {
                     .foregroundStyle(selectedKey == today ? Color.ink : Color.ink2)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
-                    .frame(maxWidth: .infinity)
+                    // The whole height of the capsule, not just the text line.
+                    .frame(maxWidth: .infinity, minHeight: 34)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.pressable)
@@ -215,6 +216,7 @@ struct TimetableView: View {
                         .padding(.horizontal, 11)
                         .frame(height: 34)
                         .glassy(Capsule(), soft: false)
+                        .hitSlop(5)
                 }
                 .buttonStyle(.pressable)
                 .transition(.soft)
@@ -233,7 +235,7 @@ struct TimetableView: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(enabled ? Color.ink : Color.ink4)
                 .frame(width: 34, height: 34)
-                .contentShape(Circle())
+                .hitSlop(5)
         }
         .buttonStyle(.pressable)
         .disabled(!enabled)
@@ -317,6 +319,7 @@ struct TimetableView: View {
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 7)
                                 .glassy(Capsule(), soft: false)
+                                .hitSlop(7)
                         }
                         .buttonStyle(.pressable)
                         .padding(.top, 8)

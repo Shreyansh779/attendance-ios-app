@@ -617,12 +617,16 @@ private struct VisitSheet: View {
                 }
                 PortalWebView(webView: portal.webView)
                     .overlay {
-                        if portal.visitHidden {
-                            ZStack {
-                                Color.bg
-                                ProgressView()
+                        ZStack {
+                            if portal.visitHidden {
+                                ZStack {
+                                    Color.bg
+                                    ProgressView()
+                                }
+                                .transition(.opacity)
                             }
                         }
+                        .animation(Motion.gentle, value: portal.visitHidden)
                     }
             }
             .background(Color.bg)

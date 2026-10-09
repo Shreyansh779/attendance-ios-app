@@ -300,6 +300,10 @@ struct SlideBar<T: Hashable, Content: View>: View {
                     .onTapGesture {
                         withAnimation(Motion.ui.reduced(reduceMotion)) { selection = item }
                     }
+                    // A tap gesture is not a button as far as VoiceOver is
+                    // concerned; without the trait the tab bar is not announced
+                    // as something that can be activated.
+                    .accessibilityAddTraits(.isButton)
             }
         }
         .background(alignment: .leading) {

@@ -170,6 +170,7 @@ struct RootView: View {
             }
         }
         .animation(Motion.ui.reduced(reduceMotion), value: hasData)
+        .animation(Motion.ui.reduced(reduceMotion), value: portal.busy)
         // Text scales with the reader's setting, but only so far: past
         // accessibility1 a 92pt room number stops being a layout and starts
         // being a single digit. The hero keeps minimumScaleFactor as well.
@@ -450,6 +451,7 @@ struct RootView: View {
             Spacer()
         }
         .padding(.horizontal, 32)
+        .transition(.soft)
     }
 
     // MARK: - Pieces

@@ -353,6 +353,7 @@ struct RootView: View {
                             refresh()
                         } label: {
                             Image(systemName: "arrow.clockwise")
+                                .symbolEffect(.rotate, isActive: portal.busy && !reduceMotion)
                         }
                         .disabled(portal.busy)
                         .accessibilityLabel("Refresh from portal")

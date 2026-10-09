@@ -183,7 +183,7 @@ private struct CourseView: View {
                                         } label: {
                                             Row(item: item)
                                         }
-                                        .buttonStyle(.plain)
+                                        .buttonStyle(.pressableCard)
                                     }
                                 }
                                 .padding(.leading, folder.name.isEmpty ? 0 : 6)

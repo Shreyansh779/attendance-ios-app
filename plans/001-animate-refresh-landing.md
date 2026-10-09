@@ -1,6 +1,6 @@
 # 001 — Animate the refresh landing
 
-- **Status**: TODO
+- **Status**: DONE
 - **Commit**: 824d428
 - **Severity**: HIGH
 - **Category**: Missed opportunities / State indication

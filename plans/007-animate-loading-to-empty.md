@@ -1,6 +1,6 @@
 # 007 — Animate the loading ↔ empty-state swap
 
-- **Status**: TODO
+- **Status**: DONE
 - **Commit**: 824d428
 - **Severity**: LOW
 - **Category**: Missed opportunities / Preventing a jarring change

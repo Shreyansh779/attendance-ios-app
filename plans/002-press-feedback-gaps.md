@@ -1,6 +1,6 @@
 # 002 — Press feedback on the last un-styled tappables
 
-- **Status**: TODO
+- **Status**: DONE
 - **Commit**: 824d428
 - **Severity**: MEDIUM
 - **Category**: Missed opportunities / Feedback

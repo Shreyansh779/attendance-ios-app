@@ -1,6 +1,6 @@
 # 006 — Confirm the diagnostic Copy button
 
-- **Status**: TODO
+- **Status**: DONE
 - **Commit**: 824d428
 - **Severity**: LOW
 - **Category**: Missed opportunities / Feedback

@@ -1,6 +1,6 @@
 # 005 — Fade the LMS link cover instead of cutting
 
-- **Status**: TODO
+- **Status**: DONE
 - **Commit**: 824d428
 - **Severity**: LOW
 - **Category**: Missed opportunities / Preventing a jarring change

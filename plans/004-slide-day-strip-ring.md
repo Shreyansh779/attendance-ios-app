@@ -1,6 +1,6 @@
 # 004 — Slide the pinned-class ring between day-strip chips
 
-- **Status**: TODO
+- **Status**: DONE
 - **Commit**: 824d428
 - **Severity**: LOW
 - **Category**: Physicality & origin / Spatial consistency

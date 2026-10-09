@@ -1,6 +1,6 @@
 # 003 — Show the refresh icon working
 
-- **Status**: TODO
+- **Status**: DONE
 - **Commit**: 824d428
 - **Severity**: MEDIUM
 - **Category**: Missed opportunities / State indication

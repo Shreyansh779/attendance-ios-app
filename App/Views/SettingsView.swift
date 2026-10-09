@@ -28,6 +28,8 @@ struct SettingsView: View {
 
     @State private var testResult: String?
     @State private var clearing = false
+    /// Which diagnostic card was just copied, by its name; nil when none.
+    @State private var copiedName: String?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -222,13 +224,27 @@ struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 Button {
                     UIPasteboard.general.string = text
+                    // Fired here, not with .sensoryFeedback(trigger:), which
+                    // would buzz again when the label reverts.
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    withAnimation(Motion.ui.reduced(reduceMotion)) { copiedName = name }
+                    Task {
+                        try? await Task.sleep(for: .seconds(1.5))
+                        withAnimation(Motion.ui.reduced(reduceMotion)) {
+                            if copiedName == name { copiedName = nil }
+                        }
+                    }
                 } label: {
-                    Label("Copy", systemImage: "doc.on.doc")
-                        .r(14, .semibold)
-                        .foregroundStyle(Color.ink)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .glassy(Capsule(), soft: false)
+                    HStack(spacing: 6) {
+                        Image(systemName: copiedName == name ? "checkmark" : "doc.on.doc")
+                            .contentTransition(.symbolEffect(.replace))
+                        Text(copiedName == name ? "Copied" : "Copy")
+                    }
+                    .r(14, .semibold)
+                    .foregroundStyle(Color.ink)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .glassy(Capsule(), soft: false)
                 }
                 .buttonStyle(.pressable)
             }

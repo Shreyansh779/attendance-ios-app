@@ -217,6 +217,12 @@ struct Snapshot: Codable {
     func sessions(for date: Date) -> [Session] {
         let key = Snapshot.isoDay.string(from: date)
         if let day = week[key], !day.isEmpty { return day }
+        // Once a whole-term read has landed, the timetable is the authority: a
+        // day it has no entry for has no classes. The dashboard card is a DOM
+        // scrape that can pick up online-classroom blocks that are not
+        // timetabled, so it must not invent classes for an empty day. Past the
+        // term end the cache says nothing, and the card is the only source.
+        if let end = termEnd, key <= end { return [] }
         return Snapshot.isoDay.string(from: savedAt) == key ? sessions : []
     }
 

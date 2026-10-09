@@ -508,6 +508,14 @@ struct RootView: View {
             // Merge rather than replace: the agenda only shows six days, so old
             // days stay cached until they are superseded.
             var merged = snapshot?.week ?? [:]
+            // A whole-term read lists every day that has classes, so a cached
+            // day it no longer lists has lost them (cancelled, or moved) and
+            // must go - otherwise the old classes, reminders included, outlive
+            // the portal's. A partial read says nothing about absent days.
+            // Days older than the payload reaches stay: nothing re-reads them.
+            if r.termEnd != nil, let first = r.week.keys.min() {
+                merged = merged.filter { $0.key < first }
+            }
             for (day, list) in r.week { merged[day] = list }
 
             let snap = Snapshot(

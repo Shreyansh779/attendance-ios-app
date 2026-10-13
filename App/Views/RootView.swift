@@ -201,6 +201,7 @@ struct RootView: View {
                 dueCount: snapshot?.deadlines.count ?? 0,
                 courseCount: snapshot?.courses.count ?? 0,
                 lmsDiag: snapshot?.lmsDiag,
+                directError: direct.lastError,
                 age: snapshot?.ageText,
                 onSettingsChanged: rescheduleReminders,
                 onClearCache: {
@@ -526,10 +527,15 @@ struct RootView: View {
                     knownStudent: snapshot?.student,
                     knownHolidays: snapshot?.holidays ?? []
                 )
+                direct.lastError = nil
                 apply(r)
             } catch is PortalDirect.DirectError {
                 // direct.showingLogin is already up; nothing else to do here.
             } catch {
+                // What actually broke, kept for Settings - without this, a
+                // fallback is silent and there is no way to tell from the
+                // device why the direct path gave up.
+                direct.lastError = "\(error)"
                 refreshViaWebView()
             }
         }

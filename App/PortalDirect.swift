@@ -125,6 +125,7 @@ final class PortalDirect: ObservableObject {
         let todaySessions = byDay[today] ?? []
 
         let (due, lmsDiag) = await dueResult
+        let (resolvedPhoto, photoDiag) = await photo
 
         return Portal.Reading(
             rows: rows, sessions: todaySessions, student: identity.name ?? knownStudent,
@@ -134,8 +135,13 @@ final class PortalDirect: ObservableObject {
             // the term runs out before `timetableRange.to` does.
             week: byDay, weekDiag: "direct: \(weekSessions.count) sessions in range",
             termEnd: resolvedTerm != nil ? byDay.keys.max() : nil,
-            holidays: knownHolidays, daywise: daywise, attDiag: attDiag,
-            photo: await photo,
+            holidays: knownHolidays, daywise: daywise,
+            // Settings only has one line for register diagnostics - the photo
+            // has no field of its own, so its outcome rides along here rather
+            // than failing with no visibility at all, same reasoning as
+            // `fetchDueDates`'s diag.
+            attDiag: "\(attDiag) | photo: \(photoDiag)",
+            photo: resolvedPhoto,
             deadlines: due, lmsDiag: lmsDiag,
             courses: nil, faculty: [:]
         )
@@ -198,13 +204,20 @@ final class PortalDirect: ObservableObject {
         return counts.map { AttRow(key: $0.key, attended: $0.value.attended, total: $0.value.total) }
     }
 
-    private static func fetchPhoto(token: String, identity: PortalGateway.StudentIdentity) async -> String? {
-        guard let p = identity.profilePicture,
-            let data = try? await PortalGateway.profilePhoto(
+    private static func fetchPhoto(
+        token: String, identity: PortalGateway.StudentIdentity
+    ) async -> (String?, String) {
+        guard let p = identity.profilePicture else {
+            return (nil, "no ProfilePictureInfo in studentloginbasicinfo")
+        }
+        do {
+            let data = try await PortalGateway.profilePhoto(
                 token: token, containerName: p.containerName,
                 blobRelativePath: p.filePath, actualFileName: p.actualFileName
             )
-        else { return nil }
-        return "data:image/jpeg;base64,\(data.base64EncodedString())"
+            return ("data:image/jpeg;base64,\(data.base64EncodedString())", "ok, \(data.count) bytes")
+        } catch {
+            return (nil, "download failed: \(error) (container=\(p.containerName), path=\(p.filePath))")
+        }
     }
 }

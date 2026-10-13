@@ -52,6 +52,7 @@ struct RootView: View {
     }
 
     @StateObject private var portal = Portal()
+    @StateObject private var direct = PortalDirect()
 
     @State private var snapshot: Snapshot? = Store.load()
     @State private var route: Route = RootView.firstRoute
@@ -137,6 +138,10 @@ struct RootView: View {
 
     private var hasData: Bool { !(snapshot?.rows.isEmpty ?? true) }
 
+    /// Either data source can be the one doing the work right now.
+    private var busy: Bool { portal.busy || direct.busy }
+    private var status: String? { direct.status ?? portal.status }
+
     private var today: String { Snapshot.isoDay.string(from: tick) }
 
     var body: some View {
@@ -163,20 +168,23 @@ struct RootView: View {
                 tabs
                 PillBar(route: $route)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-            } else if portal.busy {
+            } else if busy {
                 loadingState
             } else {
                 emptyState
             }
         }
         .animation(Motion.ui.reduced(reduceMotion), value: hasData)
-        .animation(Motion.ui.reduced(reduceMotion), value: portal.busy)
+        .animation(Motion.ui.reduced(reduceMotion), value: busy)
         // Text scales with the reader's setting, but only so far: past
         // accessibility1 a 92pt room number stops being a layout and starts
         // being a single digit. The hero keeps minimumScaleFactor as well.
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         .sensoryFeedback(.selection, trigger: route)
         .onReceive(clock) { tick = $0 }
+        .fullScreenCover(isPresented: $direct.showingLogin) {
+            DirectLoginSheet(direct: direct)
+        }
         .fullScreenCover(isPresented: $portal.showingLogin) {
             LoginSheet(portal: portal)
         }
@@ -354,9 +362,9 @@ struct RootView: View {
                             refresh()
                         } label: {
                             Image(systemName: "arrow.clockwise")
-                                .symbolEffect(.rotate, isActive: portal.busy && !reduceMotion)
+                                .symbolEffect(.rotate, isActive: busy && !reduceMotion)
                         }
-                        .disabled(portal.busy)
+                        .disabled(busy)
                         .accessibilityLabel("Refresh from portal")
                     }
                     ToolbarItem(placement: .topBarTrailing) {
@@ -380,7 +388,7 @@ struct RootView: View {
                 // here it is a passing notice about a background job, which is
                 // what it is, and it collides with nothing.
                 .overlay(alignment: .bottom) {
-                    if let msg = portal.status ?? staleNote {
+                    if let msg = status ?? staleNote {
                         Text(msg)
                             .p(14)
                             .foregroundStyle(Color.warnInk)
@@ -395,7 +403,7 @@ struct RootView: View {
                             .transition(.soft)
                     }
                 }
-                .animation(Motion.ui.reduced(reduceMotion), value: portal.status)
+                .animation(Motion.ui.reduced(reduceMotion), value: status)
         }
     }
 
@@ -406,7 +414,7 @@ struct RootView: View {
             Skeleton(height: 150, radius: 28)
             Skeleton(height: 104, radius: 28)
             Skeleton(height: 76, radius: 28)
-            if let msg = portal.status {
+            if let msg = status {
                 Text(msg)
                     .p(13.5)
                     .foregroundStyle(Color.ink3)
@@ -439,9 +447,9 @@ struct RootView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(Color.ink)
                 .foregroundStyle(Color.onInk)
-                .disabled(portal.busy)
+                .disabled(busy)
                 .padding(.top, 4)
-            if let msg = portal.status {
+            if let msg = status {
                 Text(msg)
                     .r(13.5, .medium)
                     .foregroundStyle(Color.warnInk)
@@ -500,56 +508,79 @@ struct RootView: View {
         Task { await Notify.reschedule(from: snap, terms: terms, rows: rows) }
     }
 
+    /// Tried first, every refresh: plain HTTP, no captcha, no WebView. Falls
+    /// back to `portal`'s WKWebView flow on anything but a missing session -
+    /// a missing session shows `direct`'s own login form instead, since that
+    /// is the normal, better path, not a broken one.
     private func refresh() {
+        direct.onSignedIn = { [self] in refresh() }
+        Task {
+            do {
+                let r = try await direct.begin(
+                    knownStudent: snapshot?.student,
+                    knownHolidays: snapshot?.holidays ?? []
+                )
+                apply(r)
+            } catch is PortalDirect.DirectError {
+                // direct.showingLogin is already up; nothing else to do here.
+            } catch {
+                refreshViaWebView()
+            }
+        }
+    }
+
+    private func refreshViaWebView() {
         portal.begin(
             knownStudent: snapshot?.student,
             knownHolidays: snapshot?.holidays ?? []
-        ) { r in
-            // Merge rather than replace: the agenda only shows six days, so old
-            // days stay cached until they are superseded.
-            var merged = snapshot?.week ?? [:]
-            // A whole-term read lists every day that has classes, so a cached
-            // day it no longer lists has lost them (cancelled, or moved) and
-            // must go - otherwise the old classes, reminders included, outlive
-            // the portal's. A partial read says nothing about absent days.
-            // Days older than the payload reaches stay: nothing re-reads them.
-            if r.termEnd != nil, let first = r.week.keys.min() {
-                merged = merged.filter { $0.key < first }
-            }
-            for (day, list) in r.week { merged[day] = list }
+        ) { r in apply(r) }
+    }
 
-            let snap = Snapshot(
-                savedAt: Date(),
-                rows: r.rows,
-                sessions: r.sessions,
-                student: r.student ?? snapshot?.student,
-                week: merged,
-                // Only the marks the portal has actually absorbed are spent;
-                // the rest survive a refresh that beat the portal to it.
-                marks: survivingMarks(snapshot?.marks ?? [:], after: r.rows),
-                weekDiag: r.weekDiag,
-                // A read that only managed the agenda keeps whatever term end
-                // an earlier whole-term read established.
-                termEnd: r.termEnd ?? snapshot?.termEnd,
-                history: Snapshot.extend(snapshot?.history ?? [], with: r.rows, on: Date()),
-                holidays: r.holidays.isEmpty ? (snapshot?.holidays ?? []) : r.holidays,
-                daywise: r.daywise.isEmpty ? (snapshot?.daywise ?? []) : r.daywise,
-                attDiag: r.attDiag ?? snapshot?.attDiag,
-                photo: r.photo ?? snapshot?.photo,
-                // ?? rather than isEmpty: a read that legitimately found
-                // nothing has to be able to clear what the last one left, and
-                // an empty list said both that and "this did not run".
-                deadlines: r.deadlines ?? snapshot?.deadlines ?? [],
-                lmsDiag: r.lmsDiag ?? snapshot?.lmsDiag,
-                courses: r.courses ?? snapshot?.courses ?? [],
-                faculty: r.faculty.isEmpty ? (snapshot?.faculty ?? [:]) : r.faculty
-            )
-            Store.save(snap)
-            withAnimation(Motion.ui.reduced(reduceMotion)) { snapshot = snap }
-            picked = nil
-            tick = Date()
-            rescheduleReminders()
+    private func apply(_ r: Portal.Reading) {
+        // Merge rather than replace: the agenda only shows six days, so old
+        // days stay cached until they are superseded.
+        var merged = snapshot?.week ?? [:]
+        // A whole-term read lists every day that has classes, so a cached
+        // day it no longer lists has lost them (cancelled, or moved) and
+        // must go - otherwise the old classes, reminders included, outlive
+        // the portal's. A partial read says nothing about absent days.
+        // Days older than the payload reaches stay: nothing re-reads them.
+        if r.termEnd != nil, let first = r.week.keys.min() {
+            merged = merged.filter { $0.key < first }
         }
+        for (day, list) in r.week { merged[day] = list }
+
+        let snap = Snapshot(
+            savedAt: Date(),
+            rows: r.rows,
+            sessions: r.sessions,
+            student: r.student ?? snapshot?.student,
+            week: merged,
+            // Only the marks the portal has actually absorbed are spent;
+            // the rest survive a refresh that beat the portal to it.
+            marks: survivingMarks(snapshot?.marks ?? [:], after: r.rows),
+            weekDiag: r.weekDiag,
+            // A read that only managed the agenda keeps whatever term end
+            // an earlier whole-term read established.
+            termEnd: r.termEnd ?? snapshot?.termEnd,
+            history: Snapshot.extend(snapshot?.history ?? [], with: r.rows, on: Date()),
+            holidays: r.holidays.isEmpty ? (snapshot?.holidays ?? []) : r.holidays,
+            daywise: r.daywise.isEmpty ? (snapshot?.daywise ?? []) : r.daywise,
+            attDiag: r.attDiag ?? snapshot?.attDiag,
+            photo: r.photo ?? snapshot?.photo,
+            // ?? rather than isEmpty: a read that legitimately found
+            // nothing has to be able to clear what the last one left, and
+            // an empty list said both that and "this did not run".
+            deadlines: r.deadlines ?? snapshot?.deadlines ?? [],
+            lmsDiag: r.lmsDiag ?? snapshot?.lmsDiag,
+            courses: r.courses ?? snapshot?.courses ?? [],
+            faculty: r.faculty.isEmpty ? (snapshot?.faculty ?? [:]) : r.faculty
+        )
+        Store.save(snap)
+        withAnimation(Motion.ui.reduced(reduceMotion)) { snapshot = snap }
+        picked = nil
+        tick = Date()
+        rescheduleReminders()
     }
 }
 
@@ -677,6 +708,55 @@ private struct ShareSheet: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
+
+/// Email + password, for the direct API path.
+///
+/// No captcha here - the mobile endpoint takes a literal `"-"` for it, which
+/// is the whole reason this doesn't need to be a WebView.
+private struct DirectLoginSheet: View {
+    @ObservedObject var direct: PortalDirect
+    @State private var email = ""
+    @State private var password = ""
+    @State private var signingIn = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Email", text: $email)
+                        .textContentType(.username)
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    SecureField("Password", text: $password)
+                        .textContentType(.password)
+                }
+                if let error = direct.loginError {
+                    Text(error).foregroundStyle(Color.warnInk)
+                }
+            }
+            .navigationTitle("Portal login")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { direct.cancelLogin() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        signingIn = true
+                        Task {
+                            await direct.login(email: email, password: password)
+                            signingIn = false
+                        }
+                    } label: {
+                        if signingIn { ProgressView() } else { Text("Sign in") }
+                    }
+                    .disabled(signingIn || email.isEmpty || password.isEmpty)
+                }
+            }
+        }
+    }
 }
 
 /// The portal, on screen, with the live webview so cookies survive.

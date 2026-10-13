@@ -472,7 +472,12 @@ enum PortalLMS {
         }
     }
 
-    private static let gatewayBase = URL(string: "https://myupes-beta.upes.ac.in/apigateway/")!
+    /// No `apigateway/` segment here - `access-lms` is a sibling of
+    /// `sso/user/oauth2/refresh-token` in `PortalAuth`, not of the
+    /// `connect-portal`/`student-attendance` calls in `PortalGateway`, which
+    /// do sit under `apigateway/`. Mixing the two bases up is what the 404
+    /// confirmed live 2026-10-13 turned out to be.
+    private static let gatewayBase = URL(string: "https://myupes-beta.upes.ac.in/")!
     private static let lmsBase = URL(string: "https://lms.upes.ac.in/")!
 
     /// A private cookie jar per call, so a stale Moodle session from a

@@ -463,6 +463,19 @@ struct RootView: View {
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            // The empty state has no navigation bar, so no way to reach
+            // Settings' diagnostics - this is the only place a fallback's
+            // real cause is visible before there's any data to put a
+            // Settings gear next to.
+            if let err = direct.lastError {
+                Text("Direct connection failed: \(err)")
+                    .r(12, .medium)
+                    .foregroundStyle(Color.ink3)
+                    .multilineTextAlignment(.center)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 2)
+            }
             Spacer()
         }
         .padding(.horizontal, 32)

@@ -686,24 +686,42 @@ enum PortalLMS {
 
     /// Everything the LMS is waiting on, start to finish: a fresh userkey,
     /// Moodle's own session cookie, its `sesskey`, and the due-date feed.
+    ///
+    /// Confirmed live 2026-10-13: a key requested and used within the same
+    /// instant can bounce back to the Connect Portal's own dashboard instead
+    /// of landing on Moodle, while the identical flow run by hand (with the
+    /// natural few seconds' delay of typing out curl commands) lands
+    /// correctly every time - `Portal.askForKey`, the WebView path's
+    /// equivalent, documents the exact same flakiness ("the first ask
+    /// straight after signing in answered 500 and the next one a key") and
+    /// already works around it by asking again. Same fix here: a fresh key
+    /// and another attempt, rather than giving up on the first bounce.
     static func dueDates(token: String, studentId: String) async throws -> [Deadline] {
-        let key = try await requestUserkeyURL(token: token, studentId: studentId)
         let session = freshSession()
+        var lastFailure: LMSError = .noSesskey
 
-        let (landing, landingResponse) = try await session.data(from: key)
-        guard let html = String(data: landing, encoding: .utf8) else { throw LMSError.noSesskey }
-        guard let sesskey = Self.extractSesskey(from: html) else {
-            // Confirmed live: the page that comes back here can be the
-            // Connect Portal's own Angular shell, not Moodle at all - so the
-            // landing URL actually reached (after redirects) matters as much
-            // as the HTML. `key` is what was requested; `landingResponse.url`
-            // is where it was actually still redirected to.
-            let landedAt = landingResponse.url?.absoluteString ?? "?"
-            throw LMSError.unexpectedShape(
-                "requested \(key.absoluteString), landed at \(landedAt): \(html.prefix(500))"
-            )
+        for attempt in 0..<3 {
+            if attempt > 0 { try? await Task.sleep(nanoseconds: 700_000_000) }
+            let key = try await requestUserkeyURL(token: token, studentId: studentId)
+
+            guard let (landing, landingResponse) = try? await session.data(from: key),
+                let html = String(data: landing, encoding: .utf8)
+            else { continue }
+
+            guard let sesskey = Self.extractSesskey(from: html) else {
+                let landedAt = landingResponse.url?.absoluteString ?? "?"
+                lastFailure = .unexpectedShape(
+                    "requested \(key.absoluteString), landed at \(landedAt): \(html.prefix(500))"
+                )
+                continue
+            }
+
+            return try await Self.fetchDueEvents(sesskey: sesskey, session: session)
         }
+        throw lastFailure
+    }
 
+    private static func fetchDueEvents(sesskey: String, session: URLSession) async throws -> [Deadline] {
         var request = URLRequest(
             url: lmsBase.appendingPathComponent("lib/ajax/service.php")
                 .appending(queryItems: [URLQueryItem(name: "sesskey", value: sesskey)])

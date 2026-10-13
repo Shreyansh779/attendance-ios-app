@@ -84,7 +84,22 @@ final class PortalDirect: ObservableObject {
         let token = try await token()
 
         status = "Reading your identity."
-        let identity = try await PortalGateway.studentIdentity(token: token)
+        // `token()` only refreshes pre-emptively, against our own guessed
+        // expiry - a token that's actually dead server-side (revoked, or
+        // just outlived our guess) sails past that check and 401s here
+        // instead. Without this, that 401 is just "a failure," which looks
+        // identical to a real endpoint break and sends every refresh to the
+        // WebView forever, never giving this class's own login form a
+        // chance to run.
+        let identity: PortalGateway.StudentIdentity
+        do {
+            identity = try await PortalGateway.studentIdentity(token: token)
+        } catch PortalGateway.GatewayError.unauthorized {
+            credentials = nil
+            PortalAuthStore.clear()
+            showingLogin = true
+            throw DirectError.needsLogin
+        }
 
         // The timetable range depends on the term's own start/end dates, so
         // this has to resolve before the timetable call can go out - unlike

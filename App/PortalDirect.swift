@@ -132,6 +132,7 @@ final class PortalDirect: ObservableObject {
             identity = try await PortalGateway.studentIdentity(token: token)
         }
 
+        status = "Reading your attendance and timetable."
         // The timetable range depends on the term's own start/end dates, so
         // this has to resolve before the timetable call can go out - unlike
         // the rest, which has no such dependency and still runs in parallel.
@@ -184,15 +185,16 @@ final class PortalDirect: ObservableObject {
 
         let (resolvedPhoto, photoDiag) = await photo
 
-        // Deliberately sequential, not another async let: a curl test of the
-        // exact same userkey handoff succeeded in isolation every time, while
-        // the app's version - run concurrently with the timetable/photo/
-        // register calls above, all on the same Bearer token - bounced back
-        // to the Connect Portal dashboard instead of landing on Moodle, every
-        // time, even with retries. If that's a shared short-lived session
-        // state on UPES's side getting clobbered by concurrent requests,
-        // running this strictly after everything else is the fix; if it
-        // isn't, this at least rules the theory out cleanly.
+        // Sequential, not another async let - no longer for the concurrency
+        // theory that motivated it (a raw curl trace later proved the
+        // userkey handoff's bounce is UPES-side flakiness, unrelated to
+        // concurrency), but there's no reason to undo it either.
+        //
+        // This is the slow part: `dueDates` retries for up to ~10s against
+        // known server-side flakiness, so the status message has to actually
+        // change here or the whole wait reads as the app being stuck on
+        // "Reading your identity" instead of visibly still working.
+        status = "Checking the LMS - this can take a few seconds."
         let (due, lmsDiag) = await Self.fetchDueDates(token: token, identity: identity)
 
         return Portal.Reading(

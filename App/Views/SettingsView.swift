@@ -19,6 +19,8 @@ struct SettingsView: View {
     let dueCount: Int
     let courseCount: Int
     let lmsDiag: String?
+    let hasPhoto: Bool
+    let photoDiag: String?
     /// Why the last refresh fell back to the WebView portal instead of the
     /// direct connection, when it did. nil means the direct path worked (or
     /// hasn't been tried this launch).
@@ -52,6 +54,9 @@ struct SettingsView: View {
                             "This refresh fell back to the portal login instead of the direct "
                                 + "connection. Everything below is from that fallback."
                         )
+                    }
+                    if !hasPhoto, let photoDiag {
+                        diagnostic("Photo", photoDiag, "No profile photo came back.")
                     }
                     if weekDays <= 1, let weekDiag {
                     diagnostic("Timetable", weekDiag, "The weekly scrape returned little or nothing.")

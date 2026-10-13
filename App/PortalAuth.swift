@@ -205,12 +205,25 @@ enum PortalGateway {
         var studentId: String
         var courseFamilyId: Int
         var name: String?
+        /// The numeric id the WebView scraper's profile-picture path
+        /// (`590011979_P.jpg`) is built from - kept around as a cross-check
+        /// if `profilePicture`'s field names ever need re-deriving by hand.
+        var globalId: Int?
+        var email: String?
+        var phone: String?
+        var campus: String?
+        var program: String?
         /// What `profilePhoto` needs. ponytail: `ContainerName`'s exact key
         /// wasn't pinned down live the way the rest of this struct was - if
         /// it's named differently the photo fetch just throws and the merge
         /// in `PortalDirect` keeps whatever photo was cached, same as every
         /// other best-effort field here.
         var profilePicture: ProfilePicture?
+        /// Set only when `ProfilePictureInfo` exists but didn't fully decode
+        /// - the real key names, read straight off the JSON rather than
+        /// guessed, so a wrong guess is fixable from one device run instead
+        /// of another round of blind curl commands.
+        var profilePictureRawKeys: String?
     }
 
     struct ProfilePicture {
@@ -232,6 +245,11 @@ enum PortalGateway {
                 var StudentId: String
                 var CourseFamilyId: Int
                 var StudentName: String?
+                var GlobalId: Int?
+                var EmailId: String?
+                var MobileNo: String?
+                var CenterName: String?
+                var CourseFamilyName: String?
                 var ProfilePictureInfo: Picture?
             }
             var Items: [Item]
@@ -245,9 +263,23 @@ enum PortalGateway {
             else { return nil }
             return ProfilePicture(containerName: container, filePath: path, actualFileName: name)
         }()
+        // `ProfilePictureInfo` exists but something in `Picture` came back
+        // nil - read its actual keys straight from the JSON so the real
+        // field names are known rather than guessed a second time.
+        var rawKeys: String?
+        if picture == nil,
+            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let items = obj["Items"] as? [[String: Any]],
+            let pic = items.first?["ProfilePictureInfo"] as? [String: Any]
+        {
+            rawKeys = pic.keys.sorted().joined(separator: ",")
+        }
         return StudentIdentity(
             studentId: item.StudentId, courseFamilyId: item.CourseFamilyId,
-            name: item.StudentName, profilePicture: picture
+            name: item.StudentName, globalId: item.GlobalId,
+            email: item.EmailId, phone: item.MobileNo,
+            campus: item.CenterName, program: item.CourseFamilyName,
+            profilePicture: picture, profilePictureRawKeys: rawKeys
         )
     }
 
@@ -356,9 +388,15 @@ enum PortalGateway {
     /// link lives under `FloorPlanDetails`, and the subject name is
     /// `ModuleList[0].ModuleName` - there can be more than one module per slot
     /// in principle, but every live entry so far carries exactly one.
+    /// Alongside the sessions, every subject's teacher names - pulled from
+    /// `TeacherList`, which the response carries on every slot but which
+    /// `Session` had no field for and `PortalDirect` was dropping entirely.
+    /// Not consumed by anything yet (`Portal.fetchCourses`, the WebView-side
+    /// Moodle course filter, is the only current reader of this shape), but
+    /// it's free to carry along now rather than re-fetched later.
     static func timetable(
         token: String, studentCode: String, from: Date, to: Date
-    ) async throws -> [Session] {
+    ) async throws -> (sessions: [Session], faculty: [String: [String]]) {
         let fmt = DateFormatter()
         fmt.locale = Locale(identifier: "en_US_POSIX")
         fmt.dateFormat = "dd-MMM-yyyy"
@@ -378,16 +416,20 @@ enum PortalGateway {
             var VenueCategory: String?
             var MeetingLink: String?
         }
+        struct Teacher: Decodable { var Name: String }
+        struct Cohort: Decodable { var CohortGroupName: String?; var Code: String? }
         struct Row: Decodable {
             var FloorPlanDetails: Venue?
             var SlotDate: String
             var SlotStartTime: String
             var SlotEndTime: String
             var ModuleList: [Module]
+            var TeacherList: [Teacher]?
+            var CohortList: [Cohort]?
             var IsCancelledSlot: Bool?
         }
 
-        guard let rows = try? JSONDecoder().decode([Row].self, from: data) else { return [] }
+        guard let rows = try? JSONDecoder().decode([Row].self, from: data) else { return ([], [:]) }
 
         let slotDate = DateFormatter()
         slotDate.locale = Locale(identifier: "en_US_POSIX")
@@ -395,18 +437,42 @@ enum PortalGateway {
         let isoDay = DateFormatter()
         isoDay.locale = Locale(identifier: "en_US_POSIX")
         isoDay.dateFormat = "yyyy-MM-dd"
+        let batchCode = try? NSRegularExpression(pattern: #"B\d+"#)
 
-        return rows.compactMap { r -> Session? in
+        var faculty: [String: [String]] = [:]
+        let sessions: [Session] = rows.compactMap { r -> Session? in
             guard r.IsCancelledSlot != true, let subject = r.ModuleList.first?.ModuleName else { return nil }
             let link = r.FloorPlanDetails?.MeetingLink.flatMap { $0.isEmpty ? nil : $0 }
             let date = slotDate.date(from: r.SlotDate).map { isoDay.string(from: $0) } ?? r.SlotDate
+
+            let teachers = (r.TeacherList ?? []).map(\.Name)
+            if !teachers.isEmpty {
+                faculty[subject] = Array(Set((faculty[subject] ?? []) + teachers)).sorted()
+            }
+
+            // `CohortGroupName` is already a clean "B9"-style code when the
+            // server bothers to set it; when it's blank (seen live on some
+            // rows) the batch is still embedded in `Code`, just not at a
+            // fixed offset - a regex is the only part of that string that's
+            // actually stable.
+            let batches: [String] = (r.CohortList ?? []).compactMap { c in
+                if let g = c.CohortGroupName, !g.isEmpty { return g }
+                guard let code = c.Code, let regex = batchCode,
+                    let m = regex.firstMatch(in: code, range: NSRange(code.startIndex..., in: code)),
+                    let range = Range(m.range, in: code)
+                else { return nil }
+                return String(code[range])
+            }
+
             return Session(
                 subject: subject, start: r.SlotStartTime, end: r.SlotEndTime,
                 room: r.FloorPlanDetails?.VenueName, online: link != nil,
                 mode: link != nil ? "online" : "class",
-                date: date, link: link
+                date: date, link: link,
+                batch: batches.isEmpty ? nil : Array(Set(batches)).sorted()
             )
         }
+        return (sessions, faculty)
     }
 
     // MARK: - Exam schedule

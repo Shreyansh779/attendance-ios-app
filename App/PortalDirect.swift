@@ -115,7 +115,9 @@ final class PortalDirect: ObservableObject {
             }
         }
 
-        let weekSessions = await week ?? []
+        let weekResult = await week
+        let weekSessions = weekResult?.sessions ?? []
+        let faculty = weekResult?.faculty ?? [:]
         var byDay: [String: [Session]] = [:]
         for s in weekSessions {
             guard let d = s.date else { continue }
@@ -143,7 +145,12 @@ final class PortalDirect: ObservableObject {
             attDiag: "\(attDiag) | photo: \(photoDiag)",
             photo: resolvedPhoto,
             deadlines: due, lmsDiag: lmsDiag,
-            courses: nil, faculty: [:]
+            courses: nil, faculty: faculty,
+            profile: StudentProfile(
+                name: identity.name, email: identity.email, phone: identity.phone,
+                campus: identity.campus, program: identity.program,
+                studentId: identity.studentId, globalId: identity.globalId
+            )
         )
     }
 
@@ -208,7 +215,8 @@ final class PortalDirect: ObservableObject {
         token: String, identity: PortalGateway.StudentIdentity
     ) async -> (String?, String) {
         guard let p = identity.profilePicture else {
-            return (nil, "no ProfilePictureInfo in studentloginbasicinfo")
+            let keys = identity.profilePictureRawKeys.map { " - real keys: \($0)" } ?? ""
+            return (nil, "no ProfilePictureInfo in studentloginbasicinfo" + keys)
         }
         do {
             let data = try await PortalGateway.profilePhoto(

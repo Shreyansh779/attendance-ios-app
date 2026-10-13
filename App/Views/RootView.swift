@@ -60,6 +60,7 @@ struct RootView: View {
     @State private var picked: String?
     @State private var didAutoOpen = false
     @State private var showingSettings = RootView.opensSettings
+    @State private var showingProfile = false
 
     /// Where a screenshot run wants to land. Release builds always start on
     /// Today, because `Demo` does not exist in them.
@@ -210,6 +211,9 @@ struct RootView: View {
                 }
             )
         }
+        .sheet(isPresented: $showingProfile) {
+            ProfileSheet(profile: snapshot?.profile, photo: photoImage)
+        }
         // A fresh install used to throw the portal's login page up the instant
         // it opened, before the app had shown itself at all. Opening an app
         // and being handed somebody else's website is a jarring first second;
@@ -349,12 +353,14 @@ struct RootView: View {
                 .toolbar {
                     if leadingAvatar, let img = photoImage {
                         ToolbarItem(placement: .topBarLeading) {
-                            Image(uiImage: img)
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: 30, height: 30)
-                                .clipShape(Circle())
-                                .accessibilityHidden(true)
+                            Button { showingProfile = true } label: {
+                                Image(uiImage: img)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 30, height: 30)
+                                    .clipShape(Circle())
+                            }
+                            .accessibilityLabel("Your profile")
                         }
                     }
                     ToolbarItem(placement: .topBarTrailing) {
@@ -574,7 +580,8 @@ struct RootView: View {
             deadlines: r.deadlines ?? snapshot?.deadlines ?? [],
             lmsDiag: r.lmsDiag ?? snapshot?.lmsDiag,
             courses: r.courses ?? snapshot?.courses ?? [],
-            faculty: r.faculty.isEmpty ? (snapshot?.faculty ?? [:]) : r.faculty
+            faculty: r.faculty.isEmpty ? (snapshot?.faculty ?? [:]) : r.faculty,
+            profile: r.profile ?? snapshot?.profile
         )
         Store.save(snap)
         withAnimation(Motion.ui.reduced(reduceMotion)) { snapshot = snap }
@@ -708,6 +715,66 @@ private struct ShareSheet: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
+
+/// What the direct API path learned about the student beyond name and photo.
+/// Empty whenever only the WebView path has ever run - it never reads any of
+/// this.
+private struct ProfileSheet: View {
+    let profile: StudentProfile?
+    let photo: UIImage?
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if let img = photo {
+                    HStack {
+                        Spacer()
+                        Image(uiImage: img)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 72, height: 72)
+                            .clipShape(Circle())
+                        Spacer()
+                    }
+                    .listRowBackground(Color.clear)
+                }
+                if let p = profile {
+                    Section {
+                        row("Name", p.name)
+                        row("Email", p.email)
+                        row("Phone", p.phone)
+                        row("Campus", p.campus)
+                        row("Programme", p.program)
+                        row("Student ID", p.studentId)
+                        row("Global ID", p.globalId.map(String.init))
+                    }
+                } else {
+                    Text("Only available after a refresh over the direct connection, not the portal login.")
+                        .foregroundStyle(Color.ink2)
+                }
+            }
+            .navigationTitle("Profile")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func row(_ label: String, _ value: String?) -> some View {
+        if let value, !value.isEmpty {
+            HStack {
+                Text(label).foregroundStyle(Color.ink2)
+                Spacer()
+                Text(value)
+            }
+        }
+    }
 }
 
 /// Email + password, for the direct API path.

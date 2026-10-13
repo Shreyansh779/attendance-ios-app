@@ -147,6 +147,8 @@ struct Snapshot: Codable {
     /// timetable feed. Nothing else in the portal says which of a course's
     /// twenty teachers is yours.
     var faculty: [String: [String]] = [:]
+    /// Shown when the avatar is tapped. Only the direct API path sets this.
+    var profile: StudentProfile?
 
     /// Decoded leniently: a cache written before week and marks existed should
     /// still load rather than being thrown away.
@@ -169,6 +171,7 @@ struct Snapshot: Codable {
         lmsDiag = try? c.decodeIfPresent(String.self, forKey: .lmsDiag)
         courses = (try? c.decode([LmsCourse].self, forKey: .courses)) ?? []
         faculty = (try? c.decode([String: [String]].self, forKey: .faculty)) ?? [:]
+        profile = try? c.decodeIfPresent(StudentProfile.self, forKey: .profile)
     }
 
     init(
@@ -179,7 +182,8 @@ struct Snapshot: Codable {
         holidays: [Holiday] = [], daywise: [DaySession] = [],
         attDiag: String? = nil, photo: String? = nil,
         deadlines: [Deadline] = [], lmsDiag: String? = nil,
-        courses: [LmsCourse] = [], faculty: [String: [String]] = [:]
+        courses: [LmsCourse] = [], faculty: [String: [String]] = [:],
+        profile: StudentProfile? = nil
     ) {
         self.savedAt = savedAt
         self.rows = rows
@@ -198,6 +202,7 @@ struct Snapshot: Codable {
         self.lmsDiag = lmsDiag
         self.courses = courses
         self.faculty = faculty
+        self.profile = profile
     }
 
     static var isoDay: DateFormatter {

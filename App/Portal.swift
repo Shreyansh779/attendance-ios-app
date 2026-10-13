@@ -141,6 +141,10 @@ final class Portal: NSObject, ObservableObject {
         let courses: [LmsCourse]?
         /// Subject to the teachers who take your classes.
         let faculty: [String: [String]]
+        /// Only the direct API path fills this in; the WebView scraper never
+        /// read it. Defaulted so every existing `Reading(...)` call site here
+        /// keeps compiling without naming it.
+        let profile: StudentProfile? = nil
     }
 
     // MARK: - Entry point

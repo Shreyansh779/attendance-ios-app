@@ -31,6 +31,12 @@ struct SettingsView: View {
     let onSettingsChanged: () -> Void
     /// Throws the cache away and leaves the app on its empty state.
     let onClearCache: () -> Void
+    /// Skips the direct connection entirely and refreshes through the
+    /// portal's WebView instead - a manual escape hatch for when a piece of
+    /// data only fails inside the direct path (the LMS retry budget, say)
+    /// without failing the refresh as a whole, which is the only thing that
+    /// would otherwise trigger the WebView fallback.
+    let onForceWebView: () -> Void
 
     @State private var testResult: String?
     @State private var clearing = false
@@ -47,6 +53,7 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 26) {
                     reminders
                     data
+                    forceWebView
                     if let directError {
                         diagnostic(
                             "Direct connection",
@@ -213,6 +220,31 @@ struct SettingsView: View {
                 Rule()
                 Line(name: "Version", value: SettingsView.version)
             }
+        }
+    }
+
+    /// Bypasses the direct connection for the next refresh only - useful
+    /// when one piece of data (the LMS, say) only fails inside that path
+    /// without failing the refresh as a whole, since nothing else would
+    /// trigger the WebView fallback in that case.
+    private var forceWebView: some View {
+        Card("Troubleshooting") {
+            Button {
+                dismiss()
+                onForceWebView()
+            } label: {
+                HStack {
+                    Text("Refresh via portal login instead")
+                        .r(15.5, .medium)
+                    Spacer(minLength: 0)
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .foregroundStyle(Color.ink)
+                .padding(.vertical, 13)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
     }
 

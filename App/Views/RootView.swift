@@ -767,7 +767,7 @@ private struct ProfileSheet: View {
                         row("Campus", p.campus)
                         row("Programme", p.program)
                         row("Student ID", p.studentId)
-                        row("Global ID", p.globalId.map(String.init))
+                        row("Global ID", p.globalId)
                     }
                 } else {
                     Text("Only available after a refresh over the direct connection, not the portal login.")

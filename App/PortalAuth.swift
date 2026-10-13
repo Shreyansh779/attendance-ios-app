@@ -704,7 +704,17 @@ enum PortalLMS {
             if attempt > 0 { try? await Task.sleep(nanoseconds: 700_000_000) }
             let key = try await requestUserkeyURL(token: token, studentId: studentId)
 
-            guard let (landing, landingResponse) = try? await session.data(from: key),
+            // The identical request made with curl's default User-Agent
+            // lands on Moodle every time; the app's default CFNetwork UA
+            // bounces to the Connect Portal dashboard every time, even with
+            // retries - a timing theory is ruled out by that. Likely some
+            // mobile-app/webview UA sniffing meant for the real LMS app's
+            // deep-linking, misfiring on this client. Matching curl's UA is
+            // the cheapest way to test that theory directly.
+            var landingRequest = URLRequest(url: key)
+            landingRequest.setValue("curl/8.7.1", forHTTPHeaderField: "User-Agent")
+
+            guard let (landing, landingResponse) = try? await session.data(for: landingRequest),
                 let html = String(data: landing, encoding: .utf8)
             else { continue }
 

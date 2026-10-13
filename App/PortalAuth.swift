@@ -157,6 +157,59 @@ enum PortalAuthStore {
     }
 }
 
+/// Keychain storage for the raw email/password, kept separately from the
+/// bearer tokens so a dead token (revoked, or a stale one left over from
+/// testing) can be silently replaced with a fresh login instead of
+/// immediately asking the person to type their password again. Same
+/// SecItem-generic-password approach as `PortalAuthStore`, not UserDefaults -
+/// this is a password, not cached portal rows.
+enum PortalCredentialStore {
+    private static let service = "today.portal-credentials"
+    private static let account = "slcm-login"
+
+    struct Saved: Codable {
+        var email: String
+        var password: String
+    }
+
+    static func load() -> Saved? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+        ]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+            let data = item as? Data
+        else { return nil }
+        return try? JSONDecoder().decode(Saved.self, from: data)
+    }
+
+    static func save(_ saved: Saved) {
+        guard let data = try? JSONEncoder().encode(saved) else { return }
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+        ]
+        SecItemDelete(query as CFDictionary)
+        var attributes = query
+        attributes[kSecValueData as String] = data
+        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        SecItemAdd(attributes as CFDictionary, nil)
+    }
+
+    static func clear() {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+}
+
 /// The `apigateway/*` calls, confirmed live 2026-10-13 against a real account
 /// with a token from `PortalAuth.login`. All three (student id lookup, the
 /// term/course dropdown, the detailed register) returned real data with the

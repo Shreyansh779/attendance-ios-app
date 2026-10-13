@@ -700,21 +700,22 @@ enum PortalLMS {
         let session = freshSession()
         var lastFailure: LMSError = .noSesskey
 
-        for attempt in 0..<3 {
-            if attempt > 0 { try? await Task.sleep(nanoseconds: 700_000_000) }
+        // Confirmed live 2026-10-13 that this isn't an app-specific bug at
+        // all: a plain `curl -v -L` trace, run completely independently of
+        // this code, reproduced the identical bounce
+        // (key -> / -> login/index.php -> back to the Connect Portal
+        // dashboard) that this call was hitting - three redirects, server
+        // headers, `X-Redirect-By: Moodle` and all. The userkey handoff is
+        // just intermittently unreliable on UPES's end. `Portal.askForKey`,
+        // the WebView path's equivalent, already documents this exact
+        // flakiness and survives it with a generous retry budget (8-10
+        // seconds, not a couple of quick tries) - matching that budget here
+        // instead of the 3-attempts/700ms guess that wasn't nearly enough.
+        for attempt in 0..<20 {
+            if attempt > 0 { try? await Task.sleep(nanoseconds: 500_000_000) }
             let key = try await requestUserkeyURL(token: token, studentId: studentId)
 
-            // The identical request made with curl's default User-Agent
-            // lands on Moodle every time; the app's default CFNetwork UA
-            // bounces to the Connect Portal dashboard every time, even with
-            // retries - a timing theory is ruled out by that. Likely some
-            // mobile-app/webview UA sniffing meant for the real LMS app's
-            // deep-linking, misfiring on this client. Matching curl's UA is
-            // the cheapest way to test that theory directly.
-            var landingRequest = URLRequest(url: key)
-            landingRequest.setValue("curl/8.7.1", forHTTPHeaderField: "User-Agent")
-
-            guard let (landing, landingResponse) = try? await session.data(for: landingRequest),
+            guard let (landing, landingResponse) = try? await session.data(from: key),
                 let html = String(data: landing, encoding: .utf8)
             else { continue }
 

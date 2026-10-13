@@ -449,10 +449,27 @@ enum PortalGateway {
 /// `Scrapers.lmsDue` reads out of the WebView - but over plain HTTP, no
 /// WebKit involved.
 enum PortalLMS {
-    enum LMSError: Error {
+    enum LMSError: Error, CustomStringConvertible {
         case noRedirect
         case noSesskey
         case server(status: Int)
+        /// Moodle answered 200 but the AJAX call itself failed - carries its
+        /// own exception message, which is worth more than "it didn't work".
+        case ajaxError(String)
+        /// 200, no AJAX exception, but the JSON didn't match `Call`/`Payload`
+        /// - carries a clipped raw body so a real field-name mismatch is
+        /// diagnosable from the device instead of silently returning nothing.
+        case unexpectedShape(String)
+
+        var description: String {
+            switch self {
+            case .noRedirect: return "no redirect url from access-lms"
+            case .noSesskey: return "sesskey not found in landing page"
+            case .server(let status): return "server \(status)"
+            case .ajaxError(let msg): return "ajax error: \(msg)"
+            case .unexpectedShape(let body): return "unexpected shape: \(body)"
+            }
+        }
     }
 
     private static let gatewayBase = URL(string: "https://myupes-beta.upes.ac.in/apigateway/")!
@@ -539,11 +556,23 @@ enum PortalLMS {
             struct Course: Decodable { var fullname: String }
         }
         struct Payload: Decodable { var events: [Event] }
-        struct Call: Decodable { var error: Bool; var data: Payload? }
+        struct Call: Decodable {
+            var error: Bool
+            var data: Payload?
+            var exception: Exception?
+            struct Exception: Decodable { var message: String? }
+        }
 
-        guard let calls = try? JSONDecoder().decode([Call].self, from: data),
-            let payload = calls.first?.data, calls.first?.error == false
-        else { return [] }
+        guard let calls = try? JSONDecoder().decode([Call].self, from: data), let first = calls.first else {
+            let body = String(data: data.prefix(300), encoding: .utf8) ?? "<binary>"
+            throw LMSError.unexpectedShape(body)
+        }
+        if first.error {
+            throw LMSError.ajaxError(first.exception?.message ?? "no message")
+        }
+        guard let payload = first.data else {
+            throw LMSError.unexpectedShape(String(data: data.prefix(300), encoding: .utf8) ?? "<binary>")
+        }
 
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime]

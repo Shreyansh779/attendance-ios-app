@@ -89,21 +89,26 @@ final class PortalDirect: ObservableObject {
             to: Date().addingTimeInterval(10 * 86400)
         )
         async let photo = Self.fetchPhoto(token: token, identity: identity)
-        async let due = try? PortalLMS.dueDates(token: token, studentId: identity.studentId)
+        async let dueResult = Self.fetchDueDates(token: token, identity: identity)
 
         let resolvedTerm = await term
         var rows: [AttRow] = []
         var daywise: [DaySession] = []
-        if let t = resolvedTerm,
-            let sessions = try? await PortalGateway.detailedRegister(
-                token: token, studentId: identity.studentId,
-                courseFamilyId: identity.courseFamilyId, term: t
-            )
-        {
-            rows = Self.summarize(sessions)
-            daywise = sessions.compactMap { s in
-                guard let hit = matchSubject(s.courseName, in: rows) else { return nil }
-                return DaySession(subject: hit.key, date: s.date, time: s.time, present: s.present)
+        var attDiag = "term lookup failed"
+        if let t = resolvedTerm {
+            do {
+                let sessions = try await PortalGateway.detailedRegister(
+                    token: token, studentId: identity.studentId,
+                    courseFamilyId: identity.courseFamilyId, term: t
+                )
+                rows = Self.summarize(sessions)
+                daywise = sessions.compactMap { s in
+                    guard let hit = matchSubject(s.courseName, in: rows) else { return nil }
+                    return DaySession(subject: hit.key, date: s.date, time: s.time, present: s.present)
+                }
+                attDiag = "\(rows.count) subjects, \(sessions.count) sessions"
+            } catch {
+                attDiag = "register failed: \(error)"
             }
         }
 
@@ -116,14 +121,27 @@ final class PortalDirect: ObservableObject {
         let today = Snapshot.isoDay.string(from: Date())
         let todaySessions = byDay[today] ?? []
 
+        let (due, lmsDiag) = await dueResult
+
         return Portal.Reading(
             rows: rows, sessions: todaySessions, student: identity.name ?? knownStudent,
-            week: byDay, weekDiag: "direct", termEnd: nil,
-            holidays: knownHolidays, daywise: daywise, attDiag: "direct",
+            week: byDay, weekDiag: "direct: \(weekSessions.count) sessions in range", termEnd: nil,
+            holidays: knownHolidays, daywise: daywise, attDiag: attDiag,
             photo: await photo,
-            deadlines: await due, lmsDiag: "direct",
+            deadlines: due, lmsDiag: lmsDiag,
             courses: nil, faculty: [:]
         )
+    }
+
+    private static func fetchDueDates(
+        token: String, identity: PortalGateway.StudentIdentity
+    ) async -> ([Deadline]?, String) {
+        do {
+            let due = try await PortalLMS.dueDates(token: token, studentId: identity.studentId)
+            return (due, "\(due.count) items due")
+        } catch {
+            return (nil, "lms failed: \(error)")
+        }
     }
 
     /// One `AttRow` per course, folding the register's per-session rows back

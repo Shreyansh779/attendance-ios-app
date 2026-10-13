@@ -12,7 +12,7 @@ struct StudentProfile: Codable, Hashable {
     var campus: String?
     var program: String?
     var studentId: String?
-    var globalId: Int?
+    var globalId: String?
 }
 
 // MARK: - Attendance arithmetic

@@ -269,12 +269,16 @@ enum PortalGateway {
         /// as `StudentUniqueID` - distinct from `GlobalId`, which other
         /// endpoints (e.g. `usercontext`'s `RoleId`-keyed calls) use instead.
         var studentId: String
+        /// Confirmed live 2026-10-13 to not actually be on this response;
+        /// defaulted to 0 rather than failing the whole identity fetch.
+        /// `detailedRegister`'s real requirement for it is unconfirmed.
         var courseFamilyId: Int
         var name: String?
-        /// The numeric id the WebView scraper's profile-picture path
-        /// (`590011979_P.jpg`) is built from - kept around as a cross-check
-        /// if `profilePicture`'s field names ever need re-deriving by hand.
-        var globalId: Int?
+        /// The id the WebView scraper's profile-picture path
+        /// (`590011979_P.jpg`) is built from - a quoted string in the real
+        /// response, not a number. Kept around as a cross-check if
+        /// `profilePicture`'s field names ever need re-deriving by hand.
+        var globalId: String?
         var email: String?
         var phone: String?
         var campus: String?
@@ -309,9 +313,20 @@ enum PortalGateway {
         struct Envelope: Decodable {
             struct Item: Decodable {
                 var StudentId: String
-                var CourseFamilyId: Int
-                var StudentName: String?
-                var GlobalId: Int?
+                // Confirmed live 2026-10-13: not present as a plain
+                // CourseFamilyId on this response at all (it carries
+                // TermCodeID/TermCode/TermName instead) - defaulted rather
+                // than required, since `detailedRegister`'s only use of it is
+                // uncertain until a live register call confirms what it
+                // actually needs.
+                var CourseFamilyId: Int?
+                var FirstName: String?
+                var MiddleName: String?
+                var LastName: String?
+                // A quoted string in the real response ("590011979"), not a
+                // number - decoding it as Int silently failed the whole Item,
+                // which is what actually broke this call the first time.
+                var GlobalId: String?
                 var EmailId: String?
                 var MobileNo: String?
                 var CenterName: String?
@@ -321,9 +336,13 @@ enum PortalGateway {
             var Items: [Item]
         }
         guard let item = try? JSONDecoder().decode(Envelope.self, from: data).Items.first else {
-            let body = String(data: data.prefix(500), encoding: .utf8) ?? "<binary>"
+            let body = String(data: data.prefix(3000), encoding: .utf8) ?? "<binary>"
             throw GatewayError.decodeFailed(body)
         }
+        let name = [item.FirstName, item.MiddleName, item.LastName]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
         let picture: ProfilePicture? = {
             guard let p = item.ProfilePictureInfo,
                 let container = p.ContainerName, let path = p.FilePath, let name = p.ActualFileName
@@ -342,8 +361,8 @@ enum PortalGateway {
             rawKeys = pic.keys.sorted().joined(separator: ",")
         }
         return StudentIdentity(
-            studentId: item.StudentId, courseFamilyId: item.CourseFamilyId,
-            name: item.StudentName, globalId: item.GlobalId,
+            studentId: item.StudentId, courseFamilyId: item.CourseFamilyId ?? 0,
+            name: name.isEmpty ? nil : name, globalId: item.GlobalId,
             email: item.EmailId, phone: item.MobileNo,
             campus: item.CenterName, program: item.CourseFamilyName,
             profilePicture: picture, profilePictureRawKeys: rawKeys
@@ -377,7 +396,7 @@ enum PortalGateway {
         guard let terms = try? JSONDecoder().decode([Family].self, from: data).first?.TermDropdownDetailsList,
             let term = terms.first(where: { $0.IsCurrentTerm }) ?? terms.last
         else {
-            let body = String(data: data.prefix(500), encoding: .utf8) ?? "<binary>"
+            let body = String(data: data.prefix(3000), encoding: .utf8) ?? "<binary>"
             throw GatewayError.decodeFailed(body)
         }
         return TermInfo(
@@ -429,7 +448,7 @@ enum PortalGateway {
         struct Envelope: Decodable { var AttendanceInfo: [Course] }
 
         guard let envelope = try? JSONDecoder().decode(Envelope.self, from: data) else {
-            let body = String(data: data.prefix(500), encoding: .utf8) ?? "<binary>"
+            let body = String(data: data.prefix(3000), encoding: .utf8) ?? "<binary>"
             throw GatewayError.decodeFailed(body)
         }
         return envelope.AttendanceInfo.flatMap { course in

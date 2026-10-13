@@ -19,6 +19,10 @@ struct SettingsView: View {
     let dueCount: Int
     let courseCount: Int
     let lmsDiag: String?
+    /// Why the last refresh fell back to the WebView portal instead of the
+    /// direct connection, when it did. nil means the direct path worked (or
+    /// hasn't been tried this launch).
+    let directError: String?
     let age: String?
     /// Re-runs the schedule, because changing the lead time or switching
     /// reminders off should take effect now rather than at the next refresh.
@@ -41,6 +45,14 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 26) {
                     reminders
                     data
+                    if let directError {
+                        diagnostic(
+                            "Direct connection",
+                            directError,
+                            "This refresh fell back to the portal login instead of the direct "
+                                + "connection. Everything below is from that fallback."
+                        )
+                    }
                     if weekDays <= 1, let weekDiag {
                     diagnostic("Timetable", weekDiag, "The weekly scrape returned little or nothing.")
                 }

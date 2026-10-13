@@ -17,6 +17,10 @@ final class PortalDirect: ObservableObject {
     /// two-field form, not the WebView's captcha page.
     @Published var showingLogin = false
     @Published var loginError: String?
+    /// Why the last refresh fell back to the WebView, if it did - set by
+    /// `RootView` from whatever `begin` threw. Nothing else here surfaces
+    /// this; without it a fallback is silent and undiagnosable from Settings.
+    @Published var lastError: String?
 
     private var credentials: PortalAuth.Credentials?
     /// Set right after a successful sign-in, so the caller can re-run the

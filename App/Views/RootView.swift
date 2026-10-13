@@ -545,6 +545,21 @@ struct RootView: View {
                 )
                 direct.lastError = nil
                 apply(r)
+                if r.deadlines == nil {
+                    // Confirmed live 2026-10-13: the LMS userkey handoff
+                    // reliably bounces back to the Connect Portal dashboard
+                    // when called with Bearer-token auth, no matter the
+                    // retries, concurrency, headers or timing - but the
+                    // WebView's cookie-session auth reaches Moodle every
+                    // time. Rather than keep chasing that from the direct
+                    // side, this quietly runs the already-reliable WebView
+                    // flow in the background for just this gap. It won't
+                    // show a captcha login unless the stored session has
+                    // actually expired - the WebView's cookie store is
+                    // persistent, so a session that's good right now stays
+                    // good here too.
+                    refreshViaWebView()
+                }
             } catch is PortalDirect.DirectError {
                 // direct.showingLogin is already up; nothing else to do here.
             } catch {

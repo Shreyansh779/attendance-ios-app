@@ -211,7 +211,8 @@ struct RootView: View {
                     snapshot = nil
                     picked = nil
                     rescheduleReminders()
-                }
+                },
+                onForceWebView: { refreshViaWebView() }
             )
         }
         .sheet(isPresented: $showingProfile) {

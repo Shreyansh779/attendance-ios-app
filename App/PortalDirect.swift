@@ -151,7 +151,6 @@ final class PortalDirect: ObservableObject {
             from: timetableRange.from, to: timetableRange.to
         )
         async let photo = Self.fetchPhoto(token: token, identity: identity)
-        async let dueResult = Self.fetchDueDates(token: token, identity: identity)
 
         var rows: [AttRow] = []
         var daywise: [DaySession] = []
@@ -183,8 +182,18 @@ final class PortalDirect: ObservableObject {
         let today = Snapshot.isoDay.string(from: Date())
         let todaySessions = byDay[today] ?? []
 
-        let (due, lmsDiag) = await dueResult
         let (resolvedPhoto, photoDiag) = await photo
+
+        // Deliberately sequential, not another async let: a curl test of the
+        // exact same userkey handoff succeeded in isolation every time, while
+        // the app's version - run concurrently with the timetable/photo/
+        // register calls above, all on the same Bearer token - bounced back
+        // to the Connect Portal dashboard instead of landing on Moodle, every
+        // time, even with retries. If that's a shared short-lived session
+        // state on UPES's side getting clobbered by concurrent requests,
+        // running this strictly after everything else is the fix; if it
+        // isn't, this at least rules the theory out cleanly.
+        let (due, lmsDiag) = await Self.fetchDueDates(token: token, identity: identity)
 
         return Portal.Reading(
             rows: rows, sessions: todaySessions, student: identity.name ?? knownStudent,

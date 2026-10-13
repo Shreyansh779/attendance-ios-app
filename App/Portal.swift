@@ -127,6 +127,10 @@ final class Portal: NSObject, ObservableObject {
         let attDiag: String?
         /// `data:image/...;base64,` URI from the dashboard header, if present.
         let photo: String?
+        /// What the photo fetch actually did. Only the direct path sets this
+        /// - the WebView scraper's photo is read inline off the dashboard
+        /// HTML, with no separate request whose failure needs explaining.
+        let photoDiag: String?
         /// Coursework the LMS is waiting on.
         ///
         /// nil when the read did not run or did not work, which leaves
@@ -355,7 +359,7 @@ final class Portal: NSObject, ObservableObject {
                         Reading(
                             rows: rows, sessions: sessions, student: self.student,
                             week: [:], weekDiag: nil, termEnd: nil,
-                            holidays: [], daywise: [], attDiag: nil, photo: photo,
+                            holidays: [], daywise: [], attDiag: nil, photo: photo, photoDiag: nil,
                             deadlines: nil, lmsDiag: nil, courses: nil, faculty: [:],
                             profile: nil
                         )
@@ -376,7 +380,7 @@ final class Portal: NSObject, ObservableObject {
                             rows: rows, sessions: sessions, student: self.student,
                             week: week.days, weekDiag: week.diag,
                             termEnd: week.whole ? week.days.keys.max() : nil,
-                            holidays: [], daywise: [], attDiag: nil, photo: photo,
+                            holidays: [], daywise: [], attDiag: nil, photo: photo, photoDiag: nil,
                             deadlines: nil, lmsDiag: nil, courses: nil, faculty: week.teachers,
                             profile: nil
                         )
@@ -1067,6 +1071,7 @@ final class Portal: NSObject, ObservableObject {
             daywise: daywise,
             attDiag: attDiag,
             photo: photo,
+            photoDiag: nil,
             deadlines: deadlines,
             lmsDiag: lmsDiag,
             courses: courses,
@@ -1118,6 +1123,7 @@ final class Portal: NSObject, ObservableObject {
                     daywise: found,
                     attDiag: self.attDiag,
                     photo: base.photo,
+                    photoDiag: base.photoDiag,
                     deadlines: due,
                     lmsDiag: self.lmsDiag,
                     courses: self.courses,

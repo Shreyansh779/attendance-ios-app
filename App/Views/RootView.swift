@@ -201,6 +201,8 @@ struct RootView: View {
                 dueCount: snapshot?.deadlines.count ?? 0,
                 courseCount: snapshot?.courses.count ?? 0,
                 lmsDiag: snapshot?.lmsDiag,
+                hasPhoto: snapshot?.photo != nil,
+                photoDiag: snapshot?.photoDiag,
                 directError: direct.lastError,
                 age: snapshot?.ageText,
                 onSettingsChanged: rescheduleReminders,
@@ -593,6 +595,7 @@ struct RootView: View {
             daywise: r.daywise.isEmpty ? (snapshot?.daywise ?? []) : r.daywise,
             attDiag: r.attDiag ?? snapshot?.attDiag,
             photo: r.photo ?? snapshot?.photo,
+            photoDiag: r.photoDiag ?? snapshot?.photoDiag,
             // ?? rather than isEmpty: a read that legitimately found
             // nothing has to be able to clear what the last one left, and
             // an empty list said both that and "this did not run".

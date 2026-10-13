@@ -134,6 +134,8 @@ struct Snapshot: Codable {
     /// dashboard header. Stored rather than re-fetched: the portal serves it
     /// inline, so there is no URL to load later.
     var photo: String?
+    /// What the photo fetch actually did. Only the direct path sets this.
+    var photoDiag: String?
     /// Coursework the LMS is waiting on, soonest first. Read last of all,
     /// on a different site, so it stays empty until that read has worked
     /// once.
@@ -167,6 +169,7 @@ struct Snapshot: Codable {
         daywise = (try? c.decode([DaySession].self, forKey: .daywise)) ?? []
         attDiag = try? c.decodeIfPresent(String.self, forKey: .attDiag)
         photo = try? c.decodeIfPresent(String.self, forKey: .photo)
+        photoDiag = try? c.decodeIfPresent(String.self, forKey: .photoDiag)
         deadlines = (try? c.decode([Deadline].self, forKey: .deadlines)) ?? []
         lmsDiag = try? c.decodeIfPresent(String.self, forKey: .lmsDiag)
         courses = (try? c.decode([LmsCourse].self, forKey: .courses)) ?? []
@@ -180,7 +183,7 @@ struct Snapshot: Codable {
         marks: [String: Mark] = [:], weekDiag: String? = nil,
         termEnd: String? = nil, history: [Stamp] = [],
         holidays: [Holiday] = [], daywise: [DaySession] = [],
-        attDiag: String? = nil, photo: String? = nil,
+        attDiag: String? = nil, photo: String? = nil, photoDiag: String? = nil,
         deadlines: [Deadline] = [], lmsDiag: String? = nil,
         courses: [LmsCourse] = [], faculty: [String: [String]] = [:],
         profile: StudentProfile? = nil
@@ -198,6 +201,7 @@ struct Snapshot: Codable {
         self.daywise = daywise
         self.attDiag = attDiag
         self.photo = photo
+        self.photoDiag = photoDiag
         self.deadlines = deadlines
         self.lmsDiag = lmsDiag
         self.courses = courses

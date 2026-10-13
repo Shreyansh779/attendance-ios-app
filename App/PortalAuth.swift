@@ -540,18 +540,20 @@ enum PortalGateway {
                 faculty[subject] = Array(Set((faculty[subject] ?? []) + teachers)).sorted()
             }
 
-            // `CohortGroupName` is already a clean "B9"-style code when the
-            // server bothers to set it; when it's blank (seen live on some
-            // rows) the batch is still embedded in `Code`, just not at a
-            // fixed offset - a regex is the only part of that string that's
-            // actually stable.
-            let batches: [String] = (r.CohortList ?? []).compactMap { c in
-                if let g = c.CohortGroupName, !g.isEmpty { return g }
-                guard let code = c.Code, let regex = batchCode,
-                    let m = regex.firstMatch(in: code, range: NSRange(code.startIndex..., in: code)),
-                    let range = Range(m.range, in: code)
-                else { return nil }
-                return String(code[range])
+            // Confirmed live: `CohortGroupName` is the same full descriptive
+            // string as `Code` ("BT-CSE-SPZ-CSF-V-B9"), not a short code on
+            // its own - a regex pulling just the batch letter+number is the
+            // only part of either field that's actually stable.
+            let batches: [String] = (r.CohortList ?? []).compactMap { c -> String? in
+                guard let regex = batchCode else { return nil }
+                for candidate in [c.CohortGroupName, c.Code] {
+                    guard let s = candidate,
+                        let m = regex.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)),
+                        let range = Range(m.range, in: s)
+                    else { continue }
+                    return String(s[range])
+                }
+                return nil
             }
 
             return Session(
@@ -684,9 +686,13 @@ enum PortalLMS {
         let session = freshSession()
 
         let (landing, _) = try await session.data(from: key)
-        guard let html = String(data: landing, encoding: .utf8),
-            let sesskey = Self.extractSesskey(from: html)
-        else { throw LMSError.noSesskey }
+        guard let html = String(data: landing, encoding: .utf8) else { throw LMSError.noSesskey }
+        guard let sesskey = Self.extractSesskey(from: html) else {
+            // No evidence otherwise for why a one-shot key's own landing page
+            // didn't carry a sesskey - could be a login/error page instead of
+            // the Moodle dashboard, which a raw snippet will show directly.
+            throw LMSError.unexpectedShape(String(html.prefix(800)))
+        }
 
         var request = URLRequest(
             url: lmsBase.appendingPathComponent("lib/ajax/service.php")

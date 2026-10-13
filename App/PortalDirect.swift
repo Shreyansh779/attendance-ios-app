@@ -195,12 +195,8 @@ final class PortalDirect: ObservableObject {
             week: byDay, weekDiag: "direct: \(weekSessions.count) sessions in range",
             termEnd: resolvedTerm != nil ? byDay.keys.max() : nil,
             holidays: knownHolidays, daywise: daywise,
-            // Settings only has one line for register diagnostics - the photo
-            // has no field of its own, so its outcome rides along here rather
-            // than failing with no visibility at all, same reasoning as
-            // `fetchDueDates`'s diag.
-            attDiag: "\(attDiag) | photo: \(photoDiag)",
-            photo: resolvedPhoto,
+            attDiag: attDiag,
+            photo: resolvedPhoto, photoDiag: photoDiag,
             deadlines: due, lmsDiag: lmsDiag,
             courses: nil, faculty: faculty,
             profile: StudentProfile(

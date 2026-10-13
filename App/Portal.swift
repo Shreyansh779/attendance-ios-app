@@ -142,9 +142,8 @@ final class Portal: NSObject, ObservableObject {
         /// Subject to the teachers who take your classes.
         let faculty: [String: [String]]
         /// Only the direct API path fills this in; the WebView scraper never
-        /// read it. Defaulted so every existing `Reading(...)` call site here
-        /// keeps compiling without naming it.
-        let profile: StudentProfile? = nil
+        /// reads it, so every `Reading(...)` built here passes `nil`.
+        let profile: StudentProfile?
     }
 
     // MARK: - Entry point
@@ -357,7 +356,8 @@ final class Portal: NSObject, ObservableObject {
                             rows: rows, sessions: sessions, student: self.student,
                             week: [:], weekDiag: nil, termEnd: nil,
                             holidays: [], daywise: [], attDiag: nil, photo: photo,
-                            deadlines: nil, lmsDiag: nil, courses: nil, faculty: [:]
+                            deadlines: nil, lmsDiag: nil, courses: nil, faculty: [:],
+                            profile: nil
                         )
                     )
 
@@ -377,7 +377,8 @@ final class Portal: NSObject, ObservableObject {
                             week: week.days, weekDiag: week.diag,
                             termEnd: week.whole ? week.days.keys.max() : nil,
                             holidays: [], daywise: [], attDiag: nil, photo: photo,
-                            deadlines: nil, lmsDiag: nil, courses: nil, faculty: week.teachers
+                            deadlines: nil, lmsDiag: nil, courses: nil, faculty: week.teachers,
+                            profile: nil
                         )
                     )
 
@@ -1069,7 +1070,8 @@ final class Portal: NSObject, ObservableObject {
             deadlines: deadlines,
             lmsDiag: lmsDiag,
             courses: courses,
-            faculty: faculty
+            faculty: faculty,
+            profile: nil
         )
         last = reading
         onDone?(reading)
@@ -1119,7 +1121,8 @@ final class Portal: NSObject, ObservableObject {
                     deadlines: due,
                     lmsDiag: self.lmsDiag,
                     courses: self.courses,
-                    faculty: self.faculty
+                    faculty: self.faculty,
+                    profile: nil
                 )
             )
         }

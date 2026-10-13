@@ -344,10 +344,15 @@ enum PortalGateway {
             .filter { !$0.isEmpty }
             .joined(separator: " ")
         let picture: ProfilePicture? = {
-            guard let p = item.ProfilePictureInfo,
-                let container = p.ContainerName, let path = p.FilePath, let name = p.ActualFileName
+            guard let p = item.ProfilePictureInfo, let container = p.ContainerName, let path = p.FilePath
             else { return nil }
-            return ProfilePicture(containerName: container, filePath: path, actualFileName: name)
+            // Confirmed live: this response carries ContainerName/FilePath
+            // only, no ActualFileName key at all - the filename is just the
+            // last segment of FilePath itself ("/students/profile-pictures/
+            // 590011979_P.jpg" -> "590011979_P.jpg"), which is also what the
+            // WebView-confirmed working curl call used.
+            let derivedName = p.ActualFileName ?? (path as NSString).lastPathComponent
+            return ProfilePicture(containerName: container, filePath: path, actualFileName: derivedName)
         }()
         // `ProfilePictureInfo` exists but something in `Picture` came back
         // nil - read its actual keys straight from the JSON so the real
@@ -685,13 +690,18 @@ enum PortalLMS {
         let key = try await requestUserkeyURL(token: token, studentId: studentId)
         let session = freshSession()
 
-        let (landing, _) = try await session.data(from: key)
+        let (landing, landingResponse) = try await session.data(from: key)
         guard let html = String(data: landing, encoding: .utf8) else { throw LMSError.noSesskey }
         guard let sesskey = Self.extractSesskey(from: html) else {
-            // No evidence otherwise for why a one-shot key's own landing page
-            // didn't carry a sesskey - could be a login/error page instead of
-            // the Moodle dashboard, which a raw snippet will show directly.
-            throw LMSError.unexpectedShape(String(html.prefix(800)))
+            // Confirmed live: the page that comes back here can be the
+            // Connect Portal's own Angular shell, not Moodle at all - so the
+            // landing URL actually reached (after redirects) matters as much
+            // as the HTML. `key` is what was requested; `landingResponse.url`
+            // is where it was actually still redirected to.
+            let landedAt = landingResponse.url?.absoluteString ?? "?"
+            throw LMSError.unexpectedShape(
+                "requested \(key.absoluteString), landed at \(landedAt): \(html.prefix(500))"
+            )
         }
 
         var request = URLRequest(

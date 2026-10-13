@@ -189,13 +189,7 @@ final class PortalDirect: ObservableObject {
         // theory that motivated it (a raw curl trace later proved the
         // userkey handoff's bounce is UPES-side flakiness, unrelated to
         // concurrency), but there's no reason to undo it either.
-        //
-        // This is the slow part: `dueDates` retries for up to ~10s against
-        // known server-side flakiness, so the status message has to actually
-        // change here or the whole wait reads as the app being stuck on
-        // "Reading your identity" instead of visibly still working.
-        status = "Checking the LMS - this can take a few seconds."
-        let (due, lmsDiag) = await Self.fetchDueDates(token: token, identity: identity)
+        let (due, lmsDiag) = await fetchDueDates(token: token, identity: identity)
 
         return Portal.Reading(
             rows: rows, sessions: todaySessions, student: identity.name ?? knownStudent,
@@ -250,11 +244,16 @@ final class PortalDirect: ObservableObject {
         return nil
     }
 
-    private static func fetchDueDates(
+    /// Not `static`, unlike its siblings here - it needs `self.status` to
+    /// show real retry progress instead of one frozen message for however
+    /// long `PortalLMS.dueDates`'s retry budget takes.
+    private func fetchDueDates(
         token: String, identity: PortalGateway.StudentIdentity
     ) async -> ([Deadline]?, String) {
         do {
-            let due = try await PortalLMS.dueDates(token: token, studentId: identity.studentId)
+            let due = try await PortalLMS.dueDates(token: token, studentId: identity.studentId) { attempt, max in
+                self.status = "Checking the LMS (\(attempt)/\(max))."
+            }
             return (due, "\(due.count) items due")
         } catch {
             return (nil, "lms failed: \(error)")

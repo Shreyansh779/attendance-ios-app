@@ -35,6 +35,9 @@ final class PortalDirect: ObservableObject {
         do {
             let creds = try await PortalAuth.login(email: email, password: password)
             PortalAuthStore.save(creds)
+            // Saved only on success - a wrong password typed here must never
+            // be the thing silentLogin() retries with forever.
+            PortalCredentialStore.save(.init(email: email, password: password))
             credentials = creds
             showingLogin = false
             onSignedIn?()
@@ -47,24 +50,41 @@ final class PortalDirect: ObservableObject {
         showingLogin = false
     }
 
-    /// A valid access token, refreshing or asking to sign in as needed.
+    /// A valid access token, refreshing, silently re-logging in with a saved
+    /// password, or asking to sign in as a last resort.
     private func token() async throws -> String {
         guard var current = credentials ?? PortalAuthStore.load() else {
-            showingLogin = true
-            throw DirectError.needsLogin
+            return try await silentLoginOrPrompt()
         }
 
         if current.isExpiringSoon {
             guard let refreshed = try? await PortalAuth.refresh(current) else {
                 PortalAuthStore.clear()
-                showingLogin = true
-                throw DirectError.needsLogin
+                return try await silentLoginOrPrompt()
             }
             current = refreshed
             PortalAuthStore.save(current)
         }
         credentials = current
         return current.accessToken
+    }
+
+    /// The bearer token is gone or dead; a saved email/password is tried
+    /// once before falling back to asking in person. A saved password that
+    /// no longer works is cleared rather than retried forever - a `-` typed
+    /// as "this isn't working" needs the real captcha-gated web login, which
+    /// retrying the same bad password here would never reach.
+    private func silentLoginOrPrompt() async throws -> String {
+        if let saved = PortalCredentialStore.load() {
+            if let creds = try? await PortalAuth.login(email: saved.email, password: saved.password) {
+                PortalAuthStore.save(creds)
+                credentials = creds
+                return creds.accessToken
+            }
+            PortalCredentialStore.clear()
+        }
+        showingLogin = true
+        throw DirectError.needsLogin
     }
 
     /// Mirrors `Portal.begin`: fetches everything over HTTP and hands back one
@@ -81,7 +101,7 @@ final class PortalDirect: ObservableObject {
         status = "Signing in."
         defer { busy = false; status = nil }
 
-        let token = try await token()
+        var token = try await self.token()
 
         status = "Reading your identity."
         // `token()` only refreshes pre-emptively, against our own guessed
@@ -101,12 +121,15 @@ final class PortalDirect: ObservableObject {
             // server is having a moment." Seen live as a 500, not a 401, for
             // what was almost certainly a stale token left over from earlier
             // testing - the server doesn't reject it cleanly, but it is not
-            // valid, and there is no recovery from here except a fresh login.
+            // valid. One retry through the same silent-login-or-prompt path
+            // `token()` uses, so a saved password gets a chance before
+            // anyone's asked to type it again. The refreshed token replaces
+            // `token` itself, since every call below this point still uses it.
             credentials = nil
             PortalAuthStore.clear()
-            showingLogin = true
             lastError = "\(error)"
-            throw DirectError.needsLogin
+            token = try await silentLoginOrPrompt()
+            identity = try await PortalGateway.studentIdentity(token: token)
         }
 
         // The timetable range depends on the term's own start/end dates, so

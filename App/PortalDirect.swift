@@ -94,10 +94,18 @@ final class PortalDirect: ObservableObject {
         let identity: PortalGateway.StudentIdentity
         do {
             identity = try await PortalGateway.studentIdentity(token: token)
-        } catch PortalGateway.GatewayError.unauthorized {
+        } catch let error as PortalGateway.GatewayError {
+            // Confirmed live as a clean 200 for a valid token, unlike the
+            // known-flaky holidays endpoint - so any failure here, 401 or
+            // not, reads as "this token is garbage" rather than "UPES's
+            // server is having a moment." Seen live as a 500, not a 401, for
+            // what was almost certainly a stale token left over from earlier
+            // testing - the server doesn't reject it cleanly, but it is not
+            // valid, and there is no recovery from here except a fresh login.
             credentials = nil
             PortalAuthStore.clear()
             showingLogin = true
+            lastError = "\(error)"
             throw DirectError.needsLogin
         }
 

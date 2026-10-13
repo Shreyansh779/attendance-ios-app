@@ -662,7 +662,15 @@ enum PortalLMS {
         request.httpMethod = "POST"
         request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
         request.setValue("connectportal", forHTTPHeaderField: "x-applicationname")
-        request.setValue("mobile", forHTTPHeaderField: "x-requestfrom")
+        // Deliberately NOT "x-requestfrom: mobile" here, unlike every other
+        // gateway call. The WebView path - which reaches Moodle correctly
+        // every time, confirmed live - calls this from the portal's own
+        // Angular app over session cookies, never flagged as mobile at all.
+        // Testing whether that flag is what makes the issued key redirect
+        // toward the native LMS app's own deep-link handling instead of
+        // landing on plain Moodle HTML, which would explain the bounce back
+        // to the Connect Portal dashboard that happens on every attempt
+        // otherwise, confirmed independent of concurrency, UA and timing.
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {

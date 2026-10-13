@@ -314,6 +314,12 @@ struct TimetableView: View {
                         .r(14, k.live ? .semibold : .medium)
                         .foregroundStyle(k.live ? Color.mintDim : (k.past ? Color.ink4 : Color.ink3))
 
+                    if let batch = k.batch, !batch.isEmpty {
+                        Text("With \(batch.joined(separator: ", "))")
+                            .r(12, .medium)
+                            .foregroundStyle(Color.ink4)
+                    }
+
                     // A hybrid class has both a room and a join link, so the
                     // button keys off the link rather than off `online`.
                     if !k.past, let raw = k.link, let url = URL(string: raw) {

@@ -68,6 +68,13 @@ struct TodayView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, 14)
 
+                if let batch = h.batch, !batch.isEmpty {
+                    Text("With \(batch.joined(separator: ", "))")
+                        .r(13.5, .medium)
+                        .foregroundStyle(Color.ink3)
+                        .padding(.top, 2)
+                }
+
                 if h.online, let raw = h.link, let url = URL(string: raw) {
                     Button {
                         openURL(url)
@@ -265,6 +272,11 @@ private struct Tomorrow: View {
                             Text(k.online ? "Online classroom" : "Room \(k.room ?? "not listed")")
                                 .r(13, .medium)
                                 .foregroundStyle(Color.ink3)
+                            if let batch = k.batch, !batch.isEmpty {
+                                Text("With \(batch.joined(separator: ", "))")
+                                    .r(12, .medium)
+                                    .foregroundStyle(Color.ink4)
+                            }
                         }
                         Spacer(minLength: 0)
                     }

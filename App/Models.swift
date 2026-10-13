@@ -2,6 +2,19 @@ import Foundation
 
 let THRESHOLD = 75
 
+/// Shown on tapping the avatar. Only ever populated by the direct API path -
+/// the WebView scraper never read any of this, so it stays nil on a WebView
+/// refresh rather than clearing what a direct refresh last found.
+struct StudentProfile: Codable, Hashable {
+    var name: String?
+    var email: String?
+    var phone: String?
+    var campus: String?
+    var program: String?
+    var studentId: String?
+    var globalId: Int?
+}
+
 // MARK: - Attendance arithmetic
 
 /// How much room a subject has, in whole classes.
@@ -86,10 +99,14 @@ struct Session: Codable, Identifiable, Hashable {
     let date: String?
     /// Join URL for an online class, when the portal exposes one.
     let link: String?
+    /// Batches sharing this slot - "B7", "B8", "B9" - when the source says.
+    /// Only the direct timetable API carries this; the WebView scraper never
+    /// has, so it decodes to nil there and the UI just omits the line.
+    let batch: [String]?
 
     var id: String { (date ?? "") + start + subject }
 
-    enum CodingKeys: String, CodingKey { case subject, start, end, room, online, mode, date, link }
+    enum CodingKeys: String, CodingKey { case subject, start, end, room, online, mode, date, link, batch }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -101,12 +118,13 @@ struct Session: Codable, Identifiable, Hashable {
         mode = (try? c.decode(String.self, forKey: .mode)) ?? "class"
         date = try? c.decodeIfPresent(String.self, forKey: .date)
         link = try? c.decodeIfPresent(String.self, forKey: .link)
+        batch = try? c.decodeIfPresent([String].self, forKey: .batch)
     }
 
     init(
         subject: String, start: String, end: String,
         room: String?, online: Bool, mode: String,
-        date: String? = nil, link: String? = nil
+        date: String? = nil, link: String? = nil, batch: [String]? = nil
     ) {
         self.subject = subject
         self.start = start
@@ -116,6 +134,7 @@ struct Session: Codable, Identifiable, Hashable {
         self.mode = mode
         self.date = date
         self.link = link
+        self.batch = batch
     }
 }
 
@@ -259,6 +278,7 @@ struct Klass: Identifiable {
     var online: Bool { session.online }
     var mode: String { session.mode }
     var link: String? { session.link }
+    var batch: [String]? { session.batch }
 }
 
 /// Marks the class on now and the next one due, and ties each to its subject.

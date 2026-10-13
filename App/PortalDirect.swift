@@ -82,16 +82,19 @@ final class PortalDirect: ObservableObject {
         status = "Reading your identity."
         let identity = try await PortalGateway.studentIdentity(token: token)
 
-        async let term = try? PortalGateway.currentTerm(token: token, studentId: identity.studentId)
+        // The timetable range depends on the term's own start/end dates, so
+        // this has to resolve before the timetable call can go out - unlike
+        // the rest, which has no such dependency and still runs in parallel.
+        let resolvedTerm = try? await PortalGateway.currentTerm(token: token, studentId: identity.studentId)
+
+        let timetableRange = Self.timetableRange(for: resolvedTerm)
         async let week = try? PortalGateway.timetable(
             token: token, studentCode: identity.studentId,
-            from: Date().addingTimeInterval(-3 * 86400),
-            to: Date().addingTimeInterval(10 * 86400)
+            from: timetableRange.from, to: timetableRange.to
         )
         async let photo = Self.fetchPhoto(token: token, identity: identity)
         async let dueResult = Self.fetchDueDates(token: token, identity: identity)
 
-        let resolvedTerm = await term
         var rows: [AttRow] = []
         var daywise: [DaySession] = []
         var attDiag = "term lookup failed"
@@ -125,12 +128,49 @@ final class PortalDirect: ObservableObject {
 
         return Portal.Reading(
             rows: rows, sessions: todaySessions, student: identity.name ?? knownStudent,
-            week: byDay, weekDiag: "direct: \(weekSessions.count) sessions in range", termEnd: nil,
+            // Asked for the whole term, same as `Portal.fetchWeek`'s `whole`
+            // case - so the last day actually returned (not just the one
+            // asked for) is what claims to be the end of the term, in case
+            // the term runs out before `timetableRange.to` does.
+            week: byDay, weekDiag: "direct: \(weekSessions.count) sessions in range",
+            termEnd: resolvedTerm != nil ? byDay.keys.max() : nil,
             holidays: knownHolidays, daywise: daywise, attDiag: attDiag,
             photo: await photo,
             deadlines: due, lmsDiag: lmsDiag,
             courses: nil, faculty: [:]
         )
+    }
+
+    /// Covers the whole term, the same thing `Portal.fetchWeek`'s API path
+    /// gets for free by asking the scheduler for its term feed - except this
+    /// has to ask for it explicitly, since `timetable` takes an exact range
+    /// rather than "everything you have". Falls back to a plain ±10 days
+    /// around today when the term's own dates don't parse, which is strictly
+    /// worse than the term but no worse than this endpoint's old hardcoded
+    /// window.
+    private static func timetableRange(for term: PortalGateway.TermInfo?) -> (from: Date, to: Date) {
+        let fallback = (
+            from: Date().addingTimeInterval(-10 * 86400),
+            to: Date().addingTimeInterval(60 * 86400)
+        )
+        guard let term,
+            let start = Self.parseServerDate(term.termStartDate),
+            let end = Self.parseServerDate(term.termEndDate)
+        else { return fallback }
+        return (start, end)
+    }
+
+    /// The dropdown's `TermStartDate`/`TermEndDate` arrive as full ISO
+    /// timestamps; tried with and without fractional seconds since which one
+    /// the server uses hasn't been pinned down against a live response.
+    private static func parseServerDate(_ s: String) -> Date? {
+        for withFractional in [true, false] {
+            let f = ISO8601DateFormatter()
+            f.formatOptions = withFractional
+                ? [.withInternetDateTime, .withFractionalSeconds] : [.withInternetDateTime]
+            if let d = f.date(from: s) { return d }
+        }
+        return nil
     }
 
     private static func fetchDueDates(

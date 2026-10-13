@@ -135,7 +135,15 @@ final class PortalDirect: ObservableObject {
         // The timetable range depends on the term's own start/end dates, so
         // this has to resolve before the timetable call can go out - unlike
         // the rest, which has no such dependency and still runs in parallel.
-        let resolvedTerm = try? await PortalGateway.currentTerm(token: token, studentId: identity.studentId)
+        var attDiag: String
+        let resolvedTerm: PortalGateway.TermInfo?
+        do {
+            resolvedTerm = try await PortalGateway.currentTerm(token: token, studentId: identity.studentId)
+            attDiag = "term ok"
+        } catch {
+            resolvedTerm = nil
+            attDiag = "term lookup failed: \(error)"
+        }
 
         let timetableRange = Self.timetableRange(for: resolvedTerm)
         async let week = try? PortalGateway.timetable(
@@ -147,7 +155,6 @@ final class PortalDirect: ObservableObject {
 
         var rows: [AttRow] = []
         var daywise: [DaySession] = []
-        var attDiag = "term lookup failed"
         if let t = resolvedTerm {
             do {
                 let sessions = try await PortalGateway.detailedRegister(

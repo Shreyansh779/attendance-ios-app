@@ -219,10 +219,23 @@ enum PortalCredentialStore {
 /// if and when that's wired in.
 enum PortalGateway {
 
-    enum GatewayError: Error {
+    enum GatewayError: Error, CustomStringConvertible {
         case unauthorized
         case server(status: Int)
         case malformedResponse
+        /// 200, but the JSON didn't match the expected shape - carries a
+        /// clipped raw body so a wrong field-name guess is diagnosable from
+        /// the device instead of showing a label with no evidence behind it.
+        case decodeFailed(String)
+
+        var description: String {
+            switch self {
+            case .unauthorized: return "unauthorized"
+            case .server(let status): return "server \(status)"
+            case .malformedResponse: return "malformed response"
+            case .decodeFailed(let body): return "decode failed: \(body)"
+            }
+        }
     }
 
     private static let base = URL(string: "https://myupes-beta.upes.ac.in/apigateway/")!
@@ -308,7 +321,8 @@ enum PortalGateway {
             var Items: [Item]
         }
         guard let item = try? JSONDecoder().decode(Envelope.self, from: data).Items.first else {
-            throw GatewayError.malformedResponse
+            let body = String(data: data.prefix(500), encoding: .utf8) ?? "<binary>"
+            throw GatewayError.decodeFailed(body)
         }
         let picture: ProfilePicture? = {
             guard let p = item.ProfilePictureInfo,
@@ -362,7 +376,10 @@ enum PortalGateway {
         struct Family: Decodable { var TermDropdownDetailsList: [Term] }
         guard let terms = try? JSONDecoder().decode([Family].self, from: data).first?.TermDropdownDetailsList,
             let term = terms.first(where: { $0.IsCurrentTerm }) ?? terms.last
-        else { throw GatewayError.malformedResponse }
+        else {
+            let body = String(data: data.prefix(500), encoding: .utf8) ?? "<binary>"
+            throw GatewayError.decodeFailed(body)
+        }
         return TermInfo(
             termCodeId: term.TermCodeId,
             termStartDate: term.TermStartDate,
@@ -412,7 +429,8 @@ enum PortalGateway {
         struct Envelope: Decodable { var AttendanceInfo: [Course] }
 
         guard let envelope = try? JSONDecoder().decode(Envelope.self, from: data) else {
-            throw GatewayError.malformedResponse
+            let body = String(data: data.prefix(500), encoding: .utf8) ?? "<binary>"
+            throw GatewayError.decodeFailed(body)
         }
         return envelope.AttendanceInfo.flatMap { course in
             course.AttendanceDetails.compactMap { detail -> SessionRow? in

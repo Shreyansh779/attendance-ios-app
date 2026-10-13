@@ -704,22 +704,20 @@ enum PortalLMS {
     /// straight after signing in answered 500 and the next one a key") and
     /// already works around it by asking again. Same fix here: a fresh key
     /// and another attempt, rather than giving up on the first bounce.
-    static func dueDates(token: String, studentId: String) async throws -> [Deadline] {
+    ///
+    /// ponytail: capped at 5, not the 20 a first pass tried - `askForKey`'s
+    /// own retries are a cheap local poll of a JS variable waiting on ONE
+    /// network call, not 20 full POST-plus-multi-hop-TLS-redirect round
+    /// trips the way this was. 20 real attempts reads as hung, not slow.
+    static func dueDates(
+        token: String, studentId: String, onAttempt: @MainActor (Int, Int) -> Void = { _, _ in }
+    ) async throws -> [Deadline] {
         let session = freshSession()
         var lastFailure: LMSError = .noSesskey
+        let maxAttempts = 5
 
-        // Confirmed live 2026-10-13 that this isn't an app-specific bug at
-        // all: a plain `curl -v -L` trace, run completely independently of
-        // this code, reproduced the identical bounce
-        // (key -> / -> login/index.php -> back to the Connect Portal
-        // dashboard) that this call was hitting - three redirects, server
-        // headers, `X-Redirect-By: Moodle` and all. The userkey handoff is
-        // just intermittently unreliable on UPES's end. `Portal.askForKey`,
-        // the WebView path's equivalent, already documents this exact
-        // flakiness and survives it with a generous retry budget (8-10
-        // seconds, not a couple of quick tries) - matching that budget here
-        // instead of the 3-attempts/700ms guess that wasn't nearly enough.
-        for attempt in 0..<20 {
+        for attempt in 0..<maxAttempts {
+            await onAttempt(attempt + 1, maxAttempts)
             if attempt > 0 { try? await Task.sleep(nanoseconds: 500_000_000) }
             let key = try await requestUserkeyURL(token: token, studentId: studentId)
 

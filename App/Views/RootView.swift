@@ -547,18 +547,20 @@ struct RootView: View {
                 direct.lastError = nil
                 apply(r)
                 if r.deadlines == nil {
-                    // Confirmed live 2026-10-13: the LMS userkey handoff
-                    // reliably bounces back to the Connect Portal dashboard
-                    // when called with Bearer-token auth, no matter the
-                    // retries, concurrency, headers or timing - but the
-                    // WebView's cookie-session auth reaches Moodle every
-                    // time. Rather than keep chasing that from the direct
-                    // side, this quietly runs the already-reliable WebView
-                    // flow in the background for just this gap. It won't
-                    // show a captcha login unless the stored session has
-                    // actually expired - the WebView's cookie store is
-                    // persistent, so a session that's good right now stays
-                    // good here too.
+                    // Rather than keep chasing the LMS handoff from the
+                    // direct side, this quietly runs the already-reliable
+                    // WebView flow in the background for just this gap. It
+                    // won't show a captcha login unless the stored session
+                    // has actually expired.
+                    //
+                    // The WebView's own lmsDiag overwrites r.lmsDiag the
+                    // moment that fallback's `apply` runs below, so the
+                    // direct attempt's actual reason has to be captured here
+                    // first or it's gone - without this, "why did it fall
+                    // back to the WebView for LMS" was undiagnosable the
+                    // moment the WebView fallback itself succeeded or failed
+                    // with its own, unrelated message.
+                    direct.lastError = "LMS direct attempt: \(r.lmsDiag ?? "unknown")"
                     refreshViaWebView()
                 }
             } catch is PortalDirect.DirectError {

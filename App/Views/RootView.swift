@@ -537,6 +537,7 @@ struct RootView: View {
     /// is the normal, better path, not a broken one.
     private func refresh() {
         direct.onSignedIn = { [self] in refresh() }
+        direct.moodleCookies = { [portal] in await portal.allCookies() }
         Task {
             do {
                 let r = try await direct.begin(

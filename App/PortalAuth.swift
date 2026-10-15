@@ -605,158 +605,130 @@ enum PortalGateway {
     }
 }
 
-/// The Moodle LMS handoff: `access-lms` issues a one-shot `userkey` login
-/// link, not a `wstoken` - confirmed live. Following that link with a cookie
-/// jar, then scraping `M.cfg.sesskey` out of the landing page, then calling
-/// Moodle's own AJAX service with both, reproduces exactly what
-/// `Scrapers.lmsDue` reads out of the WebView - but over plain HTTP, no
-/// WebKit involved.
-enum PortalLMS {
-    enum LMSError: Error, CustomStringConvertible {
-        case noRedirect
-        case noSesskey
+/// Moodle's own Mobile app protocol - `admin/tool/mobile/launch.php`, a
+/// `wstoken`, `webservice/rest/server.php` - confirmed from the real UPES
+/// LMS app's decompiled source (`com.upes.studentlms`): it's an unmodified
+/// build of the official Moodle Mobile app (moodlehq/moodleapp), not a
+/// custom integration. Found after `PortalLMS`'s userkey handoff turned out
+/// to reliably fail for Bearer-token auth while working for the WebView's
+/// cookie-session auth - this is the better-founded alternative: Moodle's
+/// own long-lived API credential, not a one-shot SSO redirect that has to be
+/// re-spent every refresh.
+///
+/// The trade: this still needs an authenticated Moodle *cookie* session to
+/// mint the token in the first place - `PortalGateway`'s Bearer tokens don't
+/// help here, same root cause as the userkey flow's failure. But unlike that
+/// flow, the mint only has to happen once (or whenever the stored token goes
+/// stale): `PortalDirect` borrows `Portal`'s WebView cookies for that one
+/// exchange, then every future refresh calls `webservice/rest/server.php`
+/// directly - no cookies, no sesskey, no WebView, no per-refresh dance.
+enum PortalMoodle {
+    enum MoodleError: Error, CustomStringConvertible {
+        case noAuthenticatedSession
+        case noRedirect(String)
         case server(status: Int)
-        /// Moodle answered 200 but the AJAX call itself failed - carries its
-        /// own exception message, which is worth more than "it didn't work".
-        case ajaxError(String)
-        /// 200, no AJAX exception, but the JSON didn't match `Call`/`Payload`
-        /// - carries a clipped raw body so a real field-name mismatch is
-        /// diagnosable from the device instead of silently returning nothing.
-        case unexpectedShape(String)
+        case decodeFailed(String)
+        case apiError(String)
 
         var description: String {
             switch self {
-            case .noRedirect: return "no redirect url from access-lms"
-            case .noSesskey: return "sesskey not found in landing page"
+            case .noAuthenticatedSession: return "no authenticated Moodle session in the WebView"
+            case .noRedirect(let body): return "no moodlemobile redirect: \(body)"
             case .server(let status): return "server \(status)"
-            case .ajaxError(let msg): return "ajax error: \(msg)"
-            case .unexpectedShape(let body): return "unexpected shape: \(body)"
+            case .decodeFailed(let body): return "decode failed: \(body)"
+            case .apiError(let msg): return "api error: \(msg)"
             }
         }
     }
 
-    /// No `apigateway/` segment here - `access-lms` is a sibling of
-    /// `sso/user/oauth2/refresh-token` in `PortalAuth`, not of the
-    /// `connect-portal`/`student-attendance` calls in `PortalGateway`, which
-    /// do sit under `apigateway/`. Mixing the two bases up is what the 404
-    /// confirmed live 2026-10-13 turned out to be.
-    private static let gatewayBase = URL(string: "https://myupes-beta.upes.ac.in/")!
     private static let lmsBase = URL(string: "https://lms.upes.ac.in/")!
 
-    /// A private cookie jar per call, so a stale Moodle session from a
-    /// previous attempt can't be mistaken for a fresh one.
-    private static func freshSession() -> URLSession {
-        let cfg = URLSessionConfiguration.ephemeral
-        cfg.httpCookieStorage = HTTPCookieStorage()
-        cfg.httpShouldSetCookies = true
-        return URLSession(configuration: cfg)
-    }
-
-    /// `POST sso/user/oauth2/access-lms?uniqueId=<StudentId GUID>` - the GUID
-    /// from `studentloginbasicinfo`, not `GlobalId`, which 500s.
-    private static func requestUserkeyURL(token: String, studentId: String) async throws -> URL {
-        var request = URLRequest(
-            url: gatewayBase.appendingPathComponent("sso/user/oauth2/access-lms")
-                .appending(queryItems: [URLQueryItem(name: "uniqueId", value: studentId)])
-        )
-        request.httpMethod = "POST"
-        request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
-        request.setValue("connectportal", forHTTPHeaderField: "x-applicationname")
-        // Deliberately NOT "x-requestfrom: mobile" here, unlike every other
-        // gateway call. The WebView path - which reaches Moodle correctly
-        // every time, confirmed live - calls this from the portal's own
-        // Angular app over session cookies, never flagged as mobile at all.
-        // Testing whether that flag is what makes the issued key redirect
-        // toward the native LMS app's own deep-link handling instead of
-        // landing on plain Moodle HTML, which would explain the bounce back
-        // to the Connect Portal dashboard that happens on every attempt
-        // otherwise, confirmed independent of concurrency, UA and timing.
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw LMSError.server(status: (response as? HTTPURLResponse)?.statusCode ?? -1)
+    /// Reads the `Location` header of the launch.php redirect without
+    /// following it - `moodlemobile://...` isn't an http(s) URL, so
+    /// URLSession can't fetch it anyway, but it can tell us where it was
+    /// headed.
+    private final class RedirectCapture: NSObject, URLSessionTaskDelegate {
+        var location: String?
+        func urlSession(
+            _ session: URLSession, task: URLSessionTask,
+            willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
+            completionHandler: @escaping (URLRequest?) -> Void
+        ) {
+            location = response.value(forHTTPHeaderField: "Location")
+            completionHandler(nil)
         }
-        struct Envelope: Decodable { var redirectUrl: String }
-        guard let url = (try? JSONDecoder().decode(Envelope.self, from: data)).flatMap({ URL(string: $0.redirectUrl) })
-        else { throw LMSError.noRedirect }
-        return url
     }
 
-    /// Pulled out of `M.cfg.sesskey` in the landing page's inline script -
-    /// confirmed live against the real HTML (`"sesskey":"V3sq0BoYe4"`).
-    private static func extractSesskey(from html: String) -> String? {
-        guard let regex = try? NSRegularExpression(pattern: #""sesskey"\s*:\s*"([^"]+)""#),
-            let match = regex.firstMatch(in: html, range: NSRange(html.startIndex..., in: html)),
-            let range = Range(match.range(at: 1), in: html)
-        else { return nil }
-        return String(html[range])
-    }
-
-    /// Everything the LMS is waiting on, start to finish: a fresh userkey,
-    /// Moodle's own session cookie, its `sesskey`, and the due-date feed.
-    ///
-    /// Confirmed live 2026-10-13: a key requested and used within the same
-    /// instant can bounce back to the Connect Portal's own dashboard instead
-    /// of landing on Moodle, while the identical flow run by hand (with the
-    /// natural few seconds' delay of typing out curl commands) lands
-    /// correctly every time - `Portal.askForKey`, the WebView path's
-    /// equivalent, documents the exact same flakiness ("the first ask
-    /// straight after signing in answered 500 and the next one a key") and
-    /// already works around it by asking again. Same fix here: a fresh key
-    /// and another attempt, rather than giving up on the first bounce.
-    ///
-    /// ponytail: capped at 5, not the 20 a first pass tried - `askForKey`'s
-    /// own retries are a cheap local poll of a JS variable waiting on ONE
-    /// network call, not 20 full POST-plus-multi-hop-TLS-redirect round
-    /// trips the way this was. 20 real attempts reads as hung, not slow.
-    static func dueDates(
-        token: String, studentId: String, onAttempt: @MainActor (Int, Int) -> Void = { _, _ in }
-    ) async throws -> [Deadline] {
-        let session = freshSession()
-        var lastFailure: LMSError = .noSesskey
-        let maxAttempts = 5
-
-        for attempt in 0..<maxAttempts {
-            await onAttempt(attempt + 1, maxAttempts)
-            if attempt > 0 { try? await Task.sleep(nanoseconds: 500_000_000) }
-            let key = try await requestUserkeyURL(token: token, studentId: studentId)
-
-            guard let (landing, landingResponse) = try? await session.data(from: key),
-                let html = String(data: landing, encoding: .utf8)
-            else { continue }
-
-            guard let sesskey = Self.extractSesskey(from: html) else {
-                let landedAt = landingResponse.url?.absoluteString ?? "?"
-                lastFailure = .unexpectedShape(
-                    "requested \(key.absoluteString), landed at \(landedAt): \(html.prefix(500))"
-                )
-                continue
-            }
-
-            return try await Self.fetchDueEvents(sesskey: sesskey, session: session)
+    /// The exact handshake `confirmAndOpenBrowserForSSOLogin` /
+    /// `openBrowserForSSOLogin` in the real LMS app's source perform:
+    /// `launch.php?service=moodle_mobile_app&passport=<random>&urlscheme=moodlemobile`,
+    /// which - with a live Moodle session - redirects to
+    /// `moodlemobile://user@host?token=TOKEN&privatetoken=PRIVATETOKEN`.
+    /// `cookies` has to carry a real Moodle session; `Portal.allCookies()`
+    /// is the only source of one in this app.
+    static func exchangeForWSToken(cookies: [HTTPCookie]) async throws -> (token: String, privateToken: String) {
+        guard cookies.contains(where: { $0.domain.contains("lms.upes.ac.in") }) else {
+            throw MoodleError.noAuthenticatedSession
         }
-        throw lastFailure
+
+        let passport = Int.random(in: 100_000...999_999)
+        var components = URLComponents(
+            url: lmsBase.appendingPathComponent("admin/tool/mobile/launch.php"), resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [
+            URLQueryItem(name: "service", value: "moodle_mobile_app"),
+            URLQueryItem(name: "passport", value: String(passport)),
+            URLQueryItem(name: "urlscheme", value: "moodlemobile"),
+        ]
+
+        var request = URLRequest(url: components.url!)
+        let cookieHeader = cookies.filter { $0.domain.contains("lms.upes.ac.in") }
+            .map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
+        request.setValue(cookieHeader, forHTTPHeaderField: "Cookie")
+
+        let capture = RedirectCapture()
+        let session = URLSession(configuration: .ephemeral, delegate: capture, delegateQueue: nil)
+        _ = try? await session.data(for: request)
+
+        guard let location = capture.location, location.hasPrefix("moodlemobile://") else {
+            throw MoodleError.noRedirect(capture.location ?? "<no redirect at all>")
+        }
+        // Not real query syntax (the scheme-specific part before "?" isn't
+        // host+path in any standard sense), so URLComponents is asked for
+        // just the query string rather than for a parsed URL.
+        guard let query = location.split(separator: "?", maxSplits: 1).last,
+            let parsed = URLComponents(string: "x://x?" + query)?.queryItems,
+            let token = parsed.first(where: { $0.name == "token" })?.value,
+            let privateToken = parsed.first(where: { $0.name == "privatetoken" })?.value
+        else { throw MoodleError.noRedirect(location) }
+
+        return (token, privateToken)
     }
 
-    private static func fetchDueEvents(sesskey: String, session: URLSession) async throws -> [Deadline] {
-        var request = URLRequest(
-            url: lmsBase.appendingPathComponent("lib/ajax/service.php")
-                .appending(queryItems: [URLQueryItem(name: "sesskey", value: sesskey)])
-        )
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    /// `webservice/rest/server.php` - Moodle's own long-lived REST API,
+    /// confirmed to need no `sesskey`, no cookies, just the token, unlike
+    /// the AJAX endpoint `PortalLMS` uses from inside a logged-in page.
+    static func dueDates(wstoken: String) async throws -> [Deadline] {
+        var components = URLComponents(
+            url: lmsBase.appendingPathComponent("webservice/rest/server.php"), resolvingAgainstBaseURL: false
+        )!
         let now = Int(Date().timeIntervalSince1970)
-        request.httpBody = try JSONSerialization.data(withJSONObject: [
-            [
-                "index": 0,
-                "methodname": "core_calendar_get_action_events_by_timesort",
-                "args": ["timesortfrom": now, "limitnum": 50],
-            ]
-        ])
+        components.queryItems = [
+            URLQueryItem(name: "wstoken", value: wstoken),
+            URLQueryItem(name: "wsfunction", value: "core_calendar_get_action_events_by_timesort"),
+            URLQueryItem(name: "moodlewsrestformat", value: "json"),
+            URLQueryItem(name: "timesortfrom", value: String(now)),
+            URLQueryItem(name: "limitnum", value: "50"),
+        ]
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await URLSession.shared.data(from: components.url!)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw LMSError.server(status: (response as? HTTPURLResponse)?.statusCode ?? -1)
+            throw MoodleError.server(status: (response as? HTTPURLResponse)?.statusCode ?? -1)
+        }
+
+        struct Exception: Decodable { var exception: String?; var message: String? }
+        if let err = try? JSONDecoder().decode(Exception.self, from: data), err.exception != nil {
+            throw MoodleError.apiError(err.message ?? err.exception ?? "unknown")
         }
 
         struct Event: Decodable {
@@ -768,22 +740,10 @@ enum PortalLMS {
             struct Course: Decodable { var fullname: String }
         }
         struct Payload: Decodable { var events: [Event] }
-        struct Call: Decodable {
-            var error: Bool
-            var data: Payload?
-            var exception: Exception?
-            struct Exception: Decodable { var message: String? }
-        }
 
-        guard let calls = try? JSONDecoder().decode([Call].self, from: data), let first = calls.first else {
-            let body = String(data: data.prefix(300), encoding: .utf8) ?? "<binary>"
-            throw LMSError.unexpectedShape(body)
-        }
-        if first.error {
-            throw LMSError.ajaxError(first.exception?.message ?? "no message")
-        }
-        guard let payload = first.data else {
-            throw LMSError.unexpectedShape(String(data: data.prefix(300), encoding: .utf8) ?? "<binary>")
+        guard let payload = try? JSONDecoder().decode(Payload.self, from: data) else {
+            let body = String(data: data.prefix(1000), encoding: .utf8) ?? "<binary>"
+            throw MoodleError.decodeFailed(body)
         }
 
         let iso = ISO8601DateFormatter()
@@ -796,5 +756,55 @@ enum PortalLMS {
                 kind: e.modulename ?? "assign", url: e.url ?? ""
             )
         }
+    }
+}
+
+/// Keychain storage for the Moodle wstoken/privatetoken pair - long-lived,
+/// unlike `PortalAuth.Credentials`, so there's no refresh dance here at all;
+/// a stored token is used until Moodle itself rejects it.
+enum MoodleTokenStore {
+    private static let service = "today.moodle-token"
+    private static let account = "lms"
+
+    struct Saved: Codable {
+        var token: String
+        var privateToken: String
+    }
+
+    static func load() -> Saved? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+        ]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+            let data = item as? Data
+        else { return nil }
+        return try? JSONDecoder().decode(Saved.self, from: data)
+    }
+
+    static func save(_ saved: Saved) {
+        guard let data = try? JSONEncoder().encode(saved) else { return }
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+        ]
+        SecItemDelete(query as CFDictionary)
+        var attributes = query
+        attributes[kSecValueData as String] = data
+        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        SecItemAdd(attributes as CFDictionary, nil)
+    }
+
+    static func clear() {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+        ]
+        SecItemDelete(query as CFDictionary)
     }
 }

@@ -206,6 +206,17 @@ final class Portal: NSObject, ObservableObject {
         status = nil
     }
 
+    /// Every cookie this webview's persistent session is holding - what
+    /// `PortalDirect`'s one-time Moodle wstoken exchange needs, since that
+    /// exchange is a plain `URLSession` call with no webview of its own and
+    /// has to borrow this session's cookies to look authenticated to Moodle.
+    func allCookies() async -> [HTTPCookie] {
+        let store = webView.configuration.websiteDataStore.httpCookieStore
+        return await withCheckedContinuation { k in
+            store.getAllCookies { k.resume(returning: $0) }
+        }
+    }
+
     /// The document on screen, as a file on disk, so the share sheet has
     /// something real to hand to Files, Mail or anything else.
     ///

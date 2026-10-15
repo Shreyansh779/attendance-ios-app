@@ -21,6 +21,11 @@ final class PortalDirect: ObservableObject {
     /// `RootView` from whatever `begin` threw. Nothing else here surfaces
     /// this; without it a fallback is silent and undiagnosable from Settings.
     @Published var lastError: String?
+    /// Set by `RootView` to `{ await portal.allCookies() }` - the one link
+    /// to `Portal`'s WebView this class needs, used only to mint a Moodle
+    /// wstoken the first time (or whenever the stored one goes stale). Every
+    /// other call here never touches the WebView at all.
+    var moodleCookies: (() async -> [HTTPCookie])?
 
     private var credentials: PortalAuth.Credentials?
     /// Set right after a successful sign-in, so the caller can re-run the
@@ -189,7 +194,7 @@ final class PortalDirect: ObservableObject {
         // theory that motivated it (a raw curl trace later proved the
         // userkey handoff's bounce is UPES-side flakiness, unrelated to
         // concurrency), but there's no reason to undo it either.
-        let (due, lmsDiag) = await fetchDueDates(token: token, identity: identity)
+        let (due, lmsDiag) = await fetchDueDates()
 
         return Portal.Reading(
             rows: rows, sessions: todaySessions, student: identity.name ?? knownStudent,
@@ -244,17 +249,33 @@ final class PortalDirect: ObservableObject {
         return nil
     }
 
-    /// Not `static`, unlike its siblings here - it needs `self.status` to
-    /// show real retry progress instead of one frozen message for however
-    /// long `PortalLMS.dueDates`'s retry budget takes.
-    private func fetchDueDates(
-        token: String, identity: PortalGateway.StudentIdentity
-    ) async -> ([Deadline]?, String) {
-        do {
-            let due = try await PortalLMS.dueDates(token: token, studentId: identity.studentId) { attempt, max in
-                self.status = "Checking the LMS (\(attempt)/\(max))."
+    /// Not `static`, unlike its siblings here - it needs `self.status` for
+    /// progress and `self.moodleCookies` for the one-time wstoken mint. Takes
+    /// no part of the Bearer/mobile identity, on purpose: the whole reason
+    /// this exists is that it doesn't work for Moodle's own API at all,
+    /// confirmed live 2026-10-13 - see `PortalMoodle`'s doc comment.
+    private func fetchDueDates() async -> ([Deadline]?, String) {
+        if let saved = MoodleTokenStore.load() {
+            if let due = try? await PortalMoodle.dueDates(wstoken: saved.token) {
+                return (due, "\(due.count) items due (stored wstoken)")
             }
-            return (due, "\(due.count) items due")
+            // Doesn't necessarily mean the token is dead - could be a
+            // network blip - but there's no cheap way to tell the two apart,
+            // and re-minting is itself cheap whenever a WebView session is
+            // available, so this errs toward re-minting over a diagnosis
+            // this codebase otherwise never gets right on the first guess.
+            MoodleTokenStore.clear()
+        }
+
+        status = "Signing in to the LMS."
+        guard let cookies = await moodleCookies?(), !cookies.isEmpty else {
+            return (nil, "lms failed: no WebView session available to mint a Moodle token")
+        }
+        do {
+            let (wstoken, privateToken) = try await PortalMoodle.exchangeForWSToken(cookies: cookies)
+            MoodleTokenStore.save(.init(token: wstoken, privateToken: privateToken))
+            let due = try await PortalMoodle.dueDates(wstoken: wstoken)
+            return (due, "\(due.count) items due (minted wstoken)")
         } catch {
             return (nil, "lms failed: \(error)")
         }

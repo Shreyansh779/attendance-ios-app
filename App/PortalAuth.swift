@@ -693,16 +693,25 @@ enum PortalMoodle {
         guard let location = capture.location, location.hasPrefix("moodlemobile://") else {
             throw MoodleError.noRedirect(capture.location ?? "<no redirect at all>")
         }
-        // Not real query syntax (the scheme-specific part before "?" isn't
-        // host+path in any standard sense), so URLComponents is asked for
-        // just the query string rather than for a parsed URL.
-        guard let query = location.split(separator: "?", maxSplits: 1).last,
-            let parsed = URLComponents(string: "x://x?" + query)?.queryItems,
-            let token = parsed.first(where: { $0.name == "token" })?.value,
-            let privateToken = parsed.first(where: { $0.name == "privatetoken" })?.value
+        // Confirmed live 2026-10-15 against the real redirect, and against
+        // `CoreLoginHelperProvider.validateBrowserSSOLogin` in the real LMS
+        // app's decompiled source: this is NOT "scheme://host?key=value"
+        // query syntax at all (a first guess that only produced
+        // "no moodlemobile redirect" errors) - it's a single value straight
+        // after "token=", itself base64 for `signature:::token:::privatetoken`.
+        // `params[0]` (signature) is `md5(siteUrl + passport)`, used by the
+        // real app to guard against a forged redirect; skipped here since
+        // this is our own request to a host we already trust, not an
+        // externally-triggered deep link.
+        guard let range = location.range(of: "token="),
+            let blob = Data(base64Encoded: String(location[range.upperBound...])
+                .removingPercentEncoding ?? String(location[range.upperBound...])),
+            let decoded = String(data: blob, encoding: .utf8)
         else { throw MoodleError.noRedirect(location) }
 
-        return (token, privateToken)
+        let parts = decoded.components(separatedBy: ":::")
+        guard parts.count >= 3 else { throw MoodleError.noRedirect(location) }
+        return (token: parts[1], privateToken: parts[2])
     }
 
     /// `webservice/rest/server.php` - Moodle's own long-lived REST API,

@@ -275,10 +275,22 @@ final class PortalDirect: ObservableObject {
             if yours.isEmpty { return (nil, diag) }
             return (yours, diag)
         }
+        // When REST hands back no events at all, confirm who the token is - the
+        // real LMS app's calendar call is identical to ours, so an empty result
+        // points at the token, not the request. Appended to the diag kept in the
+        // Settings "Direct connection" card; only on the suspicious zero case.
+        func diagnosed(
+            _ r: (items: [Deadline], total: Int, kinds: String), _ source: String, token: String
+        ) async -> ([Deadline]?, String) {
+            let (result, base) = filtered(r, source)
+            guard r.total == 0 else { return (result, base) }
+            let who = (try? await PortalMoodle.siteInfo(wstoken: token)) ?? "site_info failed"
+            return (result, base + " | \(who)")
+        }
 
         if let saved = MoodleTokenStore.load() {
             if let due = try? await PortalMoodle.dueDates(wstoken: saved.token) {
-                return filtered(due, "stored wstoken")
+                return await diagnosed(due, "stored wstoken", token: saved.token)
             }
             // Doesn't necessarily mean the token is dead - could be a
             // network blip - but there's no cheap way to tell the two apart,
@@ -296,7 +308,7 @@ final class PortalDirect: ObservableObject {
             let (wstoken, privateToken) = try await PortalMoodle.exchangeForWSToken(cookies: cookies)
             MoodleTokenStore.save(.init(token: wstoken, privateToken: privateToken))
             let due = try await PortalMoodle.dueDates(wstoken: wstoken)
-            return filtered(due, "minted wstoken")
+            return await diagnosed(due, "minted wstoken", token: wstoken)
         } catch {
             return (nil, "lms failed: \(error)")
         }

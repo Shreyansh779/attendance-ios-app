@@ -788,6 +788,50 @@ enum PortalMoodle {
             .map { "\($0.key)×\($0.value.count)" }.sorted().joined(separator: ",")
         return (items, payload.events.count, kinds)
     }
+
+    /// Who the wstoken actually is, and whether the calendar function is in its
+    /// allowed list. The real LMS app's calendar call is byte-for-byte ours, yet
+    /// the token returns no events - this tells apart "token resolves to the
+    /// wrong/limited user" (a mint bug) from "right user, calendar simply empty
+    /// over the token path" (a server quirk). Diagnostic only.
+    static func siteInfo(wstoken: String) async throws -> String {
+        var components = URLComponents(
+            url: lmsBase.appendingPathComponent("webservice/rest/server.php"), resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [
+            URLQueryItem(name: "wstoken", value: wstoken),
+            URLQueryItem(name: "wsfunction", value: "core_webservice_get_site_info"),
+            URLQueryItem(name: "moodlewsrestformat", value: "json"),
+        ]
+
+        let (data, response) = try await URLSession.shared.data(from: components.url!)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw MoodleError.server(status: (response as? HTTPURLResponse)?.statusCode ?? -1)
+        }
+
+        struct Exception: Decodable { var exception: String?; var message: String? }
+        if let err = try? JSONDecoder().decode(Exception.self, from: data), err.exception != nil {
+            throw MoodleError.apiError(err.message ?? err.exception ?? "unknown")
+        }
+
+        struct Info: Decodable {
+            var username: String?
+            var fullname: String?
+            var userid: Int?
+            var sitename: String?
+            var functions: [Func]?
+            struct Func: Decodable { var name: String }
+        }
+        guard let info = try? JSONDecoder().decode(Info.self, from: data) else {
+            let body = String(data: data.prefix(300), encoding: .utf8) ?? "<binary>"
+            throw MoodleError.decodeFailed(body)
+        }
+
+        let fns = info.functions ?? []
+        let hasCal = fns.contains { $0.name == "core_calendar_get_action_events_by_timesort" }
+        return "site_info: user=\(info.username ?? "?") id=\(info.userid.map(String.init) ?? "?") "
+            + "name=\(info.fullname ?? "?") funcs=\(fns.count) calFn=\(hasCal)"
+    }
 }
 
 /// Keychain storage for the Moodle wstoken/privatetoken pair - long-lived,

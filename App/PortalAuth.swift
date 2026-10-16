@@ -717,7 +717,11 @@ enum PortalMoodle {
     /// `webservice/rest/server.php` - Moodle's own long-lived REST API,
     /// confirmed to need no `sesskey`, no cookies, just the token, unlike
     /// the AJAX endpoint `PortalLMS` uses from inside a logged-in page.
-    static func dueDates(wstoken: String) async throws -> [Deadline] {
+    /// Returns the assignments and quizzes due, plus the raw event total and a
+    /// breakdown of every module type the feed carried - "rest empty" and "rest
+    /// had events my filter dropped" look identical from the deadline count
+    /// alone, and the two want completely different fixes.
+    static func dueDates(wstoken: String) async throws -> (items: [Deadline], total: Int, kinds: String) {
         var components = URLComponents(
             url: lmsBase.appendingPathComponent("webservice/rest/server.php"), resolvingAgainstBaseURL: false
         )!
@@ -760,7 +764,7 @@ enum PortalMoodle {
 
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime]
-        return payload.events.compactMap { e -> Deadline? in
+        let items = payload.events.compactMap { e -> Deadline? in
             guard let ts = e.timesort else { return nil }
             // Match the WebView `lmsDue` scraper exactly: this same feed carries
             // a "should be completed" nag for every file ever uploaded, and only
@@ -780,6 +784,9 @@ enum PortalMoodle {
                 kind: e.modulename ?? "assign", url: e.url ?? ""
             )
         }
+        let kinds = Dictionary(grouping: payload.events, by: { $0.modulename ?? "nil" })
+            .map { "\($0.key)×\($0.value.count)" }.sorted().joined(separator: ",")
+        return (items, payload.events.count, kinds)
     }
 }
 

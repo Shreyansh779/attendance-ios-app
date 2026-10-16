@@ -293,7 +293,15 @@ final class PortalDirect: ObservableObject {
             guard let mv = try? await PortalMoodle.monthlyDueDates(wstoken: token) else {
                 return filtered(r, source)
             }
-            return filtered(mv, "\(source)+monthly")
+            // No `Portal.mine` here. That filter exists for the action feed, which
+            // hands over every teacher's assignments; the monthly calendar is
+            // already the student's own (seen live: 6 assignments across three
+            // months, not twenty teachers' worth), so mine only drops real
+            // deadlines whose module the course scrape missed - e.g. an upcoming
+            // quiz absent from the scraped sections. Trust the calendar as-is.
+            let diag = "rest: \(mv.total) events [\(mv.kinds)], \(mv.items.count) due "
+                + "(\(knownCourses.count) courses cached, \(source)+monthly, no mine)"
+            return mv.items.isEmpty ? (nil, diag) : (mv.items, diag)
         }
 
         if let saved = MoodleTokenStore.load() {

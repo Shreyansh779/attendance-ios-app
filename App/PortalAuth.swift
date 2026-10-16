@@ -842,6 +842,17 @@ enum PortalMoodle {
         return try? JSONSerialization.jsonObject(with: data)
     }
 
+    /// The webservice functions this token may actually call, by name. Some are
+    /// switched off server-side here (`core_course_get_contents` is), so the
+    /// native LMS detail views check what is available before relying on a
+    /// `mod_assign_*`/`mod_quiz_*` function rather than failing at the call.
+    static func availableFunctions(wstoken: String) async -> Set<String> {
+        guard let info = await wsGet(wstoken, "core_webservice_get_site_info", []) as? [String: Any],
+            let fns = info["functions"] as? [[String: Any]]
+        else { return [] }
+        return Set(fns.compactMap { $0["name"] as? String })
+    }
+
     /// A URL that signs this webview into Moodle from the token and lands on
     /// `target`, exactly how the official app opens in-app links: mint a one-shot
     /// autologin key from the private token, then hand `autologin.php` the key and

@@ -789,50 +789,6 @@ enum PortalMoodle {
         return (items, payload.events.count, kinds)
     }
 
-    /// Who the wstoken actually is, and whether the calendar function is in its
-    /// allowed list. The real LMS app's calendar call is byte-for-byte ours, yet
-    /// the token returns no events - this tells apart "token resolves to the
-    /// wrong/limited user" (a mint bug) from "right user, calendar simply empty
-    /// over the token path" (a server quirk). Diagnostic only.
-    static func siteInfo(wstoken: String) async throws -> String {
-        var components = URLComponents(
-            url: lmsBase.appendingPathComponent("webservice/rest/server.php"), resolvingAgainstBaseURL: false
-        )!
-        components.queryItems = [
-            URLQueryItem(name: "wstoken", value: wstoken),
-            URLQueryItem(name: "wsfunction", value: "core_webservice_get_site_info"),
-            URLQueryItem(name: "moodlewsrestformat", value: "json"),
-        ]
-
-        let (data, response) = try await URLSession.shared.data(from: components.url!)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw MoodleError.server(status: (response as? HTTPURLResponse)?.statusCode ?? -1)
-        }
-
-        struct Exception: Decodable { var exception: String?; var message: String? }
-        if let err = try? JSONDecoder().decode(Exception.self, from: data), err.exception != nil {
-            throw MoodleError.apiError(err.message ?? err.exception ?? "unknown")
-        }
-
-        struct Info: Decodable {
-            var username: String?
-            var fullname: String?
-            var userid: Int?
-            var sitename: String?
-            var functions: [Func]?
-            struct Func: Decodable { var name: String }
-        }
-        guard let info = try? JSONDecoder().decode(Info.self, from: data) else {
-            let body = String(data: data.prefix(300), encoding: .utf8) ?? "<binary>"
-            throw MoodleError.decodeFailed(body)
-        }
-
-        let fns = info.functions ?? []
-        let hasCal = fns.contains { $0.name == "core_calendar_get_action_events_by_timesort" }
-        return "site_info: user=\(info.username ?? "?") id=\(info.userid.map(String.init) ?? "?") "
-            + "name=\(info.fullname ?? "?") funcs=\(fns.count) calFn=\(hasCal)"
-    }
-
     /// A plain GET to the REST endpoint, decoded loosely. Returns nil on any
     /// transport/HTTP failure; the JSON shape differs per function so callers
     /// pick fields out of the `Any`.
@@ -854,45 +810,69 @@ enum PortalMoodle {
         return try? JSONSerialization.jsonObject(with: data)
     }
 
-    /// Diagnostic: when `core_calendar_get_action_events_by_timesort` comes back
-    /// empty for a valid token, try the other calendar feeds. `upcoming_view`
-    /// and `monthly_view` fetch raw calendar events through a different code path
-    /// than the action-event callbacks, so one may carry the deadlines the
-    /// action feed drops over the webservice. Counts only; never throws.
-    static func probeCalendar(wstoken: String) async -> String {
-        func eventsCount(_ obj: Any?) -> String {
-            guard let d = obj as? [String: Any] else { return "err" }
-            if let ex = d["exception"] as? String { return "exc:\(ex)" }
-            if let ev = d["events"] as? [Any] { return String(ev.count) }
-            if let weeks = d["weeks"] as? [[String: Any]] {
-                var n = 0
-                for w in weeks {
-                    for day in (w["days"] as? [[String: Any]] ?? []) {
-                        n += (day["events"] as? [Any])?.count ?? 0
-                    }
-                }
-                return String(n)
-            }
-            return "?"
-        }
-
-        let up = eventsCount(await wsGet(wstoken, "core_calendar_get_calendar_upcoming_view", []))
-
+    /// Deadlines via the month-grid calendar instead of the action feed.
+    ///
+    /// On this Moodle `core_calendar_get_action_events_by_timesort` returns
+    /// nothing over the webservice even for a valid token (its action-event
+    /// callbacks come back empty in that context), while `monthly_view` returns
+    /// the raw calendar events - confirmed live 2026-10-16, four October events
+    /// where the action feed gave zero. Reads the previous, current and next
+    /// month (the grid already spills a few days either side, so this covers the
+    /// 14-day look-back and the weeks ahead), de-dupes by event id, and keeps the
+    /// same assign/quiz filter, course-name cleanup and 14-day window as the
+    /// action feed and the WebView scraper.
+    static func monthlyDueDates(wstoken: String) async throws -> (items: [Deadline], total: Int, kinds: String) {
         let cal = Calendar(identifier: .gregorian)
         let now = Date()
         let y = cal.component(.year, from: now)
         let m = cal.component(.month, from: now)
-        let nextM = m == 12 ? 1 : m + 1
-        let nextY = m == 12 ? y + 1 : y
-        let mo = eventsCount(await wsGet(
-            wstoken, "core_calendar_get_calendar_monthly_view",
-            [URLQueryItem(name: "year", value: String(y)), URLQueryItem(name: "month", value: String(m))]
-        ))
-        let moNext = eventsCount(await wsGet(
-            wstoken, "core_calendar_get_calendar_monthly_view",
-            [URLQueryItem(name: "year", value: String(nextY)), URLQueryItem(name: "month", value: String(nextM))]
-        ))
-        return "probe: upcoming=\(up) month\(m)=\(mo) month\(nextM)=\(moNext)"
+        let months: [(Int, Int)] = [
+            m == 1 ? (y - 1, 12) : (y, m - 1),
+            (y, m),
+            m == 12 ? (y + 1, 1) : (y, m + 1),
+        ]
+
+        var byId: [Int: [String: Any]] = [:]
+        var noId: [[String: Any]] = []
+        for (yy, mm) in months {
+            let obj = await wsGet(
+                wstoken, "core_calendar_get_calendar_monthly_view",
+                [URLQueryItem(name: "year", value: String(yy)), URLQueryItem(name: "month", value: String(mm))]
+            )
+            guard let d = obj as? [String: Any], let weeks = d["weeks"] as? [[String: Any]] else { continue }
+            for w in weeks {
+                for day in (w["days"] as? [[String: Any]] ?? []) {
+                    for ev in (day["events"] as? [[String: Any]] ?? []) {
+                        if let id = ev["id"] as? Int { byId[id] = ev } else { noId.append(ev) }
+                    }
+                }
+            }
+        }
+        let events = Array(byId.values) + noId
+
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+        let cutoff = Int(now.timeIntervalSince1970) - 86400 * 14
+        let items = events.compactMap { e -> Deadline? in
+            let mod = e["modulename"] as? String
+            guard mod == "assign" || mod == "quiz" else { return nil }
+            guard let ts = (e["timesort"] as? Int) ?? (e["timestart"] as? Int), ts >= cutoff else {
+                return nil
+            }
+            let courseName = ((e["course"] as? [String: Any])?["fullname"] as? String) ?? ""
+            return Deadline(
+                title: (e["name"] as? String) ?? "",
+                course: courseName
+                    .replacingOccurrences(of: "&amp;", with: "&")
+                    .replacingOccurrences(of: #"_Sem\d+$"#, with: "", options: .regularExpression),
+                due: iso.string(from: Date(timeIntervalSince1970: TimeInterval(ts))),
+                kind: mod ?? "assign", url: (e["url"] as? String) ?? ""
+            )
+        }.sorted { $0.due < $1.due }
+
+        let kinds = Dictionary(grouping: events, by: { ($0["modulename"] as? String) ?? "nil" })
+            .map { "\($0.key)×\($0.value.count)" }.sorted().joined(separator: ",")
+        return (items, events.count, kinds)
     }
 }
 

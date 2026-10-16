@@ -295,7 +295,7 @@ struct RootView: View {
         // Moodle session - so every one, wherever it is tapped, goes there.
         .environment(\.openURL, OpenURLAction { url in
             guard url.host == Portal.lmsHost else { return .systemAction }
-            portal.visit(url)
+            openLMS(url)
             return .handled
         })
         .animation(Motion.ui.reduced(reduceMotion), value: route)
@@ -581,6 +581,26 @@ struct RootView: View {
             knownStudent: snapshot?.student,
             knownHolidays: snapshot?.holidays ?? []
         ) { r in apply(r) }
+    }
+
+    /// Open an LMS link in the webview cover. When the deadlines came over REST
+    /// the webview was never signed into Moodle, so the raw link lands on the
+    /// login - so first mint an autologin URL from the stored token (the way the
+    /// real app opens its links) and let the webview sign itself in on the way.
+    /// Falls back to the plain link, which `portal.visit` still signs into by
+    /// hand, whenever there is no token or the key throttle/refusal returns nil.
+    private func openLMS(_ url: URL) {
+        Task {
+            var target = url
+            if let saved = MoodleTokenStore.load(),
+                let auto = await PortalMoodle.autoLoginURL(
+                    wstoken: saved.token, privateToken: saved.privateToken, target: url
+                )
+            {
+                target = auto
+            }
+            portal.visit(target)
+        }
     }
 
     private func apply(_ r: Portal.Reading) {

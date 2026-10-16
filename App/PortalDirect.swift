@@ -261,10 +261,19 @@ final class PortalDirect: ObservableObject {
         // `Portal.mine` keeps only what the course scrape already proved is
         // yours, the same filter the WebView path applies to the same feed. No
         // cached course list yet (first run) leaves everything in, unchanged.
-        func filtered(_ due: [Deadline], _ source: String) -> ([Deadline]?, String) {
-            let yours = Portal.mine(due, in: knownCourses) ?? due
-            return (yours, "rest: \(due.count) assign/quiz, \(yours.count) yours "
-                + "(\(knownCourses.count) courses cached, \(source))")
+        func filtered(
+            _ r: (items: [Deadline], total: Int, kinds: String), _ source: String
+        ) -> ([Deadline]?, String) {
+            let yours = Portal.mine(r.items, in: knownCourses) ?? r.items
+            let diag = "rest: \(r.total) events [\(r.kinds)], \(r.items.count) assign/quiz, "
+                + "\(yours.count) yours (\(knownCourses.count) courses cached, \(source))"
+            // REST came back with nothing of yours while the proven WebView
+            // scraper still can - so nil, not an empty list, which makes
+            // `refresh()` fall back to the WebView instead of overwriting a
+            // good list with an empty one. The diag above is kept in
+            // `direct.lastError` for the Settings "Direct connection" card.
+            if yours.isEmpty { return (nil, diag) }
+            return (yours, diag)
         }
 
         if let saved = MoodleTokenStore.load() {

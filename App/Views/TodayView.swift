@@ -321,7 +321,7 @@ private struct Due: View {
                                 Text(title(d))
                                     .r(15.5, .semibold)
                                     .fixedSize(horizontal: false, vertical: true)
-                                Text(d.course)
+                                Text(d.teacher.map { "\(d.course) · \($0)" } ?? d.course)
                                     .r(13, .medium)
                                     .foregroundStyle(Color.ink3)
                                     .fixedSize(horizontal: false, vertical: true)

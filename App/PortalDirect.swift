@@ -291,17 +291,18 @@ final class PortalDirect: ObservableObject {
         ) async -> ([Deadline]?, String) {
             if r.total > 0 { return filtered(r, source) }
             guard let mv = try? await PortalMoodle.monthlyDueDates(wstoken: token) else {
+                // Monthly fetch itself failed - nil so the WebView fallback runs.
                 return filtered(r, source)
             }
-            // No `Portal.mine` here. That filter exists for the action feed, which
-            // hands over every teacher's assignments; the monthly calendar is
-            // already the student's own (seen live: 6 assignments across three
-            // months, not twenty teachers' worth), so mine only drops real
-            // deadlines whose module the course scrape missed - e.g. an upcoming
-            // quiz absent from the scraped sections. Trust the calendar as-is.
-            let diag = "rest: \(mv.total) events [\(mv.kinds)], \(mv.items.count) due "
-                + "(\(knownCourses.count) courses cached, \(source)+monthly, no mine)"
-            return mv.items.isEmpty ? (nil, diag) : (mv.items, diag)
+            // The calendar carries every teacher's work, so keep only the modules
+            // in your scraped sections and tag each with its teacher. The fetch
+            // succeeded, so an empty result is a real "nothing of yours is due" -
+            // return it (not nil) so refresh does not fall back to the WebView and
+            // pop a portal login.
+            let yours = Portal.ownDeadlines(mv.items, in: knownCourses)
+            let diag = "rest: \(mv.total) events [\(mv.kinds)], \(mv.items.count) due, "
+                + "\(yours.count) yours (\(knownCourses.count) courses cached, \(source)+monthly)"
+            return (yours, diag)
         }
 
         if let saved = MoodleTokenStore.load() {

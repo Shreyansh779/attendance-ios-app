@@ -721,12 +721,15 @@ enum PortalMoodle {
         var components = URLComponents(
             url: lmsBase.appendingPathComponent("webservice/rest/server.php"), resolvingAgainstBaseURL: false
         )!
-        let now = Int(Date().timeIntervalSince1970)
+        // A fortnight back as well as forward, exactly as the WebView `lmsDue`
+        // scraper asks: something already overdue is the thing you most want to
+        // be told about, and `timesortfrom: now` silently dropped every one.
+        let from = Int(Date().timeIntervalSince1970) - 86400 * 14
         components.queryItems = [
             URLQueryItem(name: "wstoken", value: wstoken),
             URLQueryItem(name: "wsfunction", value: "core_calendar_get_action_events_by_timesort"),
             URLQueryItem(name: "moodlewsrestformat", value: "json"),
-            URLQueryItem(name: "timesortfrom", value: String(now)),
+            URLQueryItem(name: "timesortfrom", value: String(from)),
             URLQueryItem(name: "limitnum", value: "50"),
         ]
 
@@ -759,8 +762,20 @@ enum PortalMoodle {
         iso.formatOptions = [.withInternetDateTime]
         return payload.events.compactMap { e -> Deadline? in
             guard let ts = e.timesort else { return nil }
+            // Match the WebView `lmsDue` scraper exactly: this same feed carries
+            // a "should be completed" nag for every file ever uploaded, and only
+            // assignments and quizzes are real deadlines.
+            guard e.modulename == "assign" || e.modulename == "quiz" else { return nil }
             return Deadline(
-                title: e.name, course: e.course.fullname,
+                title: e.name,
+                // The LMS names every course of this term "<name>_Sem5", and the
+                // ampersands arrive HTML-escaped - the same cleanup the scraper
+                // does, so the two feeds name a course the same way.
+                course: e.course.fullname
+                    .replacingOccurrences(of: "&amp;", with: "&")
+                    .replacingOccurrences(
+                        of: #"_Sem\d+$"#, with: "", options: .regularExpression
+                    ),
                 due: iso.string(from: Date(timeIntervalSince1970: TimeInterval(ts))),
                 kind: e.modulename ?? "assign", url: e.url ?? ""
             )

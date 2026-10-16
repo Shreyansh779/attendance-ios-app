@@ -68,11 +68,13 @@ struct SettingsView: View {
                     if weekDays <= 1, let weekDiag {
                     diagnostic("Timetable", weekDiag, "The weekly scrape returned little or nothing.")
                 }
-                if dueCount == 0, courseCount == 0, let lmsDiag {
+                if let lmsDiag {
                     diagnostic(
                         "LMS",
                         lmsDiag,
-                        "Nothing came back from the LMS, so Due and the LMS tab are empty."
+                        dueCount == 0 && courseCount == 0
+                            ? "Nothing came back from the LMS, so Due and the LMS tab are empty."
+                            : "What the last LMS read did. Due and the LMS tab are built from this."
                     )
                 }
                 if registerRows == 0, let attDiag {

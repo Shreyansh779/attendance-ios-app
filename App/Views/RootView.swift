@@ -63,9 +63,6 @@ struct RootView: View {
     @State private var showingProfile = false
     /// A tapped assignment/quiz, shown natively instead of in the webview.
     @State private var lmsLink: LmsLink? = RootView.demoLmsLink
-    /// The course list only comes from the WebView scrape; once per launch, if a
-    /// REST refresh leaves it empty, run that scrape to fill the LMS tab.
-    @State private var healedCourses = false
 
     /// `-sheet lms` opens the native LMS sheet straight away for a screenshot.
     private static var demoLmsLink: LmsLink? {
@@ -592,7 +589,6 @@ struct RootView: View {
     private func refresh() {
         direct.onSignedIn = { [self] in refresh() }
         direct.moodleCookies = { [portal] in await portal.allCookies() }
-        let hadCourses = !(snapshot?.courses ?? []).isEmpty
         Task {
             do {
                 let r = try await direct.begin(
@@ -617,15 +613,6 @@ struct RootView: View {
                     // moment the WebView fallback itself succeeded or failed
                     // with its own, unrelated message.
                     direct.lastError = "LMS direct attempt: \(r.lmsDiag ?? "unknown")"
-                    refreshViaWebView()
-                } else if !hadCourses, (r.courses ?? []).isEmpty, !healedCourses {
-                    // REST gives deadlines but never the course list - that only
-                    // comes from the WebView scrape, which no longer runs now that
-                    // REST succeeds. With nothing cached (first run, or a reinstall
-                    // wiped it) the LMS tab would stay empty, so scrape once to
-                    // fill it. Once per launch, so a scrape that keeps coming back
-                    // empty does not re-run the WebView on every refresh.
-                    healedCourses = true
                     refreshViaWebView()
                 }
             } catch is PortalDirect.DirectError {

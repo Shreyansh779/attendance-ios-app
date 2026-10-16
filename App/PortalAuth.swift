@@ -810,6 +810,58 @@ enum PortalMoodle {
         return try? JSONSerialization.jsonObject(with: data)
     }
 
+    /// Same as `wsGet` but POSTs the arguments in the body - the way the official
+    /// app sends `tool_mobile_get_autologin_key`, so a credential like the
+    /// private token does not travel in a URL that servers log.
+    private static func wsPost(_ wstoken: String, _ fn: String, _ body: [String: String]) async -> Any? {
+        guard let url = URL(
+            string: lmsBase.appendingPathComponent("webservice/rest/server.php").absoluteString
+                + "?moodlewsrestformat=json"
+        ) else { return nil }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._~")
+        var fields = body
+        fields["wstoken"] = wstoken
+        fields["wsfunction"] = fn
+        req.httpBody = fields
+            .map { "\($0.key)=\($0.value.addingPercentEncoding(withAllowedCharacters: allowed) ?? "")" }
+            .joined(separator: "&").data(using: .utf8)
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+            (resp as? HTTPURLResponse)?.statusCode == 200
+        else { return nil }
+        return try? JSONSerialization.jsonObject(with: data)
+    }
+
+    /// A URL that signs this webview into Moodle from the token and lands on
+    /// `target`, exactly how the official app opens in-app links: mint a one-shot
+    /// autologin key from the private token, then hand `autologin.php` the key and
+    /// where to go. Lets a tapped deadline open the assignment without a fresh
+    /// portal login, which the REST path never did in the webview. Returns nil on
+    /// any missing piece (no private token, the 6-minute key throttle, an error)
+    /// so the caller can fall back to a plain visit.
+    static func autoLoginURL(wstoken: String, privateToken: String, target: URL) async -> URL? {
+        guard !privateToken.isEmpty else { return nil }
+        guard let info = await wsGet(wstoken, "core_webservice_get_site_info", []) as? [String: Any],
+            let userId = info["userid"] as? Int
+        else { return nil }
+        guard let data = await wsPost(
+            wstoken, "tool_mobile_get_autologin_key", ["privatetoken": privateToken]
+        ) as? [String: Any],
+            let autologinurl = data["autologinurl"] as? String,
+            let key = data["key"] as? String
+        else { return nil }
+        var c = URLComponents(string: autologinurl)
+        c?.queryItems = [
+            URLQueryItem(name: "userid", value: String(userId)),
+            URLQueryItem(name: "key", value: key),
+            URLQueryItem(name: "urltogo", value: target.absoluteString),
+        ]
+        return c?.url
+    }
+
     /// Deadlines via the month-grid calendar instead of the action feed.
     ///
     /// On this Moodle `core_calendar_get_action_events_by_timesort` returns

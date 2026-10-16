@@ -832,6 +832,68 @@ enum PortalMoodle {
         return "site_info: user=\(info.username ?? "?") id=\(info.userid.map(String.init) ?? "?") "
             + "name=\(info.fullname ?? "?") funcs=\(fns.count) calFn=\(hasCal)"
     }
+
+    /// A plain GET to the REST endpoint, decoded loosely. Returns nil on any
+    /// transport/HTTP failure; the JSON shape differs per function so callers
+    /// pick fields out of the `Any`.
+    private static func wsGet(
+        _ wstoken: String, _ fn: String, _ extra: [URLQueryItem]
+    ) async -> Any? {
+        var c = URLComponents(
+            url: lmsBase.appendingPathComponent("webservice/rest/server.php"), resolvingAgainstBaseURL: false
+        )!
+        c.queryItems = [
+            URLQueryItem(name: "wstoken", value: wstoken),
+            URLQueryItem(name: "wsfunction", value: fn),
+            URLQueryItem(name: "moodlewsrestformat", value: "json"),
+        ] + extra
+        guard let url = c.url,
+            let (data, resp) = try? await URLSession.shared.data(from: url),
+            (resp as? HTTPURLResponse)?.statusCode == 200
+        else { return nil }
+        return try? JSONSerialization.jsonObject(with: data)
+    }
+
+    /// Diagnostic: when `core_calendar_get_action_events_by_timesort` comes back
+    /// empty for a valid token, try the other calendar feeds. `upcoming_view`
+    /// and `monthly_view` fetch raw calendar events through a different code path
+    /// than the action-event callbacks, so one may carry the deadlines the
+    /// action feed drops over the webservice. Counts only; never throws.
+    static func probeCalendar(wstoken: String) async -> String {
+        func eventsCount(_ obj: Any?) -> String {
+            guard let d = obj as? [String: Any] else { return "err" }
+            if let ex = d["exception"] as? String { return "exc:\(ex)" }
+            if let ev = d["events"] as? [Any] { return String(ev.count) }
+            if let weeks = d["weeks"] as? [[String: Any]] {
+                var n = 0
+                for w in weeks {
+                    for day in (w["days"] as? [[String: Any]] ?? []) {
+                        n += (day["events"] as? [Any])?.count ?? 0
+                    }
+                }
+                return String(n)
+            }
+            return "?"
+        }
+
+        let up = eventsCount(await wsGet(wstoken, "core_calendar_get_calendar_upcoming_view", []))
+
+        let cal = Calendar(identifier: .gregorian)
+        let now = Date()
+        let y = cal.component(.year, from: now)
+        let m = cal.component(.month, from: now)
+        let nextM = m == 12 ? 1 : m + 1
+        let nextY = m == 12 ? y + 1 : y
+        let mo = eventsCount(await wsGet(
+            wstoken, "core_calendar_get_calendar_monthly_view",
+            [URLQueryItem(name: "year", value: String(y)), URLQueryItem(name: "month", value: String(m))]
+        ))
+        let moNext = eventsCount(await wsGet(
+            wstoken, "core_calendar_get_calendar_monthly_view",
+            [URLQueryItem(name: "year", value: String(nextY)), URLQueryItem(name: "month", value: String(nextM))]
+        ))
+        return "probe: upcoming=\(up) month\(m)=\(mo) month\(nextM)=\(moNext)"
+    }
 }
 
 /// Keychain storage for the Moodle wstoken/privatetoken pair - long-lived,

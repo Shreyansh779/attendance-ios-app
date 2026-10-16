@@ -285,7 +285,8 @@ final class PortalDirect: ObservableObject {
             let (result, base) = filtered(r, source)
             guard r.total == 0 else { return (result, base) }
             let who = (try? await PortalMoodle.siteInfo(wstoken: token)) ?? "site_info failed"
-            return (result, base + " | \(who)")
+            let probe = await PortalMoodle.probeCalendar(wstoken: token)
+            return (result, base + " | \(who) | \(probe)")
         }
 
         if let saved = MoodleTokenStore.load() {

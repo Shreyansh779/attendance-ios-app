@@ -542,7 +542,8 @@ struct RootView: View {
             do {
                 let r = try await direct.begin(
                     knownStudent: snapshot?.student,
-                    knownHolidays: snapshot?.holidays ?? []
+                    knownHolidays: snapshot?.holidays ?? [],
+                    knownCourses: snapshot?.courses ?? []
                 )
                 direct.lastError = nil
                 apply(r)

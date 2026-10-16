@@ -99,7 +99,8 @@ final class PortalDirect: ObservableObject {
     /// the caller as "fall back to `Portal`'s WebView".
     func begin(
         knownStudent: String?,
-        knownHolidays: [Holiday]
+        knownHolidays: [Holiday],
+        knownCourses: [LmsCourse]
     ) async throws -> Portal.Reading {
         guard !busy else { throw DirectError.needsLogin }
         busy = true
@@ -194,7 +195,7 @@ final class PortalDirect: ObservableObject {
         // theory that motivated it (a raw curl trace later proved the
         // userkey handoff's bounce is UPES-side flakiness, unrelated to
         // concurrency), but there's no reason to undo it either.
-        let (due, lmsDiag) = await fetchDueDates()
+        let (due, lmsDiag) = await fetchDueDates(knownCourses: knownCourses)
 
         return Portal.Reading(
             rows: rows, sessions: todaySessions, student: identity.name ?? knownStudent,
@@ -254,10 +255,21 @@ final class PortalDirect: ObservableObject {
     /// no part of the Bearer/mobile identity, on purpose: the whole reason
     /// this exists is that it doesn't work for Moodle's own API at all,
     /// confirmed live 2026-10-13 - see `PortalMoodle`'s doc comment.
-    private func fetchDueDates() async -> ([Deadline]?, String) {
+    private func fetchDueDates(knownCourses: [LmsCourse]) async -> ([Deadline]?, String) {
+        // The calendar feed knows nothing about sections, so it hands over every
+        // enrolled course's work - including the nineteen other teachers' ones.
+        // `Portal.mine` keeps only what the course scrape already proved is
+        // yours, the same filter the WebView path applies to the same feed. No
+        // cached course list yet (first run) leaves everything in, unchanged.
+        func filtered(_ due: [Deadline], _ source: String) -> ([Deadline]?, String) {
+            let yours = Portal.mine(due, in: knownCourses) ?? due
+            return (yours, "rest: \(due.count) assign/quiz, \(yours.count) yours "
+                + "(\(knownCourses.count) courses cached, \(source))")
+        }
+
         if let saved = MoodleTokenStore.load() {
             if let due = try? await PortalMoodle.dueDates(wstoken: saved.token) {
-                return (due, "\(due.count) items due (stored wstoken)")
+                return filtered(due, "stored wstoken")
             }
             // Doesn't necessarily mean the token is dead - could be a
             // network blip - but there's no cheap way to tell the two apart,
@@ -275,7 +287,7 @@ final class PortalDirect: ObservableObject {
             let (wstoken, privateToken) = try await PortalMoodle.exchangeForWSToken(cookies: cookies)
             MoodleTokenStore.save(.init(token: wstoken, privateToken: privateToken))
             let due = try await PortalMoodle.dueDates(wstoken: wstoken)
-            return (due, "\(due.count) items due (minted wstoken)")
+            return filtered(due, "minted wstoken")
         } catch {
             return (nil, "lms failed: \(error)")
         }

@@ -305,9 +305,28 @@ final class PortalDirect: ObservableObject {
             return (yours, diag)
         }
 
+        // Phase-1 probe for the native LMS views: report which mod_assign/mod_quiz
+        // functions this token can actually call, since some are disabled here.
+        // Shown in the Settings "Direct connection" card; removable once the
+        // native sheet (which checks the same set) is confirmed on device.
+        func nativeProbe(_ token: String) async -> String {
+            let fns = await PortalMoodle.availableFunctions(wstoken: token)
+            guard !fns.isEmpty else { return " nativeFns=[site_info failed]" }
+            func f(_ label: String, _ name: String) -> String { "\(label):\(fns.contains(name) ? 1 : 0)" }
+            return " nativeFns=[" + [
+                f("cm", "core_course_get_course_module"),
+                f("assign", "mod_assign_get_assignments"),
+                f("astat", "mod_assign_get_submission_status"),
+                f("quiz", "mod_quiz_get_quizzes_by_courses"),
+                f("qatt", "mod_quiz_get_user_attempts"),
+            ].joined(separator: ",") + "]"
+        }
+
         if let saved = MoodleTokenStore.load() {
             if let due = try? await PortalMoodle.dueDates(wstoken: saved.token) {
-                return await resolve(due, "stored wstoken", token: saved.token)
+                var out = await resolve(due, "stored wstoken", token: saved.token)
+                out.1 += await nativeProbe(saved.token)
+                return out
             }
             // Doesn't necessarily mean the token is dead - could be a
             // network blip - but there's no cheap way to tell the two apart,
@@ -325,7 +344,9 @@ final class PortalDirect: ObservableObject {
             let (wstoken, privateToken) = try await PortalMoodle.exchangeForWSToken(cookies: cookies)
             MoodleTokenStore.save(.init(token: wstoken, privateToken: privateToken))
             let due = try await PortalMoodle.dueDates(wstoken: wstoken)
-            return await resolve(due, "minted wstoken", token: wstoken)
+            var out = await resolve(due, "minted wstoken", token: wstoken)
+            out.1 += await nativeProbe(wstoken)
+            return out
         } catch {
             return (nil, "lms failed: \(error)")
         }

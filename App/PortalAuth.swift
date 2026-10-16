@@ -849,13 +849,24 @@ enum PortalMoodle {
             }
         }
         let events = Array(byId.values) + noId
+        let assignQuiz = events.filter {
+            let m = $0["modulename"] as? String
+            return m == "assign" || m == "quiz"
+        }
 
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime]
-        let cutoff = Int(now.timeIntervalSince1970) - 86400 * 14
-        let items = events.compactMap { e -> Deadline? in
-            let mod = e["modulename"] as? String
-            guard mod == "assign" || mod == "quiz" else { return nil }
+        // From the start of today, not 14 days back. The action feed excluded
+        // assignments already submitted; this raw calendar feed cannot tell done
+        // from pending over the webservice, so a past-and-done deadline would
+        // otherwise linger. Upcoming-only keeps the list honest.
+        let cutoff = Int(cal.startOfDay(for: now).timeIntervalSince1970)
+        let items = assignQuiz.compactMap { e -> Deadline? in
+            // Only the deadline event. The same feed also carries each activity's
+            // "open" event (a past date, not a deadline): assignment deadlines are
+            // eventtype "due", quizzes "close".
+            let et = (e["eventtype"] as? String) ?? ""
+            guard et == "due" || et == "close" else { return nil }
             guard let ts = (e["timesort"] as? Int) ?? (e["timestart"] as? Int), ts >= cutoff else {
                 return nil
             }
@@ -866,12 +877,15 @@ enum PortalMoodle {
                     .replacingOccurrences(of: "&amp;", with: "&")
                     .replacingOccurrences(of: #"_Sem\d+$"#, with: "", options: .regularExpression),
                 due: iso.string(from: Date(timeIntervalSince1970: TimeInterval(ts))),
-                kind: mod ?? "assign", url: (e["url"] as? String) ?? ""
+                kind: (e["modulename"] as? String) ?? "assign", url: (e["url"] as? String) ?? ""
             )
         }.sorted { $0.due < $1.due }
 
-        let kinds = Dictionary(grouping: events, by: { ($0["modulename"] as? String) ?? "nil" })
-            .map { "\($0.key)×\($0.value.count)" }.sorted().joined(separator: ",")
+        // Breakdown by module/eventtype across the assign+quiz set, before the
+        // deadline-type and date filters, so the diag shows what was dropped.
+        let kinds = Dictionary(grouping: assignQuiz, by: { e in
+            "\((e["modulename"] as? String) ?? "?")/\((e["eventtype"] as? String) ?? "?")"
+        }).map { "\($0.key)×\($0.value.count)" }.sorted().joined(separator: ",")
         return (items, events.count, kinds)
     }
 }

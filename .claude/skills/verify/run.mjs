@@ -430,17 +430,25 @@ check('a deadline of another teacher does not survive the course list', () => {
       url: 'https://lms.upes.ac.in/mod/assign/view.php?id=118605' },
   ];
   // Only the second one is in a section belonging to one of your teachers.
-  const courses = [{ items: [{ url: 'https://lms.upes.ac.in/mod/assign/view.php?id=118605' }] }];
-  const known = new Set(courses.flatMap((c) => c.items.map((i) => i.url)));
-  const kept = known.size ? due.filter((d) => known.has(d.url)) : due;
+  // Matched on the module id, not the whole URL - the first course URL carries
+  // a trailing param the deadline's does not, which a string compare would miss.
+  const courses = [{ items: [{ url: 'https://lms.upes.ac.in/mod/assign/view.php?id=118605&forceview=1' }] }];
+  const cmid = (s) => {
+    try {
+      const u = new URL(s);
+      return u.pathname.includes('/mod/') ? u.searchParams.get('id') : null;
+    } catch { return null; }
+  };
+  const known = new Set(courses.flatMap((c) => c.items.map((i) => cmid(i.url)).filter(Boolean)));
+  const kept = known.size ? due.filter((d) => { const m = cmid(d.url); return m ? known.has(m) : false; }) : due;
   eq(kept.map((d) => d.title), ['PBL_Submission 1 is due'], "another teacher's deadline survived");
   // A failed course scrape must not empty the card.
   const none = new Set();
-  eq((none.size ? due.filter((d) => none.has(d.url)) : due).length, 2, 'an empty course list dropped everything');
+  eq((none.size ? due.filter((d) => none.has(cmid(d.url))) : due).length, 2, 'an empty course list dropped everything');
   // And the Swift really is this, not something that has drifted from it.
   const src = read('App/Portal.swift');
   truthy(src.includes('guard !known.isEmpty else { return due }'), 'the fallback is gone from Portal.mine');
-  truthy(src.includes('return due.filter { known.contains($0.url) }'), 'the filter is gone from Portal.mine');
+  truthy(src.includes('return due.filter { cmid($0.url).map(known.contains) ?? false }'), 'the filter is gone from Portal.mine');
 });
 
 check('lmsCourses keeps your teachers, their folders, and the shared sections', () => {

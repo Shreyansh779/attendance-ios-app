@@ -272,7 +272,14 @@ final class PortalDirect: ObservableObject {
             // `refresh()` fall back to the WebView instead of overwriting a
             // good list with an empty one. The diag above is kept in
             // `direct.lastError` for the Settings "Direct connection" card.
-            if yours.isEmpty { return (nil, diag) }
+            // When a deadline exists but none matched your courses, show a sample
+            // of each URL so a stubborn mismatch is visible, then fall back.
+            if yours.isEmpty {
+                guard let ev = r.items.first?.url, let known = knownCourses.first?.items.first?.url else {
+                    return (nil, diag)
+                }
+                return (nil, diag + " | drop ev=[\(ev)] known=[\(known)]")
+            }
             return (yours, diag)
         }
         // The action feed returns nothing over the webservice on this Moodle even

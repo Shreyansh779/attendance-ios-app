@@ -9,6 +9,8 @@ struct TimetableView: View {
     let week: [String: [Session]]
     let rows: [AttRow]
     let today: String
+    /// Subject → teachers, from the timetable, so each class can name its teacher.
+    let faculty: [String: [String]]
     /// Called with a Klass.id when a *today* row is tapped. RootView wires
     /// this to `picked = id; route = .today` — same as tapping the class on
     /// the dashboard itself.
@@ -79,7 +81,12 @@ struct TimetableView: View {
         // as upcoming, complete with Join buttons. A past day is entirely over.
         let clock: Int
         if offset == 0 { clock = nowMin } else if offset < 0 { clock = 24 * 60 } else { clock = -1 }
-        return shapeDay(sessions: sessions, rows: rows, nowMin: clock)
+        return shapeDay(sessions: sessions, rows: rows, nowMin: clock).map { k in
+            var k = k
+            let t = (faculty[k.subject] ?? []).filter { !$0.isEmpty }.joined(separator: ", ")
+            k.teacher = t.isEmpty ? nil : t
+            return k
+        }
     }
 
     var body: some View {
@@ -313,6 +320,13 @@ struct TimetableView: View {
                     Text(place)
                         .r(14, k.live ? .semibold : .medium)
                         .foregroundStyle(k.live ? Color.mintDim : (k.past ? Color.ink4 : Color.ink3))
+
+                    if let teacher = k.teacher {
+                        Text(teacher)
+                            .r(12.5, .medium)
+                            .foregroundStyle(k.past ? Color.ink4 : Color.ink3)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
 
                     if let batch = k.batch, !batch.isEmpty {
                         Text("With \(batch.joined(separator: ", "))")

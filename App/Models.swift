@@ -271,6 +271,9 @@ struct Klass: Identifiable {
     var past = false
     var next = false
     var att: AttRow?
+    /// The teacher for this subject, from the timetable's faculty map. Attached
+    /// by the view layer, since `shapeDay` works from sessions alone.
+    var teacher: String? = nil
 
     var id: String { session.id }
     var subject: String { session.subject }

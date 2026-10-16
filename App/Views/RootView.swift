@@ -609,12 +609,27 @@ struct RootView: View {
                 portal.visit(url)
                 return
             }
-            // Moodle locks key generation to one request every few minutes. After
-            // a successful autologin the webview session carries the next taps, so
-            // inside that window open the link plainly rather than re-minting into
-            // the lockout.
+            // Moodle keeps the webview session alive for hours (the webview's
+            // cookie store is .default(), so it persists), but locks key
+            // generation to one request every few minutes. Re-minting on every
+            // tap burns straight into that lockout and lands on the login. So if
+            // the webview already holds a live Moodle session cookie, ride it -
+            // the link lands straight on the page, no mint. Mint only when there
+            // is no session to ride.
+            let cookies = await portal.allCookies()
+            let live = cookies.contains {
+                $0.domain.contains(Portal.lmsHost) && $0.name.hasPrefix("MoodleSession")
+            }
+            if live {
+                direct.lastError = "autologin: live Moodle session, no mint"
+                portal.visit(url)
+                return
+            }
+            // No session, but a mint just happened that evidently did not take -
+            // re-minting now only hits the lockout, so let portal.visit sign in
+            // by hand instead.
             if let last = portal.lastMoodleAutoLogin, Date().timeIntervalSince(last) < 360 {
-                direct.lastError = "autologin: within lockout window, using live session"
+                direct.lastError = "autologin: no session, within lockout window, signing in via portal"
                 portal.visit(url)
                 return
             }

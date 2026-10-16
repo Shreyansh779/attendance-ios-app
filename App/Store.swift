@@ -75,6 +75,9 @@ struct Deadline: Codable, Hashable {
     /// "assign" or "quiz".
     let kind: String
     let url: String
+    /// The teacher whose section this belongs to - the `group` of the matching
+    /// course item. nil until a deadline is tied to one of your scraped sections.
+    var teacher: String? = nil
 
     var date: Date? { Deadline.iso.date(from: due) }
 

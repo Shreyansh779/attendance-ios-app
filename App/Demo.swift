@@ -167,17 +167,17 @@
                     // absolute date branch.
                     Deadline(
                         title: "Experiment 2 is due", course: "Web Analytics",
-                        due: iso(-3, from: now), kind: "assign", url: ""
+                        due: iso(-3, from: now), kind: "assign", url: "", teacher: "Ayush Gurjar"
                     ),
                     Deadline(
                         title: "Class Test 1 is due",
                         course: "Object Oriented Analysis and Design",
-                        due: iso(1, from: now), kind: "quiz", url: ""
+                        due: iso(1, from: now), kind: "quiz", url: "", teacher: "Dr. Manupriya Darshani"
                     ),
                     Deadline(
                         title: "PBL_Submission 1 is due",
                         course: "Research Methodology in CS",
-                        due: iso(22, from: now), kind: "assign", url: ""
+                        due: iso(22, from: now), kind: "assign", url: "", teacher: "Kaustubh Ijardar"
                     ),
                 ],
                 lmsDiag: nil,

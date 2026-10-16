@@ -667,6 +667,31 @@ final class Portal: NSObject, ObservableObject {
         return due.filter { cmid($0.url).map(known.contains) ?? false }
     }
 
+    /// Your deadlines, each tagged with the teacher whose section it sits in.
+    ///
+    /// Like `mine` it keeps only modules that appear in your scraped sections -
+    /// another teacher's assignment, absent from them, is dropped - but it also
+    /// carries the section's `group` across as the teacher, so the row can name
+    /// who set the work. An empty course scrape leaves everything in, untagged,
+    /// rather than emptying the card.
+    static func ownDeadlines(_ due: [Deadline], in courses: [LmsCourse]) -> [Deadline] {
+        func cmid(_ s: String) -> String? {
+            guard let c = URLComponents(string: s), c.path.contains("/mod/") else { return nil }
+            return c.queryItems?.first { $0.name == "id" }?.value
+        }
+        let teacherByCmid = Dictionary(
+            courses.flatMap { c in c.items.compactMap { i in cmid(i.url).map { ($0, i.group) } } },
+            uniquingKeysWith: { first, _ in first }
+        )
+        guard !teacherByCmid.isEmpty else { return due }
+        return due.compactMap { d in
+            guard let m = cmid(d.url), let teacher = teacherByCmid[m] else { return nil }
+            var tagged = d
+            tagged.teacher = teacher.isEmpty ? nil : teacher
+            return tagged
+        }
+    }
+
     private struct CoursePayload: Decodable {
         let done: Bool
         let ok: Bool

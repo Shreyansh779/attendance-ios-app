@@ -596,13 +596,27 @@ struct RootView: View {
                 portal.visit(url)
                 return
             }
+            // Moodle locks key generation to one request every few minutes. After
+            // a successful autologin the webview session carries the next taps, so
+            // inside that window open the link plainly rather than re-minting into
+            // the lockout.
+            if let last = portal.lastMoodleAutoLogin, Date().timeIntervalSince(last) < 360 {
+                direct.lastError = "autologin: within lockout window, using live session"
+                portal.visit(url)
+                return
+            }
             let (auto, why) = await PortalMoodle.autoLoginURL(
                 wstoken: saved.token, privateToken: saved.privateToken, target: url
             )
             // Kept in the Settings "Direct connection" card so a tap that still
             // lands on the login can say why the token sign-in did not take.
             direct.lastError = "autologin(\(url.lastPathComponent)): \(why)"
-            portal.visit(auto ?? url)
+            if let auto {
+                portal.lastMoodleAutoLogin = Date()
+                portal.visit(auto, appUA: true)
+            } else {
+                portal.visit(url)
+            }
         }
     }
 

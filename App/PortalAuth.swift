@@ -821,6 +821,13 @@ enum PortalMoodle {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        // tool_mobile_get_autologin_key throws `apprequired` unless the request
+        // looks like the official app: core_useragent::is_moodle_app() just checks
+        // for "MoodleMobile" in the UA, and the real app appends exactly this
+        // (config.xml AppendUserAgent). Only set here, not on the deadline GETs -
+        // giving those the app UA could revive the action feed, which would route
+        // deadlines back through the mine filter that drops uncached modules.
+        req.setValue("MoodleMobile 4.0.2 (40203)", forHTTPHeaderField: "User-Agent")
         var allowed = CharacterSet.alphanumerics
         allowed.insert(charactersIn: "-._~")
         var fields = body

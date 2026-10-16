@@ -228,6 +228,14 @@
                         id: 3, name: "Web Analytics",
                         url: "https://lms.upes.ac.in/course/view.php?id=3", items: []
                     ),
+                ],
+                faculty: [
+                    "Web Analytics": ["Ayush Gurjar"],
+                    "Object Oriented Analysis and Design": ["Dr. Manupriya Darshani"],
+                    "Formal Languages and Automata Theory": ["Kaustubh Ijardar"],
+                    "Research Methodology in CS": ["Dr. Neelu Jyoti Ahuja"],
+                    "Probability, Entropy, and MC Simulation": ["Dr. Rahul Nijhawan"],
+                    "Cryptography and Network Security": ["Dr. Amit Kumar"],
                 ]
             )
         }

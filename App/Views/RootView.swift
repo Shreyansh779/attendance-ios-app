@@ -115,7 +115,7 @@ struct RootView: View {
 
     private var day: [Klass] {
         guard let s = snapshot else { return [] }
-        return shapeDay(sessions: s.sessions(for: tick), rows: rows, nowMin: nowMin)
+        return tagged(shapeDay(sessions: s.sessions(for: tick), rows: rows, nowMin: nowMin))
     }
 
     /// Shaped with a clock of -1, so nothing in it reads as past or live.
@@ -123,7 +123,19 @@ struct RootView: View {
         guard let s = snapshot,
             let next = Calendar.current.date(byAdding: .day, value: 1, to: tick)
         else { return [] }
-        return shapeDay(sessions: s.sessions(for: next), rows: rows, nowMin: -1)
+        return tagged(shapeDay(sessions: s.sessions(for: next), rows: rows, nowMin: -1))
+    }
+
+    /// Attach each class's teacher, looked up by subject in the timetable's
+    /// faculty map. Done here, not in `shapeDay`, which has only the sessions.
+    private func tagged(_ list: [Klass]) -> [Klass] {
+        let fac = snapshot?.faculty ?? [:]
+        return list.map { k in
+            var k = k
+            let t = (fac[k.subject] ?? []).filter { !$0.isEmpty }.joined(separator: ", ")
+            k.teacher = t.isEmpty ? nil : t
+            return k
+        }
     }
 
     private var summary: Summary { Summary(rows) }
@@ -265,6 +277,7 @@ struct RootView: View {
                         week: snapshot?.week ?? [:],
                         rows: rows,
                         today: today,
+                        faculty: snapshot?.faculty ?? [:],
                         onOpenToday: { id in
                             picked = id
                             route = .today

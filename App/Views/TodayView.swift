@@ -68,6 +68,13 @@ struct TodayView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, 14)
 
+                if let teacher = h.teacher {
+                    Text(teacher)
+                        .r(14, .medium)
+                        .foregroundStyle(Color.ink3)
+                        .padding(.top, 3)
+                }
+
                 if let batch = h.batch, !batch.isEmpty {
                     Text("With \(batch.joined(separator: ", "))")
                         .r(13.5, .medium)
@@ -269,7 +276,8 @@ private struct Tomorrow: View {
                             Text(k.subject)
                                 .r(15.5, .semibold)
                                 .fixedSize(horizontal: false, vertical: true)
-                            Text(k.online ? "Online classroom" : "Room \(k.room ?? "not listed")")
+                            Text((k.online ? "Online classroom" : "Room \(k.room ?? "not listed")")
+                                + (k.teacher.map { " · \($0)" } ?? ""))
                                 .r(13, .medium)
                                 .foregroundStyle(Color.ink3)
                             if let batch = k.batch, !batch.isEmpty {

@@ -61,6 +61,29 @@ struct RootView: View {
     @State private var didAutoOpen = false
     @State private var showingSettings = RootView.opensSettings
     @State private var showingProfile = false
+    /// A tapped assignment/quiz, shown natively instead of in the webview.
+    @State private var lmsLink: LmsLink? = RootView.demoLmsLink
+
+    /// `-sheet lms` opens the native LMS sheet straight away for a screenshot.
+    private static var demoLmsLink: LmsLink? {
+        #if DEBUG
+            if Demo.isOn, Demo.showsLms {
+                return LmsLink(url: Demo.lmsDetail.pageURL, course: nil, teacher: nil)
+            }
+        #endif
+        return nil
+    }
+
+    /// The fixture the LMS sheet renders in `-demo`; nil everywhere else, so a
+    /// real tap fetches from the webservice.
+    private static var demoLmsDetail: LmsDetail? {
+        #if DEBUG
+            return Demo.isOn ? Demo.lmsDetail : nil
+        #endif
+        #if !DEBUG
+            return nil
+        #endif
+    }
 
     /// Where a screenshot run wants to land. Release builds always start on
     /// Today, because `Demo` does not exist in them.
@@ -305,12 +328,27 @@ struct RootView: View {
         }
         .tint(Color.ink)
         // An LMS link only works inside the portal's webview - Safari has no
-        // Moodle session - so every one, wherever it is tapped, goes there.
+        // Moodle session - so every one, wherever it is tapped, goes there. An
+        // assignment or quiz, though, opens natively (no page, no login) the way
+        // the official app does; only acting on it falls back to the webview.
         .environment(\.openURL, OpenURLAction { url in
             guard url.host == Portal.lmsHost else { return .systemAction }
-            openLMS(url)
+            if isModuleLink(url) {
+                let d = snapshot?.deadlines.first { $0.url == url.absoluteString }
+                lmsLink = LmsLink(url: url, course: d?.course, teacher: d?.teacher)
+            } else {
+                openLMS(url)
+            }
             return .handled
         })
+        .sheet(item: $lmsLink) { link in
+            LmsDetailView(
+                link: link,
+                openPage: { openLMS($0) },
+                openFile: { portal.visit($0) },
+                preview: RootView.demoLmsDetail
+            )
+        }
         .animation(Motion.ui.reduced(reduceMotion), value: route)
     }
 
@@ -602,6 +640,15 @@ struct RootView: View {
     /// real app opens its links) and let the webview sign itself in on the way.
     /// Falls back to the plain link, which `portal.visit` still signs into by
     /// hand, whenever there is no token or the key throttle/refusal returns nil.
+    /// An assignment or quiz page - the two the native sheet can render. A folder,
+    /// file, forum or anything else still goes to the webview.
+    private func isModuleLink(_ url: URL) -> Bool {
+        let p = url.path
+        guard p.contains("/mod/assign/view.php") || p.contains("/mod/quiz/view.php") else { return false }
+        return URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?.contains { $0.name == "id" } ?? false
+    }
+
     private func openLMS(_ url: URL) {
         Task {
             guard let saved = MoodleTokenStore.load() else {

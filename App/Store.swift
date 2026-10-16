@@ -88,6 +88,33 @@ struct Deadline: Codable, Hashable {
     }()
 }
 
+/// The native view of a tapped deadline, read straight from the webservice the
+/// way the official app does - no page load, no autologin. Transient (built on
+/// tap, never stored), so it is not Codable and holds live URLs.
+struct LmsDetail {
+    var title: String
+    var course: String
+    var teacher: String?
+    /// "assign" or "quiz".
+    var kind: String
+    var due: Date?
+    /// "Submitted" / "Not submitted" / "Graded · 18/20" / "2 attempts" - nil when
+    /// the status function is off or returned nothing.
+    var status: String?
+    /// The module intro, HTML stripped to plain text.
+    var descriptionText: String
+    var attachments: [Attachment]
+    /// The original /mod/.../view.php page, for "Open full page" in the webview.
+    var pageURL: URL
+
+    struct Attachment: Identifiable {
+        let id = UUID()
+        let name: String
+        /// Already carries ?token= so it opens without a Moodle session.
+        let url: URL
+    }
+}
+
 struct Stamp: Codable, Hashable {
     /// ISO yyyy-MM-dd. One stamp per day; a second read the same day replaces
     /// the first rather than adding a point.

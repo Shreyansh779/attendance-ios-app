@@ -853,6 +853,168 @@ enum PortalMoodle {
         return Set(fns.compactMap { $0["name"] as? String })
     }
 
+    /// The native view of a tapped deadline, read straight from the webservice -
+    /// no page load, no autologin, the way the official (Moodle Mobile) app opens
+    /// its links. `course`/`teacher` come from the tapped `Deadline` (the webview
+    /// scrape already knows them); only the rest is fetched. Returns nil when the
+    /// cmid cannot be read or the module is neither assign nor quiz, so the caller
+    /// falls back to opening the page in the webview.
+    static func detail(
+        wstoken: String, pageURL: URL, course: String?, teacher: String?
+    ) async -> LmsDetail? {
+        guard let cmid = Int(
+            URLComponents(url: pageURL, resolvingAgainstBaseURL: false)?
+                .queryItems?.first { $0.name == "id" }?.value ?? ""
+        ) else { return nil }
+        guard let cm = (await wsGet(
+            wstoken, "core_course_get_course_module",
+            [URLQueryItem(name: "cmid", value: String(cmid))]
+        ) as? [String: Any])?["cm"] as? [String: Any],
+            let courseid = cm["course"] as? Int,
+            let modname = cm["modname"] as? String
+        else { return nil }
+        let name = (cm["name"] as? String) ?? ""
+        let instance = cm["instance"] as? Int
+
+        switch modname {
+        case "assign":
+            return await assignDetail(
+                wstoken: wstoken, courseid: courseid, cmid: cmid, instance: instance,
+                name: name, course: course, teacher: teacher, pageURL: pageURL
+            )
+        case "quiz":
+            return await quizDetail(
+                wstoken: wstoken, courseid: courseid, cmid: cmid, instance: instance,
+                name: name, course: course, teacher: teacher, pageURL: pageURL
+            )
+        default:
+            return nil
+        }
+    }
+
+    private static func assignDetail(
+        wstoken: String, courseid: Int, cmid: Int, instance: Int?,
+        name: String, course: String?, teacher: String?, pageURL: URL
+    ) async -> LmsDetail? {
+        let resp = await wsGet(
+            wstoken, "mod_assign_get_assignments",
+            [URLQueryItem(name: "courseids[0]", value: String(courseid))]
+        ) as? [String: Any]
+        let courses = (resp?["courses"] as? [[String: Any]]) ?? []
+        let assigns = courses.flatMap { ($0["assignments"] as? [[String: Any]]) ?? [] }
+        let a = assigns.first { ($0["cmid"] as? Int) == cmid }
+            ?? assigns.first { ($0["id"] as? Int) == instance }
+
+        let assignId = (a?["id"] as? Int) ?? instance
+        let duedate = (a?["duedate"] as? Int) ?? 0
+        var atts: [LmsDetail.Attachment] = []
+        for f in ((a?["introattachments"] as? [[String: Any]]) ?? []) {
+            if let fn = f["filename"] as? String, fn != ".",
+                let fu = f["fileurl"] as? String, let u = tokenized(fu, wstoken) {
+                atts.append(.init(name: fn, url: u))
+            }
+        }
+
+        var status: String?
+        if let aid = assignId, let st = await wsGet(
+            wstoken, "mod_assign_get_submission_status",
+            [URLQueryItem(name: "assignid", value: String(aid))]
+        ) as? [String: Any] {
+            let feedback = st["feedback"] as? [String: Any]
+            let sub = (st["lastattempt"] as? [String: Any])?["submission"] as? [String: Any]
+            let s = (sub?["status"] as? String) ?? ""
+            if (feedback?["grade"] as? [String: Any]) != nil {
+                let disp = (feedback?["gradefordisplay"] as? String).map(stripHTML)
+                status = disp.flatMap { $0.isEmpty ? nil : "Graded · \($0)" } ?? "Graded"
+            } else {
+                status = s == "submitted" ? "Submitted" : "Not submitted"
+            }
+        }
+
+        return LmsDetail(
+            title: name.isEmpty ? ((a?["name"] as? String) ?? "Assignment") : name,
+            course: course ?? courseName(courses, courseid),
+            teacher: teacher, kind: "assign",
+            due: duedate > 0 ? Date(timeIntervalSince1970: TimeInterval(duedate)) : nil,
+            status: status, descriptionText: stripHTML((a?["intro"] as? String) ?? ""),
+            attachments: atts, pageURL: pageURL
+        )
+    }
+
+    private static func quizDetail(
+        wstoken: String, courseid: Int, cmid: Int, instance: Int?,
+        name: String, course: String?, teacher: String?, pageURL: URL
+    ) async -> LmsDetail? {
+        let resp = await wsGet(
+            wstoken, "mod_quiz_get_quizzes_by_courses",
+            [URLQueryItem(name: "courseids[0]", value: String(courseid))]
+        ) as? [String: Any]
+        let quizzes = (resp?["quizzes"] as? [[String: Any]]) ?? []
+        let q = quizzes.first { ($0["coursemodule"] as? Int) == cmid }
+            ?? quizzes.first { ($0["id"] as? Int) == instance }
+        let quizId = (q?["id"] as? Int) ?? instance
+        let timeclose = (q?["timeclose"] as? Int) ?? 0
+
+        var status: String?
+        if let qid = quizId, let ar = await wsGet(
+            wstoken, "mod_quiz_get_user_attempts",
+            [URLQueryItem(name: "quizid", value: String(qid))]
+        ) as? [String: Any] {
+            let attempts = (ar["attempts"] as? [[String: Any]]) ?? []
+            let finished = attempts.filter { ($0["state"] as? String) == "finished" }.count
+            if attempts.isEmpty {
+                status = "Not attempted"
+            } else if finished > 0 {
+                status = "\(finished) attempt\(finished == 1 ? "" : "s")"
+            } else {
+                status = "In progress"
+            }
+        }
+
+        return LmsDetail(
+            title: (q?["name"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                ?? (name.isEmpty ? "Quiz" : name),
+            course: course ?? "",
+            teacher: teacher, kind: "quiz",
+            due: timeclose > 0 ? Date(timeIntervalSince1970: TimeInterval(timeclose)) : nil,
+            status: status, descriptionText: stripHTML((q?["intro"] as? String) ?? ""),
+            attachments: [], pageURL: pageURL
+        )
+    }
+
+    /// Append the webservice token so a `pluginfile.php` link opens without a
+    /// Moodle session - the only way a tapped attachment reaches the file instead
+    /// of a login page.
+    private static func tokenized(_ raw: String, _ token: String) -> URL? {
+        guard var c = URLComponents(string: raw) else { return nil }
+        c.queryItems = (c.queryItems ?? []) + [URLQueryItem(name: "token", value: token)]
+        return c.url
+    }
+
+    private static func courseName(_ courses: [[String: Any]], _ id: Int) -> String {
+        let n = (courses.first { ($0["id"] as? Int) == id }?["fullname"] as? String) ?? ""
+        return n.replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: #"_Sem\d+$"#, with: "", options: .regularExpression)
+    }
+
+    /// Moodle intro text is HTML. Rich rendering (NSAttributedString from HTML) is
+    /// main-thread and janky, so for v1 strip to plain text: block tags become
+    /// line breaks, the rest is dropped, and the handful of entities Moodle emits
+    /// are decoded.
+    private static func stripHTML(_ s: String) -> String {
+        var t = s.replacingOccurrences(of: #"(?i)<br\s*/?>"#, with: "\n", options: .regularExpression)
+        t = t.replacingOccurrences(of: #"(?i)</(p|div|li|h[1-6])>"#, with: "\n", options: .regularExpression)
+        t = t.replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression)
+        for (e, c) in [
+            ("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"), ("&nbsp;", " "),
+            ("&#39;", "'"), ("&rsquo;", "'"), ("&quot;", "\""), ("&hellip;", "…"),
+        ] {
+            t = t.replacingOccurrences(of: e, with: c)
+        }
+        t = t.replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
+        return t.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// A URL that signs this webview into Moodle from the token and lands on
     /// `target`, exactly how the official app opens in-app links: mint a one-shot
     /// autologin key from the private token, then hand `autologin.php` the key and

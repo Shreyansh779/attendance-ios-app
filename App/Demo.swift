@@ -25,6 +25,35 @@
         /// Whether to open the settings sheet on launch.
         static var showsSettings: Bool { value("-sheet") == "settings" }
 
+        /// Whether to open the native LMS detail sheet on launch (`-sheet lms`),
+        /// so the one screen with no login-free path of its own can be shot.
+        static var showsLms: Bool { value("-sheet") == "lms" }
+
+        /// The native assignment view's fixture: a due-soon, not-yet-submitted
+        /// assignment with a long title and two attachments.
+        static let lmsDetail = LmsDetail(
+            title: "Footprinting using SHODAN and other tools",
+            course: "Ethical Hacking & Penetration Testing",
+            teacher: "Dr. Navin Mani Upadhyay",
+            kind: "assign",
+            due: Date().addingTimeInterval(2 * 86_400),
+            status: "Not submitted",
+            descriptionText: "Use SHODAN and at least two other OSINT tools to "
+                + "enumerate the exposed services of the assigned target range. "
+                + "Submit a short report with screenshots and the commands you ran.",
+            attachments: [
+                .init(
+                    name: "Lab brief.pdf",
+                    url: URL(string: "https://lms.upes.ac.in/webservice/pluginfile.php/1/mod_assign/introattachment/0/brief.pdf?token=demo")!
+                ),
+                .init(
+                    name: "Target ranges.txt",
+                    url: URL(string: "https://lms.upes.ac.in/webservice/pluginfile.php/1/mod_assign/introattachment/0/targets.txt?token=demo")!
+                ),
+            ],
+            pageURL: URL(string: "https://lms.upes.ac.in/mod/assign/view.php?id=3")!
+        )
+
         private static func value(_ flag: String) -> String? {
             let a = ProcessInfo.processInfo.arguments
             guard let i = a.firstIndex(of: flag), i + 1 < a.count else { return nil }

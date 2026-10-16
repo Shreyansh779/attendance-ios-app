@@ -180,6 +180,9 @@ final class Portal: NSObject, ObservableObject {
         // held back, this has to do it: full size, under an opaque backdrop,
         // so the portal renders as if on screen and is never seen.
         hostingHidden = true
+        // A read scrapes the portal and the LMS, both of which sniff the
+        // user-agent - undo any app UA a prior autologin tap left set.
+        webView.customUserAgent = nil
         webView.load(URLRequest(url: Portal.dashboardURL))
         startPolling()
     }
@@ -721,11 +724,21 @@ final class Portal: NSObject, ObservableObject {
     /// the portal and a redirect - nothing anybody needs to watch.
     @Published var visitHidden = false
 
-    func visit(_ url: URL) {
+    /// Set while an autologin link is minted recently enough that re-minting
+    /// would hit Moodle's key-generation lockout; within the window the webview
+    /// session from the last autologin carries the next tap, so it opens plainly.
+    var lastMoodleAutoLogin: Date?
+
+    /// `appUA` loads the link under the official app's user-agent, which
+    /// `admin/tool/mobile/autologin.php` requires (`is_moodle_app`) to accept the
+    /// key - reset the moment a sign-in fallback or the read touches the portal,
+    /// which sniffs the UA and must see the ordinary one.
+    func visit(_ url: URL, appUA: Bool = false) {
         // A read in flight is driving this same webview, so it has to stop
         // rather than fight over where the page goes.
         registerTask?.cancel()
         visitTask?.cancel()
+        webView.customUserAgent = appUA ? "MoodleMobile 4.0.2 (40203)" : nil
         // `lastPathComponent` is already percent-decoded. Decoding it a second
         // time returns nil for any name carrying a literal % - "50% off.pdf"
         // reads as a broken escape - and nil fell back to "LMS".
@@ -751,10 +764,15 @@ final class Portal: NSObject, ObservableObject {
             let at = await self.landing(url)
             if Task.isCancelled { return }
             guard !at.isEmpty, !at.hasPrefix(Portal.lmsHost) || at.contains("login") else {
+                // Landed on the LMS: autologin took (or the session was live).
+                self.webView.customUserAgent = nil
                 self.status = nil
                 return
             }
 
+            // Bounced to the portal - the manual sign-in and everything after it
+            // runs against the portal, which must see the ordinary user-agent.
+            self.webView.customUserAgent = nil
             self.status = "Signing you in to the LMS."
             self.visitHidden = true
             self.webView.load(URLRequest(url: Portal.dashboardURL))

@@ -591,15 +591,18 @@ struct RootView: View {
     /// hand, whenever there is no token or the key throttle/refusal returns nil.
     private func openLMS(_ url: URL) {
         Task {
-            var target = url
-            if let saved = MoodleTokenStore.load(),
-                let auto = await PortalMoodle.autoLoginURL(
-                    wstoken: saved.token, privateToken: saved.privateToken, target: url
-                )
-            {
-                target = auto
+            guard let saved = MoodleTokenStore.load() else {
+                direct.lastError = "autologin: no stored token"
+                portal.visit(url)
+                return
             }
-            portal.visit(target)
+            let (auto, why) = await PortalMoodle.autoLoginURL(
+                wstoken: saved.token, privateToken: saved.privateToken, target: url
+            )
+            // Kept in the Settings "Direct connection" card so a tap that still
+            // lands on the login can say why the token sign-in did not take.
+            direct.lastError = "autologin(\(url.lastPathComponent)): \(why)"
+            portal.visit(auto ?? url)
         }
     }
 

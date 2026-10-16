@@ -647,11 +647,21 @@ final class Portal: NSObject, ObservableObject {
     ///
     /// An empty course list means the scrape failed, not that nothing is
     /// yours, so in that case everything stays.
+    ///
+    /// Matched on the course-module id (`.../mod/<type>/view.php?id=<cmid>`), not
+    /// the whole URL: the action feed, the monthly calendar and the course scrape
+    /// name the same module with the same id but not always byte-identical query
+    /// strings, and a full-string compare silently dropped a real deadline whose
+    /// URL differed only in a trailing parameter.
     static func mine(_ due: [Deadline]?, in courses: [LmsCourse]?) -> [Deadline]? {
         guard let due else { return nil }
-        let known = Set((courses ?? []).flatMap { $0.items.map(\.url) })
+        func cmid(_ s: String) -> String? {
+            guard let c = URLComponents(string: s), c.path.contains("/mod/") else { return nil }
+            return c.queryItems?.first { $0.name == "id" }?.value
+        }
+        let known = Set((courses ?? []).flatMap { $0.items.compactMap { cmid($0.url) } })
         guard !known.isEmpty else { return due }
-        return due.filter { known.contains($0.url) }
+        return due.filter { cmid($0.url).map(known.contains) ?? false }
     }
 
     private struct CoursePayload: Decodable {

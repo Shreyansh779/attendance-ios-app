@@ -842,24 +842,31 @@ enum PortalMoodle {
     /// portal login, which the REST path never did in the webview. Returns nil on
     /// any missing piece (no private token, the 6-minute key throttle, an error)
     /// so the caller can fall back to a plain visit.
-    static func autoLoginURL(wstoken: String, privateToken: String, target: URL) async -> URL? {
-        guard !privateToken.isEmpty else { return nil }
+    static func autoLoginURL(
+        wstoken: String, privateToken: String, target: URL
+    ) async -> (url: URL?, why: String) {
+        guard !privateToken.isEmpty else { return (nil, "no privatetoken") }
         guard let info = await wsGet(wstoken, "core_webservice_get_site_info", []) as? [String: Any],
             let userId = info["userid"] as? Int
-        else { return nil }
+        else { return (nil, "site_info failed") }
         guard let data = await wsPost(
             wstoken, "tool_mobile_get_autologin_key", ["privatetoken": privateToken]
-        ) as? [String: Any],
-            let autologinurl = data["autologinurl"] as? String,
+        ) as? [String: Any] else {
+            return (nil, "autologin: no response")
+        }
+        if let ex = data["exception"] as? String {
+            return (nil, "autologin exc: \(ex)/\((data["errorcode"] as? String) ?? "")")
+        }
+        guard let autologinurl = data["autologinurl"] as? String,
             let key = data["key"] as? String
-        else { return nil }
+        else { return (nil, "autologin: no key in response") }
         var c = URLComponents(string: autologinurl)
         c?.queryItems = [
             URLQueryItem(name: "userid", value: String(userId)),
             URLQueryItem(name: "key", value: key),
             URLQueryItem(name: "urltogo", value: target.absoluteString),
         ]
-        return c?.url
+        return (c?.url, "ok")
     }
 
     /// Deadlines via the month-grid calendar instead of the action feed.

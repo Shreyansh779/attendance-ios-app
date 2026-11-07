@@ -59,7 +59,7 @@ struct SubjectView: View {
             }
             HStack(spacing: 12) {
                 Meter(pct: b.state == .empty ? 0 : b.pct, tint: b.state == .empty ? Color.ink4 : tint)
-                Text("\(Int(b.pct.rounded()))% · \(row.attended)/\(row.total)")
+                Text("\(Int(b.pct))% · \(row.attended)/\(row.total)")
                     .r(14, .semibold)
                     .foregroundStyle(Color.ink2)
                     .fixedSize()
@@ -93,7 +93,7 @@ struct SubjectView: View {
                     .foregroundStyle(Color.ink3)
             }
             VStack(spacing: 9) {
-                ForEach(shown, id: \.self) { s in
+                ForEach(Array(shown.enumerated()), id: \.offset) { _, s in
                     HStack(spacing: 11) {
                         Circle()
                             .fill(s.present ? Color.mintHi : Color.coral)

@@ -162,9 +162,19 @@ final class Portal: NSObject, ObservableObject {
         // settled. busy existed for exactly this and was never consulted.
         guard !busy else { return }
         registerTask?.cancel()
+        // An LMS visit may still be driving this webview; the read takes it back.
+        visitTask?.cancel()
+        visitTask = nil
         self.onDone = onDone
         self.student = knownStudent
         self.holidays = knownHolidays
+        // Nothing from an earlier read may be re-delivered as this read's result.
+        daywise = []
+        attDiag = nil
+        deadlines = nil
+        lmsDiag = nil
+        courses = nil
+        faculty = [:]
         status = "Opening the portal."
         busy = true
         // Held back deliberately: with a session still good this never has to
@@ -198,6 +208,8 @@ final class Portal: NSObject, ObservableObject {
         showingLogin = false
         hostingHidden = false
         busy = false
+        // The banner's instruction belongs to the sign-in that was just dismissed.
+        status = nil
     }
 
     /// Close the link cover without touching a read that may be running.
@@ -236,11 +248,17 @@ final class Portal: NSObject, ObservableObject {
         }
 
         let cfg = URLSessionConfiguration.ephemeral
-        cfg.httpCookieStorage = HTTPCookieStorage.shared
-        cookies.forEach { cfg.httpCookieStorage?.setCookie($0) }
+        // A private jar, not the app-wide shared one: the portal and Moodle
+        // session cookies must not leak into every other request the app makes.
+        let jar = HTTPCookieStorage()
+        cfg.httpCookieStorage = jar
+        cookies.forEach { jar.setCookie($0) }
         cfg.httpShouldSetCookies = true
 
-        guard let (tmp, response) = try? await URLSession(configuration: cfg).download(from: url)
+        let session = URLSession(configuration: cfg)
+        defer { session.finishTasksAndInvalidate() }
+        guard let (tmp, response) = try? await session.download(from: url),
+            (response as? HTTPURLResponse)?.statusCode == 200
         else { return nil }
 
         // The server's own name for it where there is one - a pluginfile path
@@ -762,6 +780,9 @@ final class Portal: NSObject, ObservableObject {
         // A read in flight is driving this same webview, so it has to stop
         // rather than fight over where the page goes.
         registerTask?.cancel()
+        pollTask?.cancel()
+        pollTask = nil
+        busy = false
         visitTask?.cancel()
         webView.customUserAgent = appUA ? "MoodleMobile 4.0.2 (40203)" : nil
         // `lastPathComponent` is already percent-decoded. Decoding it a second
@@ -1239,8 +1260,8 @@ final class Portal: NSObject, ObservableObject {
         return (rows, sessions, cardFound)
     }
 
-    private func eval(_ js: String, in target: WKWebView? = nil) async throws -> Any? {
-        let wv = target ?? webView
+    private func eval(_ js: String) async throws -> Any? {
+        let wv = webView
         return try await withCheckedThrowingContinuation { cont in
             wv.evaluateJavaScript(js) { value, error in
                 if let error { cont.resume(throwing: error) } else { cont.resume(returning: value) }
@@ -1289,6 +1310,12 @@ extension Portal: WKNavigationDelegate {
         guard (error as NSError).code != NSURLErrorCancelled else { return }
         let msg = error.localizedDescription
         Task { @MainActor [weak self] in
+            // The load that the read was waiting on has failed for good, so the
+            // read cannot finish. End it now rather than let refresh stay locked
+            // for the whole login window.
+            self?.pollTask?.cancel()
+            self?.pollTask = nil
+            self?.busy = false
             self?.status = "Could not reach the portal: \(msg)"
         }
     }

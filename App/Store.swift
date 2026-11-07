@@ -79,11 +79,18 @@ struct Deadline: Codable, Hashable {
     /// course item. nil until a deadline is tied to one of your scraped sections.
     var teacher: String? = nil
 
-    var date: Date? { Deadline.iso.date(from: due) }
+    /// The REST path writes whole seconds, the WebView path writes milliseconds.
+    var date: Date? { Deadline.iso.date(from: due) ?? Deadline.isoWhole.date(from: due) }
 
     private static let iso: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private static let isoWhole: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
         return f
     }()
 }
@@ -212,7 +219,9 @@ struct Snapshot: Codable {
         self.profile = profile
     }
 
-    static var isoDay: DateFormatter {
+    // Built once. A DateFormatter is expensive, and the timetable reads this
+    // dozens of times per render.
+    static let isoDay: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
         f.calendar = Calendar(identifier: .gregorian)
@@ -223,7 +232,7 @@ struct Snapshot: Codable {
         // weekly timetable silently disappears.
         f.locale = Locale(identifier: "en_US_POSIX")
         return f
-    }
+    }()
 
     /// Today's classes: the weekly scrape if we have it, else the dashboard card.
     func sessions(for date: Date) -> [Session] {
@@ -252,6 +261,9 @@ struct Snapshot: Codable {
             .filter { $0.key >= today && holiday(on: $0.key) == nil }
             .sorted { $0.key < $1.key }
             .flatMap { $0.value }
+            // A class already hand-marked is already in the held count, so it
+            // must not also be counted as still to come.
+            .filter { marks["\($0.date ?? "")|\($0.start)|\($0.subject)"] == nil }
     }
 
     /// Today's reading folded in, replacing any earlier one from the same day.

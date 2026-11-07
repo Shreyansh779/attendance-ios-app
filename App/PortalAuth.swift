@@ -143,7 +143,7 @@ enum PortalAuthStore {
         SecItemDelete(query as CFDictionary)
         var attributes = query
         attributes[kSecValueData as String] = data
-        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         SecItemAdd(attributes as CFDictionary, nil)
     }
 
@@ -196,7 +196,7 @@ enum PortalCredentialStore {
         SecItemDelete(query as CFDictionary)
         var attributes = query
         attributes[kSecValueData as String] = data
-        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         SecItemAdd(attributes as CFDictionary, nil)
     }
 
@@ -561,10 +561,17 @@ enum PortalGateway {
                 return nil
             }
 
+            // Same venue test as the WebView scraper (Scrapers.swift VIRTUAL), so a
+            // hybrid slot keeps its room and only a virtual one loses it.
+            let venue = r.FloorPlanDetails?.VenueName ?? ""
+            let virtual = venue.range(
+                of: #"virtual|online|teams|zoom|webex|meet"#,
+                options: [.regularExpression, .caseInsensitive]
+            ) != nil
             return Session(
                 subject: subject, start: r.SlotStartTime, end: r.SlotEndTime,
-                room: r.FloorPlanDetails?.VenueName, online: link != nil,
-                mode: link != nil ? "online" : "class",
+                room: virtual ? nil : venue, online: virtual,
+                mode: virtual ? "virtual" : (link != nil ? "hybrid" : "class"),
                 date: date, link: link,
                 batch: batches.isEmpty ? nil : Array(Set(batches)).sorted()
             )
@@ -633,7 +640,8 @@ enum PortalMoodle {
         var description: String {
             switch self {
             case .noAuthenticatedSession: return "no authenticated Moodle session in the WebView"
-            case .noRedirect(let body): return "no moodlemobile redirect: \(body)"
+            // The body is the moodlemobile:// redirect, which carries the token.
+            case .noRedirect: return "no moodlemobile redirect"
             case .server(let status): return "server \(status)"
             case .decodeFailed(let body): return "decode failed: \(body)"
             case .apiError(let msg): return "api error: \(msg)"
@@ -689,6 +697,7 @@ enum PortalMoodle {
         let capture = RedirectCapture()
         let session = URLSession(configuration: .ephemeral, delegate: capture, delegateQueue: nil)
         _ = try? await session.data(for: request)
+        session.finishTasksAndInvalidate()
 
         guard let location = capture.location, location.hasPrefix("moodlemobile://") else {
             throw MoodleError.noRedirect(capture.location ?? "<no redirect at all>")
@@ -888,6 +897,7 @@ enum PortalMoodle {
     /// same assign/quiz filter, course-name cleanup and 14-day window as the
     /// action feed and the WebView scraper.
     static func monthlyDueDates(wstoken: String) async throws -> (items: [Deadline], total: Int, kinds: String) {
+        var failedMonths = 0
         let cal = Calendar(identifier: .gregorian)
         let now = Date()
         let y = cal.component(.year, from: now)
@@ -905,7 +915,10 @@ enum PortalMoodle {
                 wstoken, "core_calendar_get_calendar_monthly_view",
                 [URLQueryItem(name: "year", value: String(yy)), URLQueryItem(name: "month", value: String(mm))]
             )
-            guard let d = obj as? [String: Any], let weeks = d["weeks"] as? [[String: Any]] else { continue }
+            guard let d = obj as? [String: Any], let weeks = d["weeks"] as? [[String: Any]] else {
+                failedMonths += 1
+                continue
+            }
             for w in weeks {
                 for day in (w["days"] as? [[String: Any]] ?? []) {
                     for ev in (day["events"] as? [[String: Any]] ?? []) {
@@ -914,6 +927,9 @@ enum PortalMoodle {
                 }
             }
         }
+        // A month that did not load is not a month with no deadlines. Throwing
+        // lets the caller fall back instead of replacing the list with a partial one.
+        if failedMonths > 0 { throw URLError(.cannotLoadFromNetwork) }
         let events = Array(byId.values) + noId
         let assignQuiz = events.filter {
             let m = $0["modulename"] as? String
@@ -992,7 +1008,7 @@ enum MoodleTokenStore {
         SecItemDelete(query as CFDictionary)
         var attributes = query
         attributes[kSecValueData as String] = data
-        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         SecItemAdd(attributes as CFDictionary, nil)
     }
 

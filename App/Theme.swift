@@ -39,7 +39,6 @@ extension Color {
     static let surDim = Color(UIColor(white: 0, alpha: 0.16))
     static let surLive = Color(UIColor(0x7FD9AE).withAlphaComponent(0.16))
     static let surVirtual = Color(UIColor(0xB9A8E0).withAlphaComponent(0.14))
-    static let surLow = Color(UIColor(0xF0917A).withAlphaComponent(0.15))
     static let track = Color(UIColor(white: 1, alpha: 0.13))
     /// The groove a thumb slides in. Deliberately darker than any other
     /// surface: the thumb is ink, which is nearly white, and a white thumb on
@@ -55,7 +54,9 @@ extension Color {
 
     static let ink = Color(0xF5F5F7)
     static let ink2 = Color(0xA8A8B3)
-    static let ink3 = Color(0x8E8E98)
+    // Solved against the glass cards (#363637), not just the bare ground:
+    // about 4.8:1 there, so body-size secondary text meets WCAG AA.
+    static let ink3 = Color(0xA3A3AD)
     static let ink4 = Color(0x82828A)
 
     /// Text on top of an ink-filled control. Ink is the accent in this palette,
@@ -75,7 +76,6 @@ extension Color {
     static let violet = Color(0xB9A8E0)
     static let warnInk = Color(0xE0CCA4)
     /// Text that sits on top of a filled control.
-    static let onAccent = Color(0x131316)
 
     /// How loudly a subject should shout.
     static func urgencyTint(_ u: Urgency) -> Color {
@@ -109,7 +109,6 @@ extension UIColor {
 /// calm rather than as quick.
 enum Motion {
     /// Panels and sheets.
-    static let panel = Animation.spring(duration: 0.42, bounce: 0)
     /// Everything else. Arrives and stops.
     static let ui = Animation.spring(duration: 0.38, bounce: 0)
     /// Press feedback. Short enough to read as instant rather than as motion.
@@ -200,14 +199,6 @@ extension ButtonStyle where Self == PressableStyle {
 /// The rounded face this app used to be set in is gone. Rounded reads friendly
 /// and a little unserious; not looking like that was the point of the
 /// overhaul.
-extension Font {
-    /// Fixed size. Only for contexts that need a `Font` value rather than a
-    /// view modifier; prefer `View.r(_:_:)`, which scales.
-    static func r(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
-        .system(size: size, weight: weight)
-    }
-}
-
 /// The system font at `size`, scaled by the reader's text-size setting.
 ///
 /// `Font.system(size:)` ignores Dynamic Type entirely, so every size in this app

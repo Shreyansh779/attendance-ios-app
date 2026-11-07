@@ -63,12 +63,15 @@ final class PortalDirect: ObservableObject {
         }
 
         if current.isExpiringSoon {
-            guard let refreshed = try? await PortalAuth.refresh(current) else {
+            // Only a rejected credential clears anything. A network or 5xx
+            // failure rethrows, so the caller falls back without losing sign-in.
+            do {
+                current = try await PortalAuth.refresh(current)
+                PortalAuthStore.save(current)
+            } catch PortalAuth.AuthError.badCredentials {
                 PortalAuthStore.clear()
                 return try await silentLoginOrPrompt()
             }
-            current = refreshed
-            PortalAuthStore.save(current)
         }
         credentials = current
         return current.accessToken
@@ -81,12 +84,16 @@ final class PortalDirect: ObservableObject {
     /// retrying the same bad password here would never reach.
     private func silentLoginOrPrompt() async throws -> String {
         if let saved = PortalCredentialStore.load() {
-            if let creds = try? await PortalAuth.login(email: saved.email, password: saved.password) {
+            do {
+                let creds = try await PortalAuth.login(email: saved.email, password: saved.password)
                 PortalAuthStore.save(creds)
                 credentials = creds
                 return creds.accessToken
+            } catch PortalAuth.AuthError.badCredentials {
+                // Only a rejected password is forgotten. Offline or a 5xx
+                // propagates, leaving the saved password in place.
+                PortalCredentialStore.clear()
             }
-            PortalCredentialStore.clear()
         }
         showingLogin = true
         throw DirectError.needsLogin
@@ -267,6 +274,9 @@ final class PortalDirect: ObservableObject {
             let yours = Portal.mine(r.items, in: knownCourses) ?? r.items
             let diag = "rest: \(r.total) events [\(r.kinds)], \(r.items.count) assign/quiz, "
                 + "\(yours.count) yours (\(knownCourses.count) courses cached, \(source))"
+            // Without a cached course list nothing can be told apart as someone
+            // else's, so do not show the unfiltered feed. The WebView read fills it.
+            if knownCourses.isEmpty { return (nil, diag + " | no courses cached") }
             // REST came back with nothing of yours while the proven WebView
             // scraper still can - so nil, not an empty list, which makes
             // `refresh()` fall back to the WebView instead of overwriting a
@@ -299,6 +309,9 @@ final class PortalDirect: ObservableObject {
             // succeeded, so an empty result is a real "nothing of yours is due" -
             // return it (not nil) so refresh does not fall back to the WebView and
             // pop a portal login.
+            guard !knownCourses.isEmpty else {
+                return (nil, "rest: \(mv.items.count) due, no courses cached, WebView fills them")
+            }
             let yours = Portal.ownDeadlines(mv.items, in: knownCourses)
             let diag = "rest: \(mv.total) events [\(mv.kinds)], \(mv.items.count) due, "
                 + "\(yours.count) yours (\(knownCourses.count) courses cached, \(source)+monthly)"
@@ -306,15 +319,17 @@ final class PortalDirect: ObservableObject {
         }
 
         if let saved = MoodleTokenStore.load() {
-            if let due = try? await PortalMoodle.dueDates(wstoken: saved.token) {
+            do {
+                let due = try await PortalMoodle.dueDates(wstoken: saved.token)
                 return await resolve(due, "stored wstoken", token: saved.token)
+            } catch PortalMoodle.MoodleError.apiError {
+                // Moodle itself refused the token: it is dead, so drop it.
+                MoodleTokenStore.clear()
+            } catch {
+                // Transport failure or timeout: the token may still be good, keep it.
             }
-            // Doesn't necessarily mean the token is dead - could be a
-            // network blip - but there's no cheap way to tell the two apart,
-            // and re-minting is itself cheap whenever a WebView session is
-            // available, so this errs toward re-minting over a diagnosis
-            // this codebase otherwise never gets right on the first guess.
-            MoodleTokenStore.clear()
+            // Falls through to re-minting either way: cheap whenever a WebView
+            // session is available, and it fails harmlessly when offline.
         }
 
         status = "Signing in to the LMS."
@@ -327,7 +342,9 @@ final class PortalDirect: ObservableObject {
             let due = try await PortalMoodle.dueDates(wstoken: wstoken)
             return await resolve(due, "minted wstoken", token: wstoken)
         } catch {
-            return (nil, "lms failed: \(error)")
+            // localizedDescription, not "\(error)": the interpolated form of a
+            // URLError carries the failing URL, and that URL holds the wstoken.
+            return (nil, "lms failed: \(error.localizedDescription)")
         }
     }
 

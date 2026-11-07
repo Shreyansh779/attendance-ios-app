@@ -770,6 +770,9 @@ enum Scrapers {
   var usedLoose = 0;
 
   for (var i = 0; i < arr.length; i++) {
+    // A cancelled slot is not a class: drop it before it can shadow the
+    // replacement in the date|start|subject dedup below.
+    if (arr[i] && arr[i].IsCancelledSlot === true) continue;
     var g = direct(arr[i]);
     if (!g) { g = loose(arr[i]); if (g) usedLoose++; }
     if (!g) { skipped.shape++; continue; }
@@ -816,16 +819,16 @@ enum Scrapers {
   // and it is the only place in the whole portal that says which of a
   // course's twenty teachers is yours. The LMS needs that to tell your own
   // teacher's material from the rest of the department's.
-  var teachers = {};
+  var teachers = Object.create(null);
   for (var t = 0; t < arr.length; t++) {
     var mods = arr[t] && arr[t].ModuleList;
     var who = arr[t] && arr[t].TeacherList;
     if (!mods || !mods.length || !who || !who.length) continue;
-    var subj = clean(mods[0].ModuleName);
+    var subj = clean((mods[0] && mods[0].ModuleName) || '');
     if (!subj) continue;
     if (!teachers[subj]) teachers[subj] = [];
     for (var u = 0; u < who.length; u++) {
-      var nm = clean(who[u].Name);
+      var nm = clean((who[u] && who[u].Name) || '');
       if (nm && teachers[subj].indexOf(nm) < 0) teachers[subj].push(nm);
     }
   }
@@ -1094,7 +1097,7 @@ enum Scrapers {
     static let holidays = #"""
 (function () {
   var clean = function (t) { return String(t == null ? '' : t).replace(/\s+/g, ' ').trim(); };
-  var DMY = /\b(\d{2})-(\d{2})-(\d{4})\b/g;
+  var DMY = /(?<!\d)(\d{2})-(\d{2})-(\d{4})(?!\d)/g;
 
   var out = [];
   var rows = document.querySelectorAll('tr');
@@ -1565,6 +1568,9 @@ enum Scrapers {
         var mine = MINE[name] || [];
         var items = [], dropped = 0;
         var raw = states[i] && states[i].data;
+        // A course whose state did not arrive is left out, rather than listed
+        // with no material and reported as a good read.
+        if (!raw) continue;
 
         if (raw) {
           var s = JSON.parse(raw), secs = {}, cms = {};

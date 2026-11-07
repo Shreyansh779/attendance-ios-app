@@ -231,7 +231,11 @@ func survivingMarks(_ marks: [String: Mark], after rows: [AttRow]) -> [String: M
         let base = ordered.map(\.mark.total).min() ?? row.total
         let absorbed = Swift.max(0, row.total - base)
         for (i, entry) in ordered.enumerated() where i >= absorbed {
-            out[entry.key] = entry.mark
+            // Rebase to the portal's current total, so the next pass measures
+            // only what the portal has counted since this point.
+            var kept = entry.mark
+            kept.total = row.total
+            out[entry.key] = kept
         }
     }
     return out

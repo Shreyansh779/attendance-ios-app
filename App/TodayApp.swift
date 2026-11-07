@@ -11,7 +11,9 @@ struct TodayApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            // Sheets are presented from above the tab view, so the tint has to
+            // be set here to reach their buttons and text-field carets.
+            RootView().tint(Color.ink)
         }
     }
 }

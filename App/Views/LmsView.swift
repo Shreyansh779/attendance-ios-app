@@ -187,7 +187,7 @@ private struct CourseView: View {
                                 }
 
                                 VStack(alignment: .leading, spacing: 13) {
-                                    ForEach(folder.items, id: \.self) { item in
+                                    ForEach(Array(folder.items.enumerated()), id: \.offset) { _, item in
                                         Button {
                                             onOpen(item.url)
                                         } label: {

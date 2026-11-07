@@ -36,7 +36,14 @@ const re = /(?:^|\n)([ \t]*)sources:[ \t]*\n([\s\S]*?)(?=\n\1[^ \t\n]|$)/g;
 let m;
 let offender = null;
 while ((m = re.exec(src))) {
-  if (/Info\.plist/.test(m[2])) { offender = m; break; }
+  // Only a real list entry counts: comments and the `excludes:` sub-block
+  // legitimately name Info.plist.
+  const active = m[2]
+    .split('\n')
+    .filter((l) => !/^\s*#/.test(l))
+    .join('\n')
+    .replace(/^[ \t]*excludes:[\s\S]*$/m, '');
+  if (/(^|\n)\s*-\s*(path:\s*)?\S*Info\.plist\s*(\n|$)/.test(active)) { offender = m; break; }
   // A zero-width match would spin here; a block always has at least one line.
   if (m[0].length === 0) re.lastIndex++;
 }

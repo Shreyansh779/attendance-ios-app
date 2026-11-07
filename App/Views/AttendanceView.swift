@@ -79,7 +79,7 @@ struct AttendanceView: View {
         let o = summary.overall
         return HStack(alignment: .firstTextBaseline, spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("\(String(format: "%.1f", o.pct))%")
+                Text("\(String(format: "%.1f", (o.pct * 10).rounded(.down) / 10))%")
                     .contentTransition(.numericText())
                     .d(29, .bold)
                     .kerning(-0.5)
@@ -199,7 +199,7 @@ struct AttendanceView: View {
                 }
                 HStack(spacing: 12) {
                     Meter(pct: idle ? 0 : b.pct, tint: idle ? Color.ink4 : tint)
-                    Text(idle ? "not started" : "\(Int(b.pct.rounded()))% · \(row.attended)/\(row.total)")
+                    Text(idle ? "not started" : "\(Int(b.pct))% · \(row.attended)/\(row.total)")
                         .r(13.5, .medium)
                         .foregroundStyle(Color.ink3)
                         .fixedSize()

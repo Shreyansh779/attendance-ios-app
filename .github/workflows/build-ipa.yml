@@ -100,6 +100,7 @@ jobs:
           # failing with "the download version doesn't match".
           printf '\nbundle %s (%s)\n' "$VERSION" "${{ github.run_number }}" >> notes.md
           gh release create "$TAG" out/Today.ipa \
+            --target "$GITHUB_SHA" \
             --title "Today $VERSION ($TAG)" \
             --notes-file notes.md \
             --latest

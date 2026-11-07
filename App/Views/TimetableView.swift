@@ -310,7 +310,7 @@ struct TimetableView: View {
                             .foregroundStyle(Color.mintDim)
                     }
                 }
-                .frame(width: 70, alignment: .leading)
+                .frame(minWidth: 70, alignment: .leading)
 
                 VStack(alignment: .leading, spacing: 5) {
                     Text(k.subject)

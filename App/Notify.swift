@@ -75,6 +75,11 @@ enum Notify {
     /// Called after every refresh and on launch: a sideloaded app is reinstalled
     /// roughly weekly when the certificate is re-signed, and a reinstall clears
     /// pending notifications. Rescheduling on launch makes that invisible.
+    /// Empties the pending queue without rebuilding it.
+    static func clear() {
+        UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
+    }
+
     static func reschedule(from snap: Snapshot, terms: [String: Term], rows: [AttRow]) async {
         let centre = UNUserNotificationCenter.current()
         // Clear first either way: switching reminders off has to empty the
@@ -125,7 +130,7 @@ enum Notify {
         }
         let content = UNMutableNotificationContent()
         content.title = "Reminders are working"
-        content.body = "A real one arrives 30 minutes before each class."
+        content.body = "A real one arrives \(lead) minutes before each class."
         content.sound = .default
 
         let request = UNNotificationRequest(

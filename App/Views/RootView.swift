@@ -115,6 +115,8 @@ struct RootView: View {
 
     private var day: [Klass] {
         guard let s = snapshot else { return [] }
+        // A holiday has no classes, whatever the week feed still lists for it.
+        if s.holiday(on: Snapshot.isoDay.string(from: tick)) != nil { return [] }
         return tagged(shapeDay(sessions: s.sessions(for: tick), rows: rows, nowMin: nowMin))
     }
 
@@ -123,6 +125,7 @@ struct RootView: View {
         guard let s = snapshot,
             let next = Calendar.current.date(byAdding: .day, value: 1, to: tick)
         else { return [] }
+        if s.holiday(on: Snapshot.isoDay.string(from: next)) != nil { return [] }
         return tagged(shapeDay(sessions: s.sessions(for: next), rows: rows, nowMin: -1))
     }
 
@@ -179,8 +182,6 @@ struct RootView: View {
 
             if hasData {
                 tabs
-                PillBar(route: $route)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             } else if busy {
                 loadingState
             } else {
@@ -193,7 +194,21 @@ struct RootView: View {
         // accessibility1 a 92pt room number stops being a layout and starts
         // being a single digit. The hero keeps minimumScaleFactor as well.
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
-        .sensoryFeedback(.selection, trigger: route)
+        // One bottom inset for the floating bar. Every screen beneath it
+        // (including pushed ones) gets the real height, not a guessed constant.
+        .safeAreaInset(edge: .bottom, spacing: 8) {
+            if hasData {
+                PillBar(route: $route)
+            }
+        }
+        // VoiceOver is not told when the screen changes or when a status
+        // arrives; say so here so the user hears it.
+        .onChange(of: route) { _, _ in
+            AccessibilityNotification.ScreenChanged().post()
+        }
+        .onChange(of: status) { _, s in
+            if let s { AccessibilityNotification.Announcement(s).post() }
+        }
         .onReceive(clock) { tick = $0 }
         .fullScreenCover(isPresented: $direct.showingLogin) {
             DirectLoginSheet(direct: direct)
@@ -399,11 +414,6 @@ struct RootView: View {
                         .accessibilityLabel("Settings")
                     }
                 }
-                // The pill bar floats over the content, so the content has
-                // to be told to end above it.
-                .safeAreaInset(edge: .bottom) {
-                    Color.clear.frame(height: 66)
-                }
                 // At the bottom, over the content, rather than pinned under
                 // the navigation bar. As a top inset it sat between the large
                 // title and the screen and did not move when either did -
@@ -420,9 +430,8 @@ struct RootView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .glassEffect(.regular, in: .rect(cornerRadius: 22))
                             .padding(.horizontal, 20)
-                            // Clear of the tab bar, which floats over the same
-                            // corner of the screen.
-                            .padding(.bottom, 70)
+                            // Sits just above the tab bar's inset.
+                            .padding(.bottom, 14)
                             .transition(.soft)
                     }
                 }
@@ -472,6 +481,12 @@ struct RootView: View {
                 .foregroundStyle(Color.onInk)
                 .disabled(busy)
                 .padding(.top, 4)
+            // The only way in when the direct sign-in cannot work: this one
+            // goes through the portal's own login page.
+            Button("Use the portal login instead") { refreshViaWebView() }
+                .r(15, .medium)
+                .foregroundStyle(Color.ink2)
+                .disabled(busy)
             if let msg = status {
                 Text(msg)
                     .r(13.5, .medium)
@@ -538,7 +553,11 @@ struct RootView: View {
     /// Fire-and-forget: reminders are a convenience, and nothing in the UI
     /// should wait on the notification centre.
     private func rescheduleReminders() {
-        guard let snap = snapshot, !snap.rows.isEmpty else { return }
+        guard let snap = snapshot, !snap.rows.isEmpty else {
+            // Nothing cached means nothing to remind about: drop the queue.
+            Notify.clear()
+            return
+        }
         let terms = self.terms
         let rows = self.rows
         Task { await Notify.reschedule(from: snap, terms: terms, rows: rows) }
@@ -664,13 +683,17 @@ struct RootView: View {
 
         let snap = Snapshot(
             savedAt: Date(),
-            rows: r.rows,
+            // An empty register means the read failed, not that the student has
+            // no classes: keep what was cached and every hand mark with it.
+            rows: r.rows.isEmpty ? (snapshot?.rows ?? []) : r.rows,
             sessions: r.sessions,
             student: r.student ?? snapshot?.student,
             week: merged,
             // Only the marks the portal has actually absorbed are spent;
             // the rest survive a refresh that beat the portal to it.
-            marks: survivingMarks(snapshot?.marks ?? [:], after: r.rows),
+            marks: r.rows.isEmpty
+                ? (snapshot?.marks ?? [:])
+                : survivingMarks(snapshot?.marks ?? [:], after: r.rows),
             weekDiag: r.weekDiag,
             // A read that only managed the agenda keeps whatever term end
             // an earlier whole-term read established.
@@ -723,7 +746,10 @@ private struct PillBar: View {
             }
             .foregroundStyle(on ? Color.onInk : Color.ink3)
             .padding(.horizontal, 8)
-            .padding(.vertical, 11)
+            .padding(.vertical, 14)
+            // One element per tab: the icon and its label read as one name,
+            // and the selected trait is announced once.
+            .accessibilityElement(children: .ignore)
             .accessibilityLabel(r.title)
             .accessibilityAddTraits(on ? [.isSelected] : [])
         }

@@ -324,7 +324,8 @@ private struct Due: View {
                                 .r(15, .bold)
                                 .kerning(-0.2)
                                 .foregroundStyle(overdue(d) ? Color.ink : Color.ink2)
-                                .frame(width: 62, alignment: .leading)
+                                .fixedSize(horizontal: true, vertical: false)
+                                .frame(minWidth: 62, alignment: .leading)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(title(d))
                                     .r(15.5, .semibold)
@@ -430,7 +431,7 @@ private struct OwnSlack: View {
                 }
                 HStack(spacing: 12) {
                     Meter(pct: b.pct, tint: b.state == .empty ? Color.ink4 : tint)
-                    Text("\(Int(b.pct.rounded()))% · \(a.attended)/\(a.total)")
+                    Text("\(Int(b.pct))% · \(a.attended)/\(a.total)")
                         .r(14, .semibold)
                         .foregroundStyle(Color.ink2)
                         .fixedSize()

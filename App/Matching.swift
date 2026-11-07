@@ -26,13 +26,31 @@ private func tokenSet(_ s: String) -> Set<String> {
         normalise(s)
             .split(separator: " ")
             .map(String.init)
-            .filter { $0.count > 2 && !stopWords.contains($0) }
+            // Short tokens are dropped, but numbers are kept: "Maths 1" and
+            // "Maths 2" must not look alike.
+            .filter { t in (t.count > 2 || t.allSatisfy { $0.isNumber }) && !stopWords.contains(t) }
     )
+}
+
+/// Lab and theory are different subjects with different numbers. A row only
+/// matches a name with the same set of these words.
+private let variantWords: Set<String> = ["lab", "theory"]
+
+private func variants(_ s: String) -> Set<String> {
+    Set(normalise(s).split(separator: " ").map(String.init)).intersection(variantWords)
+}
+
+/// True when `short` is a prefix of `long` that ends on a word boundary.
+private func isWordPrefix(_ long: String, _ short: String) -> Bool {
+    guard long.hasPrefix(short) else { return false }
+    let tail = long.dropFirst(short.count)
+    return tail.isEmpty || tail.first == " "
 }
 
 func matchSubject(_ name: String, in rows: [AttRow]) -> AttRow? {
     guard !name.isEmpty, !rows.isEmpty else { return nil }
     let n = normalise(name)
+    let nVariants = variants(name)
 
     if let hit = rows.first(where: { normalise($0.key) == n }) { return hit }
 
@@ -45,7 +63,11 @@ func matchSubject(_ name: String, in rows: [AttRow]) -> AttRow? {
         let prefixHits =
             rows
             .map { ($0, normalise($0.key)) }
-            .filter { $0.1.count > 6 && ($0.1.hasPrefix(n) || n.hasPrefix($0.1)) }
+            .filter {
+                $0.1.count > 6
+                    && (isWordPrefix($0.1, n) || isWordPrefix(n, $0.1))
+                    && variants($0.0.key) == nVariants
+            }
             .sorted { abs($0.1.count - n.count) < abs($1.1.count - n.count) }
 
         if prefixHits.count == 1 { return prefixHits[0].0 }
@@ -61,7 +83,9 @@ func matchSubject(_ name: String, in rows: [AttRow]) -> AttRow? {
 
     var best: AttRow?
     var bestScore = 0.0
+    var tied = false
     for r in rows {
+        guard variants(r.key) == nVariants else { continue }
         let b = tokenSet(r.key)
         if b.isEmpty { continue }
         let shared = a.intersection(b).count
@@ -69,8 +93,12 @@ func matchSubject(_ name: String, in rows: [AttRow]) -> AttRow? {
         if score > bestScore {
             bestScore = score
             best = r
+            tied = false
+        } else if score == bestScore && score > 0 {
+            // Two rows equally close: picking one is a coin toss between subjects.
+            tied = true
         }
     }
     // Below this the guesses stop being useful and start being wrong.
-    return bestScore >= 0.6 ? best : nil
+    return bestScore >= 0.6 && !tied ? best : nil
 }

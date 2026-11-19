@@ -844,7 +844,84 @@ enum PortalMoodle {
         for c in out {
             full.append(LmsCourse(id: c.id, name: c.name, url: c.url, items: await contents(wstoken, c.id)))
         }
+        // The sections call is switched off on some Moodles. The per-type
+        // "by courses" lists are what the official app falls back on, and they
+        // work with the same token: one request per activity type, all courses.
+        if full.contains(where: { $0.items.isEmpty }) {
+            let byCourse = await moduleLists(wstoken, full.map(\.id))
+            full = full.map { c in
+                c.items.isEmpty ? LmsCourse(id: c.id, name: c.name, url: c.url, items: byCourse[c.id] ?? []) : c
+            }
+        }
         return full
+    }
+
+    private static func moduleLists(_ wstoken: String, _ ids: [Int]) async -> [Int: [LmsItem]] {
+        let q = ids.enumerated().map { URLQueryItem(name: "courseids[\($0.offset)]", value: String($0.element)) }
+        func make(_ id: Int, _ cm: Int, _ name: String, _ mod: String, _ kind: String) -> (Int, LmsItem) {
+            let url = lmsBase.appendingPathComponent("mod/\(mod)/view.php").absoluteString + "?id=\(cm)"
+            return (id, LmsItem(title: name, kind: kind, url: url, group: "", folder: ""))
+        }
+        var found: [(Int, LmsItem)] = []
+        // mod_assign nests its list under each course.
+        if let d = await wsGet(wstoken, "mod_assign_get_assignments", q) as? [String: Any],
+            let cs = d["courses"] as? [[String: Any]] {
+            for c in cs {
+                guard let cid = c["id"] as? Int else { continue }
+                for a in (c["assignments"] as? [[String: Any]]) ?? [] {
+                    if let cm = a["cmid"] as? Int, let n = a["name"] as? String {
+                        found.append(make(cid, cm, n, "assign", "Assignment"))
+                    }
+                }
+            }
+        }
+        let flat: [(String, String, String, String)] = [
+            ("mod_quiz_get_quizzes_by_courses", "quizzes", "quiz", "Quiz"),
+            ("mod_resource_get_resources_by_courses", "resources", "resource", "File"),
+            ("mod_folder_get_folders_by_courses", "folders", "folder", "Folder"),
+            ("mod_url_get_urls_by_courses", "urls", "url", "URL"),
+            ("mod_page_get_pages_by_courses", "pages", "page", "Page"),
+        ]
+        for (fn, key, mod, kind) in flat {
+            guard let d = await wsGet(wstoken, fn, q) as? [String: Any],
+                let list = d[key] as? [[String: Any]] else { continue }
+            for m in list {
+                if let cid = m["course"] as? Int, let cm = m["coursemodule"] as? Int, let n = m["name"] as? String {
+                    found.append(make(cid, cm, n, mod, kind))
+                }
+            }
+        }
+        return Dictionary(grouping: found, by: { $0.0 }).mapValues { $0.map(\.1) }
+    }
+
+    /// Signs in to Moodle with no WebView: the same one-shot key the portal's
+    /// "LMS" tile gets (POST access-lms with the portal bearer token), spent by
+    /// following its redirect in a cookie-keeping session. Returns the Moodle
+    /// session cookies for `exchangeForWSToken`.
+    static func directSessionCookies(portalToken: String, studentId: String) async throws -> [HTTPCookie] {
+        guard let u = URL(
+            string: "https://myupes-beta.upes.ac.in/sso/user/oauth2/access-lms?uniqueId=" + studentId
+        ) else { return [] }
+        var req = URLRequest(url: u)
+        req.httpMethod = "POST"
+        req.httpBody = Data("{}".utf8)
+        for (k, v) in [
+            ("Authorization", "Bearer " + portalToken), ("x-applicationname", "connectportal"),
+            ("x-appsecret", "ku7GUMtyT8er51rTfTc7HC"), ("x-requestfrom", "web"),
+            ("x-studentUniqueId", studentId), ("Content-Type", "application/json"),
+        ] { req.setValue(v, forHTTPHeaderField: k) }
+        let (data, _) = try await URLSession.shared.data(for: req)
+        guard let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let s = j["redirectUrl"] as? String, let url = URL(string: s)
+        else { return [] }
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.httpCookieStorage = HTTPCookieStorage()
+        cfg.httpCookieAcceptPolicy = .always
+        let session = URLSession(configuration: cfg)
+        _ = try? await session.data(from: url)
+        let cookies = cfg.httpCookieStorage?.cookies(for: lmsBase) ?? []
+        session.finishTasksAndInvalidate()
+        return cookies
     }
 
     private static func contents(_ wstoken: String, _ courseId: Int) async -> [LmsItem] {

@@ -214,10 +214,10 @@ final class PortalDirect: ObservableObject {
             if let r = restCourses, r.contains(where: { !$0.items.isEmpty }) { courses = r }
         }
         await loadRest()
-        var (due, lmsDiag) = await fetchDueDates(knownCourses: courses)
+        var (due, lmsDiag) = await fetchDueDates(knownCourses: courses, portalToken: token, studentId: identity.studentId)
         if restCourses == nil {
             await loadRest()
-            if !courses.isEmpty { (due, lmsDiag) = await fetchDueDates(knownCourses: courses) }
+            if !courses.isEmpty { (due, lmsDiag) = await fetchDueDates(knownCourses: courses, portalToken: token, studentId: identity.studentId) }
         }
 
         return Portal.Reading(
@@ -278,7 +278,9 @@ final class PortalDirect: ObservableObject {
     /// no part of the Bearer/mobile identity, on purpose: the whole reason
     /// this exists is that it doesn't work for Moodle's own API at all,
     /// confirmed live 2026-10-13 - see `PortalMoodle`'s doc comment.
-    private func fetchDueDates(knownCourses: [LmsCourse]) async -> ([Deadline]?, String) {
+    private func fetchDueDates(
+        knownCourses: [LmsCourse], portalToken: String? = nil, studentId: String? = nil
+    ) async -> ([Deadline]?, String) {
         // The calendar feed knows nothing about sections, so it hands over every
         // enrolled course's work - including the nineteen other teachers' ones.
         // `Portal.mine` keeps only what the course scrape already proved is
@@ -349,8 +351,15 @@ final class PortalDirect: ObservableObject {
         }
 
         status = "Signing in to the LMS."
-        guard let cookies = await moodleCookies?(), !cookies.isEmpty else {
-            return (nil, "lms failed: no WebView session available to mint a Moodle token")
+        // Direct first (portal token -> one-shot LMS key -> Moodle cookies), the
+        // WebView's cookies only as a fallback.
+        var cookies: [HTTPCookie] = []
+        if let pt = portalToken, let sid = studentId {
+            cookies = (try? await PortalMoodle.directSessionCookies(portalToken: pt, studentId: sid)) ?? []
+        }
+        if cookies.isEmpty { cookies = await moodleCookies?() ?? [] }
+        guard !cookies.isEmpty else {
+            return (nil, "lms failed: direct LMS sign-in gave no session and no WebView session is available")
         }
         do {
             let (wstoken, privateToken) = try await PortalMoodle.exchangeForWSToken(cookies: cookies)

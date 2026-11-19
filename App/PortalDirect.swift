@@ -210,7 +210,7 @@ final class PortalDirect: ObservableObject {
         var courses = knownCourses
         func loadRest() async {
             guard courses.isEmpty, restCourses == nil, let saved = MoodleTokenStore.load() else { return }
-            restCourses = await PortalMoodle.restCourses(wstoken: saved.token)
+            restCourses = await lmsTimeout(20) { await PortalMoodle.restCourses(wstoken: saved.token) }
             if let r = restCourses, r.contains(where: { !$0.items.isEmpty }) { courses = r }
         }
         await loadRest()
@@ -355,7 +355,7 @@ final class PortalDirect: ObservableObject {
         // WebView's cookies only as a fallback.
         var cookies: [HTTPCookie] = []
         if let pt = portalToken, let sid = studentId {
-            cookies = (try? await PortalMoodle.directSessionCookies(portalToken: pt, studentId: sid)) ?? []
+            cookies = await lmsTimeout(15) { try? await PortalMoodle.directSessionCookies(portalToken: pt, studentId: sid) } ?? []
         }
         if cookies.isEmpty { cookies = await moodleCookies?() ?? [] }
         guard !cookies.isEmpty else {

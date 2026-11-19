@@ -813,7 +813,7 @@ enum PortalMoodle {
             URLQueryItem(name: "moodlewsrestformat", value: "json"),
         ] + extra
         guard let url = c.url,
-            let (data, resp) = try? await URLSession.shared.data(from: url),
+            let (data, resp) = try? await URLSession.shared.data(for: URLRequest(url: url, timeoutInterval: 12)),
             (resp as? HTTPURLResponse)?.statusCode == 200
         else { return nil }
         return try? JSONSerialization.jsonObject(with: data)
@@ -841,8 +841,13 @@ enum PortalMoodle {
         // Moodle refuses core_course_get_contents the course keeps no items and
         // the caller falls back to the scrape.
         var full: [LmsCourse] = []
+        var contentsAllowed = true
         for c in out {
-            full.append(LmsCourse(id: c.id, name: c.name, url: c.url, items: await contents(wstoken, c.id)))
+            var items: [LmsItem] = []
+            if contentsAllowed {
+                if let got = await contents(wstoken, c.id) { items = got } else { contentsAllowed = false }
+            }
+            full.append(LmsCourse(id: c.id, name: c.name, url: c.url, items: items))
         }
         // The sections call is switched off on some Moodles. The per-type
         // "by courses" lists are what the official app falls back on, and they
@@ -902,7 +907,7 @@ enum PortalMoodle {
         guard let u = URL(
             string: "https://myupes-beta.upes.ac.in/sso/user/oauth2/access-lms?uniqueId=" + studentId
         ) else { return [] }
-        var req = URLRequest(url: u)
+        var req = URLRequest(url: u, timeoutInterval: 12)
         req.httpMethod = "POST"
         req.httpBody = Data("{}".utf8)
         for (k, v) in [
@@ -917,6 +922,8 @@ enum PortalMoodle {
         let cfg = URLSessionConfiguration.ephemeral
         cfg.httpCookieStorage = HTTPCookieStorage()
         cfg.httpCookieAcceptPolicy = .always
+        cfg.timeoutIntervalForRequest = 12
+        cfg.timeoutIntervalForResource = 20
         let session = URLSession(configuration: cfg)
         _ = try? await session.data(from: url)
         let cookies = cfg.httpCookieStorage?.cookies(for: lmsBase) ?? []
@@ -924,10 +931,10 @@ enum PortalMoodle {
         return cookies
     }
 
-    private static func contents(_ wstoken: String, _ courseId: Int) async -> [LmsItem] {
+    private static func contents(_ wstoken: String, _ courseId: Int) async -> [LmsItem]? {
         guard let secs = await wsGet(
             wstoken, "core_course_get_contents", [URLQueryItem(name: "courseid", value: String(courseId))]
-        ) as? [[String: Any]] else { return [] }
+        ) as? [[String: Any]] else { return nil }
         let kinds = ["resource": "File", "assign": "Assignment", "quiz": "Quiz", "url": "URL",
                      "folder": "Folder", "page": "Page", "forum": "Forum"]
         var items: [LmsItem] = []
@@ -1317,5 +1324,18 @@ enum MoodleTokenStore {
             kSecAttrAccount as String: account,
         ]
         SecItemDelete(query as CFDictionary)
+    }
+}
+
+
+/// Runs `op`, giving up with nil after `seconds` so a slow LMS can never hold
+/// the whole refresh (attendance included) hostage.
+func lmsTimeout<T>(_ seconds: Double, _ op: @escaping () async -> T?) async -> T? {
+    await withTaskGroup(of: T?.self) { g in
+        g.addTask { await op() }
+        g.addTask { try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)); return nil }
+        let first = await g.next() ?? nil
+        g.cancelAll()
+        return first
     }
 }

@@ -207,17 +207,21 @@ final class PortalDirect: ObservableObject {
         // scraped is known, so scraped sections are never replaced. The token
         // may only be minted inside the first fetchDueDates, so ask again after.
         var restCourses: [LmsCourse]? = nil
-        var courses = knownCourses
         func loadRest() async {
-            guard courses.isEmpty, restCourses == nil, let saved = MoodleTokenStore.load() else { return }
+            guard knownCourses.isEmpty, restCourses == nil, let saved = MoodleTokenStore.load() else { return }
             restCourses = await lmsTimeout(20) { await PortalMoodle.restCourses(wstoken: saved.token) }
-            if let r = restCourses, r.contains(where: { !$0.items.isEmpty }) { courses = r }
         }
+        // Deadlines exactly as before (scraped courses only), so nothing that
+        // worked can get worse; the REST course list is display-first.
+        var (due, lmsDiag) = await fetchDueDates(
+            knownCourses: knownCourses, portalToken: token, studentId: identity.studentId)
         await loadRest()
-        var (due, lmsDiag) = await fetchDueDates(knownCourses: courses, portalToken: token, studentId: identity.studentId)
-        if restCourses == nil {
-            await loadRest()
-            if !courses.isEmpty { (due, lmsDiag) = await fetchDueDates(knownCourses: courses, portalToken: token, studentId: identity.studentId) }
+        // No scraped list means deadlines came back nil (and a WebView scrape
+        // would follow). When the REST list is complete - every course has
+        // activities - it can stand in for it; an empty result is ignored.
+        if due == nil, let r = restCourses, !r.isEmpty, r.allSatisfy({ !$0.items.isEmpty }) {
+            let (d2, g2) = await fetchDueDates(knownCourses: r, portalToken: token, studentId: identity.studentId)
+            if let d2, !d2.isEmpty { due = d2; lmsDiag = g2 }
         }
 
         return Portal.Reading(

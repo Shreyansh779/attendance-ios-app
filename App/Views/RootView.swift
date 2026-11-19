@@ -336,7 +336,19 @@ struct RootView: View {
             pane(.lms) {
                 screen(title: Route.lms.title) {
                     LmsView(courses: snapshot?.courses ?? []) { link in
-                        if let u = URL(string: link) { portal.visit(u) }
+                        guard let u = URL(string: link) else { return }
+                        if isModuleLink(u) {
+                            var courseName: String?
+                            var teacher: String?
+                            for c in snapshot?.courses ?? [] {
+                                if let item = c.items.first(where: { $0.url == link }) {
+                                    courseName = c.name; teacher = item.group; break
+                                }
+                            }
+                            lmsLink = LmsLink(url: u, course: courseName, teacher: teacher)
+                        } else {
+                            openLMS(u)
+                        }
                     }
                 }
             }

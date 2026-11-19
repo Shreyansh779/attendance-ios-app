@@ -203,6 +203,13 @@ final class PortalDirect: ObservableObject {
         // userkey handoff's bounce is UPES-side flakiness, unrelated to
         // concurrency), but there's no reason to undo it either.
         let (due, lmsDiag) = await fetchDueDates(knownCourses: knownCourses)
+        // Course list over REST (what the official LMS app's home screen reads),
+        // only when nothing scraped is known, so scraped section contents are
+        // never replaced by empty ones.
+        var restCourses: [LmsCourse]? = nil
+        if knownCourses.isEmpty, let saved = MoodleTokenStore.load() {
+            restCourses = await PortalMoodle.restCourses(wstoken: saved.token)
+        }
 
         return Portal.Reading(
             rows: rows, sessions: todaySessions, student: identity.name ?? knownStudent,
@@ -216,7 +223,7 @@ final class PortalDirect: ObservableObject {
             attDiag: attDiag,
             photo: resolvedPhoto, photoDiag: photoDiag,
             deadlines: due, lmsDiag: lmsDiag,
-            courses: nil, faculty: faculty,
+            courses: restCourses, faculty: faculty,
             profile: StudentProfile(
                 name: identity.name, email: identity.email, phone: identity.phone,
                 campus: identity.campus, program: identity.program,

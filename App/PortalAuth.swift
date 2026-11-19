@@ -819,6 +819,26 @@ enum PortalMoodle {
         return try? JSONSerialization.jsonObject(with: data)
     }
 
+    /// The enrolled-course list the official LMS app shows on its home screen:
+    /// `core_webservice_get_site_info` (userid) then `core_enrol_get_users_courses`.
+    /// Names and links only - section contents still come from the scraper - so
+    /// the Courses tab is not blank when the direct path has no scraped courses.
+    /// nil on any failure so callers keep what they had.
+    static func restCourses(wstoken: String) async -> [LmsCourse]? {
+        guard let info = await wsGet(wstoken, "core_webservice_get_site_info", []) as? [String: Any],
+            let uid = info["userid"] as? Int,
+            let list = await wsGet(
+                wstoken, "core_enrol_get_users_courses", [URLQueryItem(name: "userid", value: String(uid))]
+            ) as? [[String: Any]]
+        else { return nil }
+        let out: [LmsCourse] = list.compactMap { c in
+            guard let id = c["id"] as? Int, let name = c["fullname"] as? String else { return nil }
+            let url = lmsBase.appendingPathComponent("course/view.php").absoluteString + "?id=\(id)"
+            return LmsCourse(id: id, name: name, url: url, items: [])
+        }
+        return out.isEmpty ? nil : out
+    }
+
     /// Same as `wsGet` but POSTs the arguments in the body - the way the official
     /// app sends `tool_mobile_get_autologin_key`, so a credential like the
     /// private token does not travel in a URL that servers log.

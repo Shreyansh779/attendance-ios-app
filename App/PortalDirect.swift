@@ -202,13 +202,22 @@ final class PortalDirect: ObservableObject {
         // theory that motivated it (a raw curl trace later proved the
         // userkey handoff's bounce is UPES-side flakiness, unrelated to
         // concurrency), but there's no reason to undo it either.
-        let (due, lmsDiag) = await fetchDueDates(knownCourses: knownCourses)
-        // Course list over REST (what the official LMS app's home screen reads),
-        // only when nothing scraped is known, so scraped section contents are
-        // never replaced by empty ones.
+        // Courses and their contents over REST with the stored token, no
+        // WebView login (what the official LMS app does). Only when nothing
+        // scraped is known, so scraped sections are never replaced. The token
+        // may only be minted inside the first fetchDueDates, so ask again after.
         var restCourses: [LmsCourse]? = nil
-        if knownCourses.isEmpty, let saved = MoodleTokenStore.load() {
+        var courses = knownCourses
+        func loadRest() async {
+            guard courses.isEmpty, restCourses == nil, let saved = MoodleTokenStore.load() else { return }
             restCourses = await PortalMoodle.restCourses(wstoken: saved.token)
+            if let r = restCourses, r.contains(where: { !$0.items.isEmpty }) { courses = r }
+        }
+        await loadRest()
+        var (due, lmsDiag) = await fetchDueDates(knownCourses: courses)
+        if restCourses == nil {
+            await loadRest()
+            if !courses.isEmpty { (due, lmsDiag) = await fetchDueDates(knownCourses: courses) }
         }
 
         return Portal.Reading(

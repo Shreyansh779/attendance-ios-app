@@ -836,7 +836,35 @@ enum PortalMoodle {
             let url = lmsBase.appendingPathComponent("course/view.php").absoluteString + "?id=\(id)"
             return LmsCourse(id: id, name: name, url: url, items: [])
         }
-        return out.isEmpty ? nil : out
+        if out.isEmpty { return nil }
+        // Sections and activities per course, again with no WebView. Where this
+        // Moodle refuses core_course_get_contents the course keeps no items and
+        // the caller falls back to the scrape.
+        var full: [LmsCourse] = []
+        for c in out {
+            full.append(LmsCourse(id: c.id, name: c.name, url: c.url, items: await contents(wstoken, c.id)))
+        }
+        return full
+    }
+
+    private static func contents(_ wstoken: String, _ courseId: Int) async -> [LmsItem] {
+        guard let secs = await wsGet(
+            wstoken, "core_course_get_contents", [URLQueryItem(name: "courseid", value: String(courseId))]
+        ) as? [[String: Any]] else { return [] }
+        let kinds = ["resource": "File", "assign": "Assignment", "quiz": "Quiz", "url": "URL",
+                     "folder": "Folder", "page": "Page", "forum": "Forum"]
+        var items: [LmsItem] = []
+        for s in secs where (s["uservisible"] as? Bool) != false {
+            let group = (s["name"] as? String) ?? ""
+            for m in (s["modules"] as? [[String: Any]]) ?? [] {
+                guard (m["uservisible"] as? Bool) != false,
+                    let mod = m["modname"] as? String, let kind = kinds[mod],
+                    let title = m["name"] as? String, let url = m["url"] as? String
+                else { continue }
+                items.append(LmsItem(title: title, kind: kind, url: url, group: group, folder: ""))
+            }
+        }
+        return items
     }
 
     /// Same as `wsGet` but POSTs the arguments in the body - the way the official

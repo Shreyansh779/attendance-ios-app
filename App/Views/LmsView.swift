@@ -61,11 +61,14 @@ struct LmsView: View {
 
                 VStack(alignment: .leading, spacing: 10) {
                     ForEach(bare, id: \.id) { c in
-                        Text(c.name)
-                            .r(15, .medium)
-                            .foregroundStyle(Color.ink2)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Button { onOpen(c.url) } label: {
+                            Text(c.name)
+                                .r(15, .medium)
+                                .foregroundStyle(Color.ink2)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
                 .slab(.sur, radius: 24, pad: EdgeInsets(top: 18, leading: 20, bottom: 18, trailing: 20))

@@ -613,7 +613,10 @@ struct RootView: View {
                 let r = try await direct.begin(
                     knownStudent: snapshot?.student,
                     knownHolidays: snapshot?.holidays ?? [],
-                    knownCourses: snapshot?.courses ?? []
+                    // Only courses with scraped contents count as a cached list:
+                    // names-only REST courses must not stop the WebView scrape
+                    // that fills the real sections and teacher matching.
+                    knownCourses: (snapshot?.courses ?? []).filter { !$0.items.isEmpty }
                 )
                 direct.lastError = nil
                 apply(r)

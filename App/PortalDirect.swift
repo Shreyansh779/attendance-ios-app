@@ -207,7 +207,7 @@ final class PortalDirect: ObservableObject {
         // be minted inside the first fetchDueDates, so ask again after.
         var restCourses: [LmsCourse]? = nil
         func loadRest() async {
-            guard restCourses == nil, let saved = MoodleTokenStore.load() else { return }
+            guard knownCourses.isEmpty, restCourses == nil, let saved = MoodleTokenStore.load() else { return }
             status = "Loading courses."
             restCourses = await lmsTimeout(45) { await PortalMoodle.restCourses(wstoken: saved.token) }
         }

@@ -632,6 +632,8 @@ struct RootView: View {
                 )
                 direct.lastError = nil
                 apply(r)
+                // Courses load in the background — attendance is on screen now.
+                Task { await loadCourses() }
                 if r.deadlines == nil {
                     // Rather than keep chasing the LMS handoff from the
                     // direct side, this quietly runs the already-reliable
@@ -780,6 +782,19 @@ struct RootView: View {
         picked = nil
         tick = Date()
         rescheduleReminders()
+    }
+
+    private func loadCourses() async {
+        let lms = await direct.loadRestCourses()
+        guard let courses = lms.courses else { return }
+        guard var snap = snapshot else { return }
+        snap.courses = courses
+        if let d = lms.deadlines { snap.deadlines = d }
+        if let d = lms.lmsDiag { snap.lmsDiag = d }
+        snap.savedAt = Date()
+        Store.save(snap)
+        withAnimation(Motion.ui.reduced(reduceMotion)) { snapshot = snap }
+        tick = Date()
     }
 }
 

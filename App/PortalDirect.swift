@@ -202,27 +202,10 @@ final class PortalDirect: ObservableObject {
         // theory that motivated it (a raw curl trace later proved the
         // userkey handoff's bounce is UPES-side flakiness, unrelated to
         // concurrency), but there's no reason to undo it either.
-        // Courses and their contents over REST with the stored token, no
-        // WebView login (what the official LMS app does). The token may only
-        // be minted inside the first fetchDueDates, so ask again after.
-        var restCourses: [LmsCourse]? = nil
-        func loadRest() async {
-            guard knownCourses.isEmpty, restCourses == nil, let saved = MoodleTokenStore.load() else { return }
-            status = "Loading courses."
-            restCourses = await lmsTimeout(45) { await PortalMoodle.restCourses(wstoken: saved.token) }
-        }
-        // Deadlines exactly as before (scraped courses only), so nothing that
-        // worked can get worse; the REST course list is display-first.
-        var (due, lmsDiag) = await fetchDueDates(
+        // Courses are loaded separately after begin() returns, so they
+        // never block attendance. See loadRestCourses().
+        let (due, lmsDiag) = await fetchDueDates(
             knownCourses: knownCourses, portalToken: token, studentId: identity.studentId)
-        await loadRest()
-        // No scraped list means deadlines came back nil (and a WebView scrape
-        // would follow). When the REST list has courses, re-filter deadlines
-        // using them; an empty result is ignored.
-        if due == nil, let r = restCourses, !r.isEmpty {
-            let (d2, g2) = await fetchDueDates(knownCourses: r, portalToken: token, studentId: identity.studentId)
-            if let d2, !d2.isEmpty { due = d2; lmsDiag = g2 }
-        }
 
         return Portal.Reading(
             rows: rows, sessions: todaySessions, student: identity.name ?? knownStudent,
@@ -236,13 +219,26 @@ final class PortalDirect: ObservableObject {
             attDiag: attDiag,
             photo: resolvedPhoto, photoDiag: photoDiag,
             deadlines: due, lmsDiag: lmsDiag,
-            courses: restCourses, faculty: faculty,
+            courses: nil, faculty: faculty,
             profile: StudentProfile(
                 name: identity.name, email: identity.email, phone: identity.phone,
                 campus: identity.campus, program: identity.program,
                 studentId: identity.studentId, globalId: identity.globalId
             )
         )
+    }
+
+    /// Loads courses over REST, independent of the main refresh. Call after
+    /// begin() returns — the wstoken it minted is in the keychain. Returns
+    /// courses and re-filtered deadlines when possible.
+    func loadRestCourses() async -> (courses: [LmsCourse]?, deadlines: [Deadline]?, lmsDiag: String?) {
+        guard !busy, let saved = MoodleTokenStore.load() else { return (nil, nil, nil) }
+        status = "Loading courses."
+        defer { status = nil }
+        guard let courses = await lmsTimeout(45) { await PortalMoodle.restCourses(wstoken: saved.token) },
+              !courses.isEmpty else { return (nil, nil, "rest courses: timeout or empty") }
+        let (due, diag) = await fetchDueDates(knownCourses: courses)
+        return (courses, due, diag)
     }
 
     /// Covers the whole term, the same thing `Portal.fetchWeek`'s API path
